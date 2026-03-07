@@ -1,7 +1,9 @@
 import re
+import time
 from pathlib import Path
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from mp.db.core import DATABASE_URL, engine
 
@@ -28,37 +30,47 @@ def run_database_upgrades() -> None:
     if not migrations:
         return
 
-    with engine.begin() as conn:
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS app_config (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
-        )
-        conn.exec_driver_sql(
-            """
-            INSERT INTO app_config (key, value)
-            VALUES ('dbversion', '0')
-            ON CONFLICT (key) DO NOTHING
-            """
-        )
-        current_revision = int(
-            conn.execute(
-                text("SELECT value FROM app_config WHERE key = 'dbversion'")
-            ).scalar_one()
-        )
+    for attempt in range(1, 21):
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_config (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.exec_driver_sql(
+                    """
+                    INSERT INTO app_config (key, value)
+                    VALUES ('dbversion', '-1')
+                    ON CONFLICT (key) DO NOTHING
+                    """
+                )
+                current_revision = int(
+                    conn.execute(
+                        text("SELECT value FROM app_config WHERE key = 'dbversion'")
+                    ).scalar_one()
+                )
 
-        for revision in sorted(migrations):
-            if revision <= current_revision:
-                continue
+                for revision in sorted(migrations):
+                    if revision <= current_revision:
+                        continue
 
-            migration_path = migrations[revision]
-            sql = migration_path.read_text().strip()
-            if sql:
-                conn.exec_driver_sql(sql)
-            conn.execute(
-                text("UPDATE app_config SET value = :revision WHERE key = 'dbversion'"),
-                {"revision": str(revision)},
-            )
+                    migration_path = migrations[revision]
+                    sql = migration_path.read_text().strip()
+                    if sql:
+                        conn.exec_driver_sql(sql)
+                    conn.execute(
+                        text(
+                            "UPDATE app_config SET value = :revision "
+                            "WHERE key = 'dbversion'"
+                        ),
+                        {"revision": str(revision)},
+                    )
+            return
+        except OperationalError:
+            if attempt == 20:
+                raise
+            time.sleep(1)

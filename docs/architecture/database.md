@@ -3,14 +3,16 @@
 ## Engine
 
 - PostgreSQL 16 (containerized via `docker-compose.yml`)
-- Init SQL: `init.sql` mounted to `/docker-entrypoint-initdb.d/init.sql`
+- Bootstrap SQL: `init.sql` mounted to `/docker-entrypoint-initdb.d/init.sql`
+- `init.sql` should stay bootstrap-only (grants/extensions), not app table DDL.
 
 ## Schema Revisions / Upgrades
 
 - SQL migration files live in `python/mp/db/migrations/` and are named like `0001_description.sql`.
+- These migration files are the single source of truth for app schema.
 - On API startup, `python/mp/db/upgrade.py`:
   - ensures `app_config` exists,
-  - ensures `app_config['dbversion']` exists,
+  - ensures `app_config['dbversion']` exists (default `-1`),
   - reads current revision from `dbversion`,
   - applies all missing migration files in numeric order,
   - updates `dbversion` after each migration.
