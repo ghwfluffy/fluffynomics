@@ -1,0 +1,1 @@
+{"root":["./src/env.d.ts","./src/main.ts","./src/router.ts","./src/shims-vuetify.d.ts","./src/vite-env.d.ts","./src/vuetify.ts","./src/App.vue","./src/accounts/AccountsPage.vue"],"errors":true,"version":"5.7.3"}

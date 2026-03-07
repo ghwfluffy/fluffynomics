@@ -1,0 +1,6 @@
+__pycache__
+dist
+node_modules
+*.swp
+python/venv
+outfile.tmp
