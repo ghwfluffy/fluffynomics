@@ -35,6 +35,10 @@
             type="password"
             required
           />
+          <label class="example-checkbox">
+            <input v-model="registerForm.addExampleData" type="checkbox" />
+            <span>Add example data</span>
+          </label>
           <v-btn type="submit" block color="primary" class="mt-2">Create Account</v-btn>
         </v-form>
       </v-card-text>
@@ -58,6 +62,7 @@ const loginForm = ref({
 const registerForm = ref({
   username: '',
   password: '',
+  addExampleData: false,
 })
 
 const submitLogin = async () => {
@@ -66,9 +71,18 @@ const submitLogin = async () => {
 }
 
 const submitRegister = async () => {
-  await register(registerForm.value.username, registerForm.value.password)
+  const username = registerForm.value.username
+  const password = registerForm.value.password
+  await register(
+    username,
+    password,
+    registerForm.value.addExampleData,
+  )
+  await login(username, password)
+  await router.push('/app')
   mode.value = 'login'
-  loginForm.value.username = registerForm.value.username
+  loginForm.value.username = username
+  registerForm.value.addExampleData = false
   registerForm.value.password = ''
 }
 </script>
@@ -120,6 +134,21 @@ const submitRegister = async () => {
   width: 100%;
   margin-inline: auto;
   background-image: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.example-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  color: #334155;
+  font-size: 0.95rem;
+}
+
+.example-checkbox input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: #0f766e;
 }
 
 @media (max-width: 960px) {

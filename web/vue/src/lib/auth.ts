@@ -39,8 +39,16 @@ export async function login(username: string, password: string, sessionSeconds?:
   return response.user
 }
 
-export async function register(username: string, password: string): Promise<User> {
-  return request.post<User>('/auth/register', { username, password })
+export async function register(
+  username: string,
+  password: string,
+  addExampleData = false,
+): Promise<User> {
+  return request.post<User>('/auth/register', {
+    username,
+    password,
+    add_example_data: addExampleData,
+  })
 }
 
 export async function logout(): Promise<void> {

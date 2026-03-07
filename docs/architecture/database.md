@@ -17,6 +17,7 @@
   - applies all missing migration files in numeric order,
   - updates `dbversion` after each migration.
 - This supports in-place schema upgrades without wiping the Postgres volume.
+- Users can opt into seeded demo data via `users.example_data`; startup sync fills missing example records for opted-in users.
 
 ## Core Tables (Current)
 

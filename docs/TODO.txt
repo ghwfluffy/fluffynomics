@@ -1,5 +1,7 @@
+[ ] dashboard widgets
 [ ] Design
 [ ] Encrypt at rest with PBE
 [ ] Database backups
-[ ] Password auth
+[ ] Verify security of password auth
+[ ] Ability to disable registration (or admin add registration codes)
 [ ] Prod deployment

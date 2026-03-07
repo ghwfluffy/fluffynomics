@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from mp.db import run_database_upgrades
 from mp.api.auth import initialize_session_signing_key
+from mp.sample_data import ensure_example_data_for_opted_in_users
 
 # FastAPI
 app: FastAPI = FastAPI()
@@ -30,3 +31,4 @@ for name in [
 def startup_event() -> None:
     initialize_session_signing_key()
     run_database_upgrades()
+    ensure_example_data_for_opted_in_users()

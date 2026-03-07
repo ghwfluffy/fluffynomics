@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from mp.db import get_db
+from mp.sample_data import ensure_example_data_for_user
 from mp.schema.user import (
     LoginResponseSchema,
     LoginSchema,
@@ -124,9 +125,14 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
         raise HTTPException(status_code=400, detail="Username already exists")
 
     user = User(
-        username=payload.username, password_hash=_hash_password(payload.password)
+        username=payload.username,
+        password_hash=_hash_password(payload.password),
+        example_data=payload.add_example_data,
     )
     db.add(user)
+    db.flush()
+    if payload.add_example_data:
+        ensure_example_data_for_user(db, user)
     db.commit()
     db.refresh(user)
     return user

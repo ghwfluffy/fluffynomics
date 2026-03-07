@@ -10,11 +10,12 @@
 
 - FastAPI app is created in `python/main.py`.
 - Routers are dynamically imported from `mp.api.*`.
-- Right now only `accounts` is mounted.
+- Currently mounted routers: `auth`, `accounts`.
 
 ## Current Routes
 
 - `POST /auth/register`
+  - accepts `add_example_data` boolean.
 - `POST /auth/login`
 - `POST /auth/logout`
 - `GET /auth/me`
@@ -34,8 +35,10 @@ Defined in `python/mp/api/auth.py` and `python/mp/api/accounts.py`.
 
 - Accounts and stocks are scoped by authenticated user (`user_id`) in the backend.
 - Session auth is cookie-based via encrypted+signed payload with `user_id` and expiration.
+- Login returns `session_token` in JSON and also sets cookie; auth accepts cookie or bearer token.
 - Session key is generated at API startup, so sessions are invalidated on API restart.
 - CORS is currently very open (`allow_origins=["*"]` etc.) for dev convenience.
+- Example data seeding lives in `python/mp/sample_data.py`; keep it updated with new features.
 
 ## Runtime / Container Notes
 

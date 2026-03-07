@@ -18,6 +18,7 @@ class User(Base):
     )
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    example_data: Mapped[bool] = mapped_column(default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -29,6 +30,7 @@ class User(Base):
 class UserSchema(BaseModel):
     id: UUID
     username: str
+    example_data: bool
     created_at: datetime
     updated_at: datetime
 
@@ -38,6 +40,7 @@ class UserSchema(BaseModel):
 class UserCreateSchema(BaseModel):
     username: str
     password: str
+    add_example_data: bool = False
 
 
 class LoginSchema(BaseModel):

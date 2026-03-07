@@ -14,3 +14,4 @@ This file is the entry point for future dev agents working in this repo.
 - Keep API/web pathing consistent with NGINX (`/api/...` externally).
 - Do not assume CRUD is fully implemented; verify endpoints before wiring UI calls.
 - Keep schema and DB evolution explicit (new tables/columns should be reflected in both SQL and ORM models).
+- Maintain example-data parity: when adding new schema/features, update `python/mp/sample_data.py` so users with `example_data=true` receive representative data for the new feature.
