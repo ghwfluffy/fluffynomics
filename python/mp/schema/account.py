@@ -20,7 +20,7 @@ from sqlalchemy import Column, Integer, BigInteger, String, TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column
 
-from schema.base import Base
+from mp.schema.base import Base
 
 class Account(Base):
     __tablename__ = 'accounts'

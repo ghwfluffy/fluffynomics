@@ -17,6 +17,6 @@ app.add_middleware(
 for name in [
     "accounts",
 ]:
-    mod = import_module(f"api.{name}")
+    mod = import_module(f"mp.api.{name}")
     router = getattr(mod, "router")
     app.include_router(router)
