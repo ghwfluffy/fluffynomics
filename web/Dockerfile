@@ -1,5 +1,12 @@
-FROM ubuntu:noble
+FROM nginx:1.27-alpine
 
-# TODO: Install nginx and web packages
+# Serve the built Vue app
+COPY ./web/vue/dist/ /usr/share/nginx/html/
 
-WORKDIR /app
+# TLS + reverse-proxy config
+COPY ./web/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Fallback snakeoil certs; replace with real certs by mounting ./web/pki
+COPY ./web/pki/ /etc/nginx/pki/
+
+EXPOSE 443
