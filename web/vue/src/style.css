@@ -1,0 +1,11 @@
+:root {
+  --mp-bg: #f8fafc;
+  --mp-text: #0f172a;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+  color: var(--mp-text);
+  background: var(--mp-bg);
+}

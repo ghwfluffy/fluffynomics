@@ -1,3 +1,4 @@
+cryptography
 fastapi
 flake8
 mypy

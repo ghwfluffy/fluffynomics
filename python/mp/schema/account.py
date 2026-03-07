@@ -18,6 +18,9 @@ class Account(Base):
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     account_number: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -57,6 +60,9 @@ class Stock(Base):
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     ticker: Mapped[str] = mapped_column(Text, nullable=False)
@@ -188,6 +194,7 @@ class AccountUpdateSchema(BaseModel):
 
 class AccountSchema(AccountBaseSchema):
     id: UUID
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
 
@@ -212,6 +219,7 @@ class StockUpdateSchema(BaseModel):
 
 class StockSchema(StockBaseSchema):
     id: UUID
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
 

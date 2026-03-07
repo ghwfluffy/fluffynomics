@@ -14,16 +14,27 @@
 
 ## Current Routes
 
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/logout`
+- `GET /auth/me`
 - `GET /accounts`
+- `GET /accounts/{id}`
 - `POST /accounts`
+- `PUT /accounts/{id}`
+- `DELETE /accounts/{id}`
+- `GET /stocks`
+- `POST /stocks`
+- `PUT /stocks/{id}`
+- `DELETE /stocks/{id}`
 
-Defined in `python/mp/api/accounts.py`.
+Defined in `python/mp/api/auth.py` and `python/mp/api/accounts.py`.
 
 ## Important Constraints
 
-- There is currently no `PUT /accounts/{id}` or `DELETE /accounts/{id}` route.
-- `AccountSchema` includes required `id`, so create requests currently require an `id` in payload.
-- `Account` model uses explicit `id` primary key with no autoincrement behavior defined in SQL schema.
+- Accounts and stocks are scoped by authenticated user (`user_id`) in the backend.
+- Session auth is cookie-based via encrypted+signed payload with `user_id` and expiration.
+- Session key is generated at API startup, so sessions are invalidated on API restart.
 - CORS is currently very open (`allow_origins=["*"]` etc.) for dev convenience.
 
 ## Runtime / Container Notes

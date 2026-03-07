@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from mp.db import get_db
+from mp.api.auth import get_current_user
 from mp.schema.account import (
     Account,
     AccountCashDenomination,
@@ -21,6 +22,7 @@ from mp.schema.account import (
     StockSchema,
     StockUpdateSchema,
 )
+from mp.schema.user import User
 
 router = APIRouter()
 
@@ -130,6 +132,7 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
     )
     return AccountSchema(
         id=account.id,
+        user_id=account.user_id,
         account_number=account.account_number,
         name=account.name,
         type=account.type,
@@ -214,14 +217,30 @@ def _replace_nested_positions(
 
 
 @router.get("/accounts", response_model=list[AccountSchema])
-def get_accounts(db: Session = Depends(get_db)) -> list[AccountSchema]:
-    accounts = db.query(Account).order_by(Account.created_at.desc()).all()
+def get_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AccountSchema]:
+    accounts = (
+        db.query(Account)
+        .filter(Account.user_id == current_user.id)
+        .order_by(Account.created_at.desc())
+        .all()
+    )
     return [_serialize_account(db, account) for account in accounts]
 
 
 @router.get("/accounts/{account_id}", response_model=AccountSchema)
-def get_account(account_id: UUID, db: Session = Depends(get_db)) -> AccountSchema:
-    account = db.get(Account, account_id)
+def get_account(
+    account_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return _serialize_account(db, account)
@@ -229,12 +248,15 @@ def get_account(account_id: UUID, db: Session = Depends(get_db)) -> AccountSchem
 
 @router.post("/accounts", response_model=AccountSchema)
 def create_account(
-    payload: AccountCreateSchema, db: Session = Depends(get_db)
+    payload: AccountCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
     _validate_account_type(payload.type)
     _validate_type_requirements(payload)
 
     account = Account(
+        user_id=current_user.id,
         account_number=payload.account_number,
         name=payload.name,
         type=payload.type,
@@ -261,6 +283,18 @@ def create_account(
     db.add(account)
     db.flush()
 
+    if payload.stock_positions:
+        stock_ids = [item.stock_id for item in payload.stock_positions]
+        owned_count = (
+            db.query(Stock)
+            .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
+            .count()
+        )
+        if owned_count != len(set(stock_ids)):
+            raise HTTPException(
+                status_code=400, detail="Stock position contains unknown stock"
+            )
+
     _replace_nested_positions(
         db,
         account.id,
@@ -279,8 +313,13 @@ def update_account(
     account_id: UUID,
     payload: AccountUpdateSchema,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
-    account = db.get(Account, account_id)
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
@@ -342,6 +381,18 @@ def update_account(
     )
     _validate_type_requirements(merged_payload)
 
+    if payload.stock_positions is not None and payload.stock_positions:
+        stock_ids = [item.stock_id for item in payload.stock_positions]
+        owned_count = (
+            db.query(Stock)
+            .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
+            .count()
+        )
+        if owned_count != len(set(stock_ids)):
+            raise HTTPException(
+                status_code=400, detail="Stock position contains unknown stock"
+            )
+
     for field in [
         "account_number",
         "name",
@@ -385,8 +436,16 @@ def update_account(
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
-def delete_account(account_id: UUID, db: Session = Depends(get_db)) -> None:
-    account = db.get(Account, account_id)
+def delete_account(
+    account_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     db.delete(account)
@@ -395,13 +454,26 @@ def delete_account(account_id: UUID, db: Session = Depends(get_db)) -> None:
 
 
 @router.get("/stocks", response_model=list[StockSchema])
-def get_stocks(db: Session = Depends(get_db)) -> list[Stock]:
-    return db.query(Stock).order_by(Stock.ticker.asc()).all()
+def get_stocks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[Stock]:
+    return (
+        db.query(Stock)
+        .filter(Stock.user_id == current_user.id)
+        .order_by(Stock.ticker.asc())
+        .all()
+    )
 
 
 @router.post("/stocks", response_model=StockSchema)
-def create_stock(payload: StockCreateSchema, db: Session = Depends(get_db)) -> Stock:
+def create_stock(
+    payload: StockCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Stock:
     stock = Stock(
+        user_id=current_user.id,
         name=payload.name,
         ticker=payload.ticker.upper(),
         exchange=payload.exchange,
@@ -414,9 +486,16 @@ def create_stock(payload: StockCreateSchema, db: Session = Depends(get_db)) -> S
 
 @router.put("/stocks/{stock_id}", response_model=StockSchema)
 def update_stock(
-    stock_id: UUID, payload: StockUpdateSchema, db: Session = Depends(get_db)
+    stock_id: UUID,
+    payload: StockUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Stock:
-    stock = db.get(Stock, stock_id)
+    stock = (
+        db.query(Stock)
+        .filter(Stock.id == stock_id, Stock.user_id == current_user.id)
+        .first()
+    )
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
 
@@ -435,8 +514,16 @@ def update_stock(
 
 
 @router.delete("/stocks/{stock_id}", status_code=204)
-def delete_stock(stock_id: UUID, db: Session = Depends(get_db)) -> None:
-    stock = db.get(Stock, stock_id)
+def delete_stock(
+    stock_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    stock = (
+        db.query(Stock)
+        .filter(Stock.id == stock_id, Stock.user_id == current_user.id)
+        .first()
+    )
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
 

@@ -1,9 +1,9 @@
 <template>
   <v-app>
-    <v-snackbar v-model="snackbar" color="error" timeout="4000">
+    <router-view />
+    <v-snackbar v-model="snackbar" color="error" timeout="4500">
       {{ errorMessage }}
     </v-snackbar>
-    <router-view />
   </v-app>
 </template>
 

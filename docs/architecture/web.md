@@ -11,7 +11,9 @@
 
 - Entry: `web/vue/src/main.ts`
 - Routes: `web/vue/src/router.ts`
-- Current page: `web/vue/src/accounts/AccountsPage.vue` (`/`)
+- Landing/login page: `web/vue/src/auth/LandingPage.vue` (`/`)
+- Authenticated app shell: `web/vue/src/AppShell.vue` (`/app`)
+- Accounts page: `web/vue/src/accounts/AccountsPage.vue` (`/app`)
 
 ## Container/Serving Model
 
@@ -30,10 +32,8 @@
 
 ## Important Frontend Gaps (Current State)
 
-- `request.get()` returns response data directly, but `AccountsPage.vue` uses `res.data`.
-- `deleteAccount()` references `API_URL` which is not defined.
-- Form calls update endpoint (`PUT /accounts/{id}`) not currently implemented by API.
-- Axios base URL is hardcoded to `http://localhost:8000`; this conflicts with the NGINX `/api` pattern and HTTPS flow.
+- Frontend auth is cookie-based and relies on `/auth/me` in router guards.
+- Vite dev mode proxies `/api/*` to backend and strips `/api` prefix to match FastAPI routes.
 
 ## Build/Run Notes
 

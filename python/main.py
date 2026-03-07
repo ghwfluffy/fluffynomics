@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mp.db import run_database_upgrades
+from mp.api.auth import initialize_session_signing_key
 
 # FastAPI
 app: FastAPI = FastAPI()
@@ -17,6 +18,7 @@ app.add_middleware(
 
 # APIs
 for name in [
+    "auth",
     "accounts",
 ]:
     mod = import_module(f"mp.api.{name}")
@@ -26,4 +28,5 @@ for name in [
 
 @app.on_event("startup")
 def startup_event() -> None:
+    initialize_session_signing_key()
     run_database_upgrades()
