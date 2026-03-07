@@ -1,7 +1,8 @@
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import create_engine
-from typing import Generator
 import os
+from typing import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 engine = create_engine(DATABASE_URL)

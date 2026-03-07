@@ -1,0 +1,3 @@
+ALTER TABLE accounts
+    ADD COLUMN IF NOT EXISTS date_opened DATE,
+    ADD COLUMN IF NOT EXISTS last_update TIMESTAMPTZ;

@@ -5,6 +5,17 @@
 - PostgreSQL 16 (containerized via `docker-compose.yml`)
 - Init SQL: `init.sql` mounted to `/docker-entrypoint-initdb.d/init.sql`
 
+## Schema Revisions / Upgrades
+
+- SQL migration files live in `python/mp/db/migrations/` and are named like `0001_description.sql`.
+- On API startup, `python/mp/db/upgrade.py`:
+  - ensures `app_config` exists,
+  - ensures `app_config['dbversion']` exists,
+  - reads current revision from `dbversion`,
+  - applies all missing migration files in numeric order,
+  - updates `dbversion` after each migration.
+- This supports in-place schema upgrades without wiping the Postgres volume.
+
 ## Core Tables (Current)
 
 - `accounts`

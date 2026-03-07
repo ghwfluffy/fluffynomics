@@ -1,5 +1,5 @@
+[ ] Design
+[ ] Encrypt at rest with PBE
 [ ] Database backups
-[ ] flake/ruff
-[ ] lint only reload packages on change
 [ ] Password auth
 [ ] Prod deployment

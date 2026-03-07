@@ -8,100 +8,114 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ghw;
 -- Connect to target database
 --\c budget;
 
--- Money accounts (checking, savings)
-CREATE TABLE accounts (
-    id INT NOT NULL,
-    name VARCHAR,
-    type VARCHAR,
-    -- cents
-    balance BIGINT,
-    -- percentage points
-    apr INT,
-    url VARCHAR,
-    notes VARCHAR,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-    PRIMARY KEY (id)
+CREATE TABLE accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_number TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (
+        type IN (
+            'checking',
+            'savings',
+            'cash',
+            'line_of_credit',
+            'credit_card',
+            'stocks_account',
+            'crypto_exchange',
+            'crypto_wallet',
+            'retirement',
+            'loan',
+            'rewards_card'
+        )
+    ),
+    organization TEXT,
+    url TEXT,
+    notes TEXT,
+
+    balance_cents BIGINT,
+    fee_amount_cents BIGINT,
+    fee_period TEXT,
+    routing_number TEXT,
+    apy_bps INT,
+    compound_period TEXT,
+    apr_bps INT,
+    billing_day INT CHECK (billing_day BETWEEN 1 AND 31),
+    payment_day INT CHECK (payment_day BETWEEN 1 AND 31),
+    expiration_date DATE,
+    cvc TEXT,
+    usd_balance_cents BIGINT,
+    retirement_account_type TEXT CHECK (
+        retirement_account_type IN ('roth', 'simple', '401k')
+    ),
+    payment_amount_cents BIGINT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE stocks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    exchange TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (ticker, exchange)
+);
+
+CREATE TABLE account_stock_positions (
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    stock_id UUID NOT NULL REFERENCES stocks(id) ON DELETE RESTRICT,
+    quantity NUMERIC(20, 8) NOT NULL,
+    PRIMARY KEY (account_id, stock_id)
+);
+
+CREATE TABLE account_crypto_positions (
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    ticker VARCHAR(32) NOT NULL,
+    quantity NUMERIC(38, 18) NOT NULL,
+    PRIMARY KEY (account_id, ticker)
+);
+
+CREATE TABLE account_cash_denominations (
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    denomination_cents INT NOT NULL,
+    quantity INT NOT NULL,
+    PRIMARY KEY (account_id, denomination_cents)
 );
 
 -- Static one time withdrawals from accounts that haven't posted yet
 CREATE TABLE pending_payments (
-    id INT NOT NULL,
-    -- accounts.id
-    account_id INT NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     -- negative cents
     delta BIGINT,
-    notes VARCHAR,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-
-    PRIMARY KEY (id)
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Contracts
 CREATE TABLE contracts (
-    id INT NOT NULL,
-    name VARCHAR,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT,
     -- cents (positive IE paycheck or negative IE bill)
     amount BIGINT,
     -- cents more or less than amount might occur this pay period
     delta_amount BIGINT,
     -- Week, %d Weeks, HalfMonth (15th and last day of month), Month, %d Months, Year, %d Years
-    frequency VARCHAR,
+    frequency TEXT,
     last_payment DATE,
     next_payment DATE,
     automatic BOOLEAN,
-    -- accounts.id
-    payment_account_id INT,
-    category VARCHAR,
+    payment_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    category TEXT,
     active BOOLEAN,
-    url VARCHAR,
-    notes VARCHAR,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
+    url TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     start_date DATE,
-    end_date DATE,
-
-    PRIMARY KEY (id)
-);
-
--- Credit accounts
-CREATE TABLE payables (
-    id INT NOT NULL,
-    name VARCHAR,
-    type VARCHAR,
-    -- Max credit, cents
-    credit BIGINT,
-    last_payment DATE,
-    next_payment DATE,
-    -- percentage points
-    apr INT,
-    -- negative cents
-    balance BIGINT,
-    -- cents
-    rewards BIGINT,
-    url VARCHAR,
-    notes VARCHAR,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-
-    PRIMARY KEY (id)
-);
-
--- Investment accounts (Acorns, Betterment, Retirement, etc)
-CREATE TABLE funds (
-    id INT NOT NULL,
-    name VARCHAR,
-    type VARCHAR,
-    -- cents
-    balance BIGINT,
-    -- percentage points
-    apr INT,
-    url VARCHAR,
-    notes VARCHAR,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-
-    PRIMARY KEY (id)
+    end_date DATE
 );

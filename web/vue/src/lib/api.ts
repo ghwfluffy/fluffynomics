@@ -6,13 +6,13 @@ export const errorMessage = ref('')
 export const snackbar = ref(false)
 
 const instance = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-async function handleRequest<T>(promise: Promise<AxiosResponse<T>>): Promise<T | undefined> {
+async function handleRequest<T>(promise: Promise<AxiosResponse<T>>): Promise<T> {
   try {
     const response = await promise
     return response.data
@@ -24,9 +24,14 @@ async function handleRequest<T>(promise: Promise<AxiosResponse<T>>): Promise<T |
 }
 
 export const request = {
-  get:    <T = any>(url: string, config?: AxiosRequestConfig) => handleRequest<T>(instance.get(url, config)),
-  post:   <T = any>(url: string, data?: any, config?: AxiosRequestConfig) => handleRequest<T>(instance.post(url, data, config)),
-  put:    <T = any>(url: string, data?: any, config?: AxiosRequestConfig) => handleRequest<T>(instance.put(url, data, config)),
-  patch:  <T = any>(url: string, data?: any, config?: AxiosRequestConfig) => handleRequest<T>(instance.patch(url, data, config)),
-  delete: <T = any>(url: string, config?: AxiosRequestConfig) => handleRequest<T>(instance.delete(url, config)),
+  get: <T = unknown>(url: string, config?: AxiosRequestConfig) =>
+    handleRequest<T>(instance.get(url, config)),
+  post: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    handleRequest<T>(instance.post(url, data, config)),
+  put: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    handleRequest<T>(instance.put(url, data, config)),
+  patch: <T = unknown>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    handleRequest<T>(instance.patch(url, data, config)),
+  delete: <T = unknown>(url: string, config?: AxiosRequestConfig) =>
+    handleRequest<T>(instance.delete(url, config)),
 }

@@ -4,7 +4,7 @@
 
 - Framework: FastAPI (`python/main.py`)
 - ORM: SQLAlchemy 2-style mapped columns (`python/mp/schema/*.py`)
-- DB session dependency: `python/mp/db.py`
+- DB session dependency: `python/mp/db/core.py` (re-exported via `python/mp/db/__init__.py`)
 
 ## App Structure
 
