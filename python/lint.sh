@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eux -o pipefail
+set -eu -o pipefail
 
 REQ_HASH="$(sha256sum requirements.txt | awk '{print $1}')"
 DIGEST_FILE="venv/digest.sha256"
@@ -17,3 +17,5 @@ if [ ! -f "${DIGEST_FILE}" ] || [ "${REQ_HASH}" != "$(cat "${DIGEST_FILE}")" ]; 
 fi
 
 python3 -m mypy .
+python3 -m flake8 .
+python3 -m ruff format .

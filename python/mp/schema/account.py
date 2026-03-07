@@ -1,6 +1,13 @@
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel
+from sqlalchemy import BigInteger, Integer, String, TIMESTAMP
+from sqlalchemy.orm import Mapped, mapped_column
+
+
+from mp.schema.base import Base
+
 
 class AccountSchema(BaseModel):
     id: int
@@ -16,14 +23,9 @@ class AccountSchema(BaseModel):
     class Config:
         from_attributes = True
 
-from sqlalchemy import Column, Integer, BigInteger, String, TIMESTAMP
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Mapped, mapped_column
-
-from mp.schema.base import Base
 
 class Account(Base):
-    __tablename__ = 'accounts'
+    __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String)

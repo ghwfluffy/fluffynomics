@@ -7,9 +7,11 @@ from mp.db import get_db
 
 router = APIRouter()
 
+
 @router.get("/accounts", response_model=List[AccountSchema])
 def get_accounts(db: Session = Depends(get_db)) -> List[Account]:
     return db.query(Account).all()
+
 
 @router.post("/accounts", response_model=AccountSchema)
 def create_account(account: AccountSchema, db: Session = Depends(get_db)) -> Account:

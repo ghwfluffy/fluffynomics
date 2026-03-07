@@ -1,6 +1,8 @@
 fastapi
+flake8
 mypy
 psycopg2-binary
 pydantic
+ruff
 sqlalchemy
 uvicorn
