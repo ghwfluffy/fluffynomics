@@ -1,7 +1,10 @@
 <template>
   <v-app>
     <v-app-bar color="white" density="comfortable" elevation="1">
-      <v-app-bar-title>Fluffynomics - Wealth Tracker</v-app-bar-title>
+      <v-app-bar-title class="brand-title">
+        <img src="/cat_small.png" alt="Fluffynomics cat" class="brand-cat" />
+        Fluffynomics - Wealth Tracker
+      </v-app-bar-title>
       <div class="mr-4">{{ currentUser?.username }}</div>
       <v-btn variant="outlined" color="primary" @click="signOut">Logout</v-btn>
     </v-app-bar>
@@ -28,3 +31,16 @@ const signOut = async () => {
   await router.push('/')
 }
 </script>
+
+<style scoped>
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-cat {
+  width: 30px;
+  height: 30px;
+}
+</style>

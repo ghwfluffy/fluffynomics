@@ -1,11 +1,11 @@
 <template>
   <div class="landing">
     <div class="hero">
-      <p class="eyebrow">Fluffynomics - Wealth Tracker</p>
+      <img src="/banner.png" alt="Fluffynomics banner" class="hero-banner" />
       <h1>Budgeting and money planning software for real life.</h1>
       <p>
-        Track checking, savings, debt, stocks, and crypto accounts in one secure workspace.
-        Your data is private to your user account and protected by signed, encrypted sessions.
+        Fluffynomics brings your accounts and investments together so you can
+        track your wealth and plan ahead.
       </p>
     </div>
 
@@ -77,9 +77,10 @@ const submitRegister = async () => {
 .landing {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(560px, 760px) minmax(360px, 460px);
   gap: 24px;
-  padding: 32px;
+  padding: 32px clamp(18px, 6vw, 88px);
+  justify-content: center;
   background:
     radial-gradient(circle at 8% 10%, #fde68a 0%, #fde68a00 35%),
     radial-gradient(circle at 90% 12%, #a7f3d0 0%, #a7f3d000 36%),
@@ -89,6 +90,9 @@ const submitRegister = async () => {
 .hero {
   align-self: center;
   padding: 24px;
+  justify-self: center;
+  width: 100%;
+  max-width: 680px;
 }
 
 .hero h1 {
@@ -103,11 +107,11 @@ const submitRegister = async () => {
   color: #334155;
 }
 
-.eyebrow {
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-weight: 700;
-  color: #0f766e;
+.hero-banner {
+  width: min(100%, 580px);
+  border-radius: 14px;
+  margin-bottom: 18px;
+  box-shadow: 0 16px 34px -18px rgba(15, 23, 42, 0.45);
 }
 
 .auth-card {
@@ -115,11 +119,13 @@ const submitRegister = async () => {
   max-width: 460px;
   width: 100%;
   margin-inline: auto;
+  background-image: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
 
 @media (max-width: 960px) {
   .landing {
     grid-template-columns: 1fr;
+    justify-content: stretch;
     padding: 18px;
   }
 }

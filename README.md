@@ -1,6 +1,6 @@
 # Fluffynomics - Wealth Tracker
 
-Budgeting and money planning software for tracking cash flow, debt, investments, and account health in one place.
+Fluffynomics brings your accounts and investments together so you can track your wealth and plan ahead.
 
 ## Why Fluffynomics?
 
