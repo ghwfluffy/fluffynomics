@@ -141,6 +141,30 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
   - `expenses.linked_account_id -> accounts.id` uses `ON DELETE SET NULL`.
 - Tightly-coupled child data may still cascade (for example account positions/history tied directly to account lifecycle).
 
+## Data Portability Replace Semantics
+
+Import/restore (`POST /data/import`) is intentionally modeled as:
+- deserialize package JSON,
+- migrate payload schema to current version,
+- replace existing user-scoped rows with fresh inserts.
+
+Current replace order removes user rows from:
+- `expenses`
+- `contracts`
+  - cascades `contract_postings` by contract foreign key
+- `account_value_history`
+- `net_worth_daily_snapshot`
+- `accounts` (cascades account positions/denominations)
+- `stocks`
+
+Then new rows are inserted with remapped IDs per import run.
+
+Icon handling during import:
+- imported icon records are looked up by `icon_assets.hash` first (global dedupe),
+- existing matching hash rows are reused,
+- missing hashes create new rows,
+- imported account/contract/expense `icon_id` references are remapped to resolved icon rows.
+
 ## Example Data Contract
 
 - `users.example_data` controls whether sample data should exist.
@@ -155,4 +179,5 @@ When changing schema:
 - add a new migration file (next numeric prefix),
 - update ORM/Pydantic models,
 - update affected API handlers,
+- update data portability serializer/import migrator in `python/mp/api/data_portability.py` so export packages remain complete and older package versions can be upgraded,
 - update docs in `docs/architecture/*.md`.

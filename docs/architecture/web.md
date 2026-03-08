@@ -77,6 +77,20 @@ Trend widget behavior:
 
 Organization fuzzy search sources organizations from `GET /organizations` (not only local account state) so defaults and known icons are available immediately.
 
+## Data Portability UX
+
+`AppShell.vue` header uses a profile trigger (avatar + username) with a dropdown menu that provides:
+- `Export Data`
+  - opens modal with optional password
+  - downloads a JSON package from `POST /data/export`
+- `Import Data`
+  - opens modal for package file selection + optional password
+  - uploads package to `POST /data/import` with replace semantics
+  - app reloads after successful import to refresh dashboard state
+- `Logout`
+
+Password is optional in both flows. It is required only for encrypted packages.
+
 ## Dashboard Interaction Patterns
 
 In `AccountsPage.vue`:

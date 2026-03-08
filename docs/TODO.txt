@@ -1,15 +1,24 @@
-Features
-[ ] Visualized net worth
 Security
+[ ] pw change
+[ ] verify authorization checks
 [ ] Encrypt account info at rest with PBE
-[ ] Database backups
-[ ] Verify security of password auth
-[ ] Ability to disable registration (or admin add registration codes)
+[ ] Automated database backups
+[ ] Registration codes (admin add registration codes)
+    [ ] Admin site settings
+    [ ] Test mode (allow test data creation)
+    [ ] Reg codes
 Prod deployment
 [ ] Domain
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
+[ ] calendar view
+[ ] Mobile site
+[ ] Visualized net worth
+[ ] note reminders
+[ ] $/minute
+[ ] $/day^2
+[ ] queued payments/transfers
 [ ] Stock dividens
 [ ] Pull crypto/stock prices automatically
     [ ] tastytrade integration
@@ -17,7 +26,6 @@ Nice to have
 [ ] upcoming payment alerts (UI)
 [ ] upcoming payment alerts (SMS)
 [ ] notifications: tasks to review
-[ ] Mobile site
 [ ] Assets
 [ ] Receivables
 [ ] Credit score

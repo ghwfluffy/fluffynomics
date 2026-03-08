@@ -11,6 +11,7 @@
 - `mp.api.auth` mounted at `/auth`
 - `mp.api.accounts` mounted at `/`
 - `mp.api.contracts` mounted at `/`
+- `mp.api.data_portability` mounted at `/data`
 
 ## Auth + Session Model
 
@@ -194,6 +195,47 @@ Deletion coupling rule:
 - Accounts/stocks are always filtered by authenticated `user_id`.
 - Contract reads/writes/runs are always filtered by authenticated `user_id`.
 - Cross-user access is denied server-side even if IDs are known.
+
+## Data Export / Import API
+
+Defined in `python/mp/api/data_portability.py`.
+
+- `POST /data/export`
+  - builds a versioned JSON package of current user data:
+    - icons referenced by user records
+    - stocks
+    - accounts (+ stock/crypto/cash sub-records)
+    - contracts
+    - contract postings ledger
+    - expenses
+    - account value history
+    - net-worth daily snapshots
+  - package envelope fields:
+    - `format: "money-planner-export"`
+    - `package_version: 1`
+    - `encrypted: boolean`
+  - optional password support:
+    - when password is provided, payload is encrypted (`cipher: fernet`)
+    - key derivation uses PBKDF2-SHA256 with intentionally high-hardness defaults:
+      - large salt (`>=64` bytes, current export uses 128 bytes)
+      - high iteration count (`1,500,000`)
+- `POST /data/import`
+  - accepts package envelope + optional password
+  - decrypts (if needed), deserializes JSON, migrates payload schema to latest, then replaces user-scoped records via insert flow
+  - currently supports only `replace_existing=true`
+  - response returns imported object counts for each dataset class
+
+### Export Payload Migration Contract
+
+- Export payload includes `schema_version`.
+- Import path must run migration steps until current `schema_version`.
+- If payload version is newer than server-supported version, import is rejected.
+- Initial migration compatibility:
+  - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
+- Schema-change rule:
+  - backend schema/API changes that affect user data must update both:
+    - DB migration/ORM model paths, and
+    - data portability export/import serialization + migration logic.
 
 ## Important Timestamp Semantics
 
