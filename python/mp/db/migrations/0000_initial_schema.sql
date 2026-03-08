@@ -9,6 +9,30 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS icon_assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    hash VARCHAR(64) NOT NULL UNIQUE,
+    created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    png_data BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL UNIQUE,
+    icon_id UUID REFERENCES icon_assets(id) ON DELETE SET NULL,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS default_icons (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key VARCHAR(64) NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    icon_id UUID NOT NULL REFERENCES icon_assets(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -48,8 +72,13 @@ CREATE TABLE IF NOT EXISTS accounts (
         retirement_account_type IN ('roth', 'simple', '401k')
     ),
     payment_amount_cents BIGINT,
+    icon_id UUID REFERENCES icon_assets(id) ON DELETE SET NULL,
+    icon_type VARCHAR(16) NOT NULL DEFAULT 'Icon' CHECK (
+        icon_type IN ('Letters', 'Gravatar', 'Icon')
+    ),
+    rank DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    last_update TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS stocks (
@@ -60,7 +89,7 @@ CREATE TABLE IF NOT EXISTS stocks (
     exchange TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (ticker, exchange)
+    UNIQUE (user_id, ticker, exchange)
 );
 
 CREATE TABLE IF NOT EXISTS account_stock_positions (

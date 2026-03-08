@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -10,6 +10,7 @@ from mp.schema.account import (
     AccountCashDenomination,
     AccountCryptoPosition,
     AccountStockPosition,
+    Organization,
     Stock,
 )
 from mp.schema.user import User
@@ -18,14 +19,37 @@ from mp.schema.user import User
 def _ensure_account(db: Session, user: User, name: str, payload: dict) -> Account:
     account = db.query(Account).filter_by(user_id=user.id, name=name).first()
     if account is None:
-        account = Account(user_id=user.id, name=name, **payload)
+        max_rank = (
+            db.query(Account.rank)
+            .filter_by(user_id=user.id)
+            .order_by(Account.rank.desc())
+            .first()
+        )
+        next_rank = (max_rank[0] if max_rank else 0) + 1
+        account = Account(user_id=user.id, name=name, rank=next_rank, **payload)
         db.add(account)
         db.flush()
+    elif account.last_update is None and payload.get("last_update") is not None:
+        account.last_update = payload["last_update"]
+    if account.icon_id is None and account.organization:
+        organization = (
+            db.query(Organization).filter_by(name=account.organization).first()
+        )
+        if organization is not None and organization.icon_id is not None:
+            account.icon_id = organization.icon_id
     return account
 
 
 def _ensure_stock(db: Session, user: User, ticker: str, payload: dict) -> Stock:
-    stock = db.query(Stock).filter_by(user_id=user.id, ticker=ticker).first()
+    stock = (
+        db.query(Stock)
+        .filter_by(
+            user_id=user.id,
+            ticker=ticker,
+            exchange=payload.get("exchange"),
+        )
+        .first()
+    )
     if stock is None:
         stock = Stock(user_id=user.id, ticker=ticker, **payload)
         db.add(stock)
@@ -38,6 +62,10 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
         return
 
     now = datetime.now(timezone.utc)
+    fresh = now - timedelta(days=2)
+    recent = now - timedelta(days=12)
+    aging = now - timedelta(days=45)
+    stale = now - timedelta(days=120)
 
     checking = _ensure_account(
         db,
@@ -51,8 +79,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "fee_amount_cents": 0,
             "fee_period": "monthly",
             "routing_number": "110000000",
-            "date_opened": date(2023, 1, 12),
-            "last_update": now,
+            "last_update": fresh,
         },
     )
     _ensure_account(
@@ -69,8 +96,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "routing_number": "110000000",
             "apy_bps": 430,
             "compound_period": "monthly",
-            "date_opened": date(2022, 7, 1),
-            "last_update": now,
+            "last_update": recent,
         },
     )
     cash = _ensure_account(
@@ -81,8 +107,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "CASH-0001",
             "type": "cash",
             "organization": "On Hand",
-            "date_opened": date(2024, 1, 1),
-            "last_update": now,
+            "last_update": aging,
         },
     )
     _ensure_account(
@@ -97,8 +122,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "fee_amount_cents": 0,
             "fee_period": "monthly",
             "routing_number": "110000000",
-            "date_opened": date(2024, 3, 12),
-            "last_update": now,
+            "last_update": stale,
         },
     )
     _ensure_account(
@@ -113,8 +137,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "fee_amount_cents": 0,
             "fee_period": "monthly",
             "routing_number": "121000358",
-            "date_opened": date(2022, 11, 2),
-            "last_update": now,
+            "last_update": fresh,
         },
     )
     _ensure_account(
@@ -131,8 +154,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "routing_number": "110000000",
             "apy_bps": 390,
             "compound_period": "monthly",
-            "date_opened": date(2023, 4, 18),
-            "last_update": now,
+            "last_update": recent,
         },
     )
     _ensure_account(
@@ -149,8 +171,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "routing_number": "121000358",
             "apy_bps": 410,
             "compound_period": "monthly",
-            "date_opened": date(2021, 9, 9),
-            "last_update": now,
+            "last_update": aging,
         },
     )
     _ensure_account(
@@ -161,8 +182,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "CASH-0002",
             "type": "cash",
             "organization": "On Hand",
-            "date_opened": date(2024, 2, 1),
-            "last_update": now,
+            "last_update": stale,
         },
     )
     _ensure_account(
@@ -173,8 +193,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "CASH-0003",
             "type": "cash",
             "organization": "On Hand",
-            "date_opened": date(2023, 10, 7),
-            "last_update": now,
+            "last_update": fresh,
         },
     )
     _ensure_account(
@@ -194,8 +213,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "compound_period": "daily",
             "expiration_date": date(2028, 8, 1),
             "cvc": "123",
-            "date_opened": date(2021, 4, 17),
-            "last_update": now,
+            "last_update": recent,
         },
     )
     _ensure_account(
@@ -213,8 +231,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "compound_period": "daily",
             "billing_day": 3,
             "payment_day": 22,
-            "date_opened": date(2020, 9, 10),
-            "last_update": now,
+            "last_update": aging,
         },
     )
     _ensure_account(
@@ -230,8 +247,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "compound_period": "monthly",
             "payment_amount_cents": 41500,
             "payment_day": 14,
-            "date_opened": date(2024, 5, 2),
-            "last_update": now,
+            "last_update": stale,
         },
     )
     _ensure_account(
@@ -244,8 +260,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "organization": "Peak Retirement",
             "balance_cents": 8450000,
             "retirement_account_type": "401k",
-            "date_opened": date(2018, 2, 5),
-            "last_update": now,
+            "last_update": fresh,
         },
     )
     _ensure_account(
@@ -258,8 +273,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "organization": "SkyMile Club",
             "balance_cents": 42000,
             "expiration_date": date(2027, 12, 1),
-            "date_opened": date(2023, 6, 1),
-            "last_update": now,
+            "last_update": recent,
         },
     )
     stocks_account = _ensure_account(
@@ -270,8 +284,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "BRK-445566",
             "type": "stocks_account",
             "organization": "Fluffy Brokerage",
-            "date_opened": date(2019, 11, 20),
-            "last_update": now,
+            "last_update": aging,
         },
     )
     crypto_exchange = _ensure_account(
@@ -283,8 +296,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "type": "crypto_exchange",
             "organization": "CatCoin Exchange",
             "usd_balance_cents": 210000,
-            "date_opened": date(2023, 8, 4),
-            "last_update": now,
+            "last_update": stale,
         },
     )
     crypto_wallet = _ensure_account(
@@ -295,8 +307,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "CW-1122",
             "type": "crypto_wallet",
             "organization": "Self Custody",
-            "date_opened": date(2022, 3, 19),
-            "last_update": now,
+            "last_update": fresh,
         },
     )
 

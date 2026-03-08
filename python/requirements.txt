@@ -2,6 +2,10 @@ cryptography
 fastapi
 flake8
 mypy
+pillow
+python-multipart
+pyyaml
+types-PyYAML
 psycopg2-binary
 pydantic
 ruff

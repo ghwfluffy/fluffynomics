@@ -1,20 +1,35 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from mp.db import get_db
 from mp.api.auth import get_current_user
+from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
+from mp.recurring_period import parse_recurring_period
 from mp.schema.account import (
     Account,
     AccountCashDenomination,
     AccountCreateSchema,
+    AccountIconType,
     AccountCryptoPosition,
+    DefaultIcon,
+    DefaultIconSchema,
+    AccountRankUpdateSchema,
     AccountSchema,
     AccountStockPosition,
     AccountUpdateSchema,
+    AccountValueUpdateSchema,
     CashBillSchema,
+    IconAsset,
+    IconListItemSchema,
+    IconUploadResponseSchema,
+    Organization,
+    OrganizationSuggestionSchema,
     PositionCryptoSchema,
     PositionStockSchema,
     Stock,
@@ -48,69 +63,72 @@ def _validate_account_type(account_type: str) -> None:
         )
 
 
+def _validate_required_identity_fields(
+    name: str | None, organization: str | None
+) -> None:
+    if name is None or not name.strip():
+        raise HTTPException(status_code=400, detail="name is required")
+    if organization is None or not organization.strip():
+        raise HTTPException(status_code=400, detail="organization is required")
+
+
+def _validate_account_number(account_number: str | None) -> None:
+    if account_number is None or not account_number.strip():
+        raise HTTPException(status_code=400, detail="account_number is required")
+
+
 def _validate_type_requirements(
     payload: AccountCreateSchema | AccountUpdateSchema,
 ) -> None:
-    if payload.type is None:
+    # Type-specific fields are intentionally optional. We only enforce
+    # account identity fields + a valid account type.
+    return
+
+
+def _validate_icon_type(icon_type: str | None) -> None:
+    if icon_type is None:
         return
+    if icon_type not in {item.value for item in AccountIconType}:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported icon_type: {icon_type}"
+        )
 
-    required_fields_by_type = {
-        "checking": [
-            "balance_cents",
-            "fee_amount_cents",
-            "fee_period",
-            "routing_number",
-        ],
-        "savings": [
-            "apy_bps",
-            "compound_period",
-            "balance_cents",
-            "fee_amount_cents",
-            "fee_period",
-            "routing_number",
-        ],
-        "cash": ["cash_bills"],
-        "line_of_credit": [
-            "balance_cents",
-            "fee_amount_cents",
-            "fee_period",
-            "apr_bps",
-            "compound_period",
-            "billing_day",
-            "payment_day",
-        ],
-        "credit_card": [
-            "balance_cents",
-            "fee_amount_cents",
-            "fee_period",
-            "apr_bps",
-            "billing_day",
-            "payment_day",
-            "compound_period",
-            "expiration_date",
-            "cvc",
-        ],
-        "stocks_account": ["stock_positions"],
-        "crypto_exchange": ["usd_balance_cents", "crypto_positions"],
-        "crypto_wallet": ["crypto_positions"],
-        "retirement": ["balance_cents", "retirement_account_type"],
-        "loan": [
-            "balance_cents",
-            "apr_bps",
-            "compound_period",
-            "payment_amount_cents",
-            "payment_day",
-        ],
-        "rewards_card": ["balance_cents", "expiration_date"],
-    }
 
-    for required_field in required_fields_by_type[payload.type]:
-        value = getattr(payload, required_field, None)
-        if value is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{required_field} is required for type {payload.type}",
-            )
+def _validate_recurring_period(raw: str | None) -> None:
+    if raw is None:
+        return
+    if not raw.strip():
+        return
+    try:
+        parse_recurring_period(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _coerce_icon_type(icon_type: str | None) -> Literal["Letters", "Gravatar", "Icon"]:
+    if icon_type == AccountIconType.LETTERS.value:
+        return AccountIconType.LETTERS.value
+    if icon_type == AccountIconType.GRAVATAR.value:
+        return AccountIconType.GRAVATAR.value
+    return AccountIconType.ICON.value
+
+
+def _normalize_icon_selection(
+    icon_type: str | None,
+    icon_id: UUID | None,
+    organization: str | None,
+    db: Session,
+) -> tuple[Literal["Letters", "Gravatar", "Icon"], UUID | None]:
+    normalized_type = _coerce_icon_type(icon_type)
+    if normalized_type != AccountIconType.ICON.value:
+        return normalized_type, None
+    if icon_id is not None:
+        return normalized_type, icon_id
+    if organization:
+        org = db.query(Organization).filter_by(name=organization.strip()).first()
+        if org is not None:
+            return normalized_type, org.icon_id
+    return normalized_type, None
 
 
 def _hydrate_nested_positions(db: Session, account: Account) -> tuple[list, list, list]:
@@ -133,6 +151,7 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
     return AccountSchema(
         id=account.id,
         user_id=account.user_id,
+        rank=account.rank,
         account_number=account.account_number,
         name=account.name,
         type=account.type,
@@ -153,7 +172,8 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         usd_balance_cents=account.usd_balance_cents,
         retirement_account_type=account.retirement_account_type,
         payment_amount_cents=account.payment_amount_cents,
-        date_opened=account.date_opened,
+        icon_id=account.icon_id,
+        icon_type=_coerce_icon_type(account.icon_type),
         last_update=account.last_update,
         stock_positions=[
             PositionStockSchema(stock_id=position.stock_id, quantity=position.quantity)
@@ -171,7 +191,6 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
             for position in cash_bills
         ],
         created_at=account.created_at,
-        updated_at=account.updated_at,
     )
 
 
@@ -224,7 +243,7 @@ def get_accounts(
     accounts = (
         db.query(Account)
         .filter(Account.user_id == current_user.id)
-        .order_by(Account.created_at.desc())
+        .order_by(Account.rank.desc(), Account.created_at.desc())
         .all()
     )
     return [_serialize_account(db, account) for account in accounts]
@@ -253,14 +272,31 @@ def create_account(
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
     _validate_account_type(payload.type)
+    _validate_account_number(payload.account_number)
+    _validate_required_identity_fields(payload.name, payload.organization)
+    _validate_icon_type(payload.icon_type)
+    _validate_recurring_period(payload.fee_period)
     _validate_type_requirements(payload)
+
+    max_rank = (
+        db.query(func.max(Account.rank))
+        .filter(Account.user_id == current_user.id)
+        .scalar()
+    )
+    icon_type, effective_icon_id = _normalize_icon_selection(
+        payload.icon_type,
+        payload.icon_id,
+        payload.organization,
+        db,
+    )
 
     account = Account(
         user_id=current_user.id,
-        account_number=payload.account_number,
-        name=payload.name,
+        rank=(max_rank or 0) + 1,
+        account_number=payload.account_number.strip(),
+        name=payload.name.strip(),
         type=payload.type,
-        organization=payload.organization,
+        organization=payload.organization.strip() if payload.organization else None,
         url=payload.url,
         notes=payload.notes,
         balance_cents=payload.balance_cents,
@@ -277,8 +313,10 @@ def create_account(
         usd_balance_cents=payload.usd_balance_cents,
         retirement_account_type=payload.retirement_account_type,
         payment_amount_cents=payload.payment_amount_cents,
-        date_opened=payload.date_opened,
-        last_update=payload.last_update,
+        icon_id=effective_icon_id,
+        icon_type=icon_type,
+        created_at=datetime.utcnow(),
+        last_update=datetime.utcnow(),
     )
     db.add(account)
     db.flush()
@@ -308,6 +346,27 @@ def create_account(
     return _serialize_account(db, account)
 
 
+@router.put("/accounts/{account_id}/rank", response_model=AccountSchema)
+def set_account_rank(
+    account_id: UUID,
+    payload: AccountRankUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account.rank = payload.rank
+    db.commit()
+    db.refresh(account)
+    return _serialize_account(db, account)
+
+
 @router.put("/accounts/{account_id}", response_model=AccountSchema)
 def update_account(
     account_id: UUID,
@@ -326,6 +385,17 @@ def update_account(
     data = payload.model_dump(exclude_unset=True)
     account_type = data.get("type", account.type)
     _validate_account_type(account_type)
+    if "icon_type" in data:
+        _validate_icon_type(data["icon_type"])
+    if "account_number" in data:
+        _validate_account_number(data["account_number"])
+    if "fee_period" in data:
+        _validate_recurring_period(data["fee_period"])
+    if "name" in data or "organization" in data:
+        _validate_required_identity_fields(
+            data.get("name", account.name),
+            data.get("organization", account.organization),
+        )
 
     existing_stock_positions, existing_crypto_positions, existing_cash_bills = (
         _hydrate_nested_positions(db, account)
@@ -355,8 +425,8 @@ def update_account(
         payment_amount_cents=data.get(
             "payment_amount_cents", account.payment_amount_cents
         ),
-        date_opened=data.get("date_opened", account.date_opened),
-        last_update=data.get("last_update", account.last_update),
+        icon_id=data.get("icon_id", account.icon_id),
+        icon_type=data.get("icon_type", account.icon_type),
         stock_positions=payload.stock_positions
         if payload.stock_positions is not None
         else [
@@ -379,6 +449,14 @@ def update_account(
             for position in existing_cash_bills
         ],
     )
+    normalized_icon_type, normalized_icon_id = _normalize_icon_selection(
+        merged_payload.icon_type,
+        merged_payload.icon_id,
+        merged_payload.organization,
+        db,
+    )
+    merged_payload.icon_type = normalized_icon_type
+    merged_payload.icon_id = normalized_icon_id
     _validate_type_requirements(merged_payload)
 
     if payload.stock_positions is not None and payload.stock_positions:
@@ -414,13 +492,19 @@ def update_account(
         "usd_balance_cents",
         "retirement_account_type",
         "payment_amount_cents",
-        "date_opened",
-        "last_update",
+        "icon_id",
+        "icon_type",
     ]:
         if field in data:
-            setattr(account, field, data[field])
+            value = data[field]
+            if field in {"account_number", "name", "organization"} and isinstance(
+                value, str
+            ):
+                value = value.strip()
+            setattr(account, field, value)
 
-    account.updated_at = datetime.utcnow()
+    account.icon_type = merged_payload.icon_type
+    account.icon_id = merged_payload.icon_id
 
     _replace_nested_positions(
         db,
@@ -430,6 +514,241 @@ def update_account(
         payload.cash_bills,
     )
 
+    db.commit()
+    db.refresh(account)
+    return _serialize_account(db, account)
+
+
+@router.post("/icons", response_model=IconUploadResponseSchema)
+async def upload_icon(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> IconUploadResponseSchema:
+    _ = current_user
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Icon file is empty")
+    try:
+        png_data = normalize_icon_png(raw)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail="Invalid image file") from exc
+    icon_hash = digest_icon(png_data)
+    existing = db.query(IconAsset).filter_by(hash=icon_hash).first()
+    if existing is not None:
+        return IconUploadResponseSchema(id=existing.id, hash=existing.hash)
+
+    icon = IconAsset(
+        hash=icon_hash, png_data=png_data, created_by_user_id=current_user.id
+    )
+    db.add(icon)
+    db.commit()
+    db.refresh(icon)
+    return IconUploadResponseSchema(id=icon.id, hash=icon.hash)
+
+
+@router.get("/icons/lettered/{organization_name}")
+def get_lettered_icon(
+    organization_name: str,
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    seed = organization_name.strip() or "Organization"
+    png_data = generate_algorithmic_icon(variant="initials", organization_name=seed)
+    return Response(content=png_data, media_type="image/png")
+
+
+@router.get("/icons/gravatar/{organization_name}")
+def get_gravatar_style_icon(
+    organization_name: str,
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    seed = organization_name.strip() or "Organization"
+    png_data = generate_algorithmic_icon(variant="identicon", organization_name=seed)
+    return Response(content=png_data, media_type="image/png")
+
+
+@router.get("/icons", response_model=list[IconListItemSchema])
+def list_icons(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[IconListItemSchema]:
+    default_icon_ids = {
+        row[0]
+        for row in db.query(Organization.icon_id)
+        .filter(Organization.is_default.is_(True), Organization.icon_id.isnot(None))
+        .all()
+    }
+    generic_default_icon_ids = {
+        row[0]
+        for row in db.query(DefaultIcon.icon_id)
+        .filter(DefaultIcon.icon_id.isnot(None))
+        .all()
+    }
+    all_default_icon_ids = default_icon_ids | generic_default_icon_ids
+    icons = (
+        db.query(IconAsset)
+        .filter(
+            (IconAsset.created_by_user_id == current_user.id)
+            | (IconAsset.id.in_(all_default_icon_ids))
+        )
+        .order_by(IconAsset.created_at.desc())
+        .all()
+    )
+    return [
+        IconListItemSchema(
+            id=icon.id,
+            hash=icon.hash,
+            is_default=icon.id in all_default_icon_ids,
+            created_by_me=icon.created_by_user_id == current_user.id,
+        )
+        for icon in icons
+    ]
+
+
+@router.get("/default-icons", response_model=list[DefaultIconSchema])
+def list_default_icons(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[DefaultIconSchema]:
+    _ = current_user
+    rows = db.query(DefaultIcon).order_by(DefaultIcon.label.asc()).all()
+    return [
+        DefaultIconSchema(key=row.key, label=row.label, icon_id=row.icon_id)
+        for row in rows
+    ]
+
+
+@router.get("/icons/{icon_id}")
+def get_icon(
+    icon_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    icon = db.get(IconAsset, icon_id)
+    if icon is None:
+        raise HTTPException(status_code=404, detail="Icon not found")
+    is_default_org_icon = (
+        db.query(Organization.id)
+        .filter(Organization.icon_id == icon_id, Organization.is_default.is_(True))
+        .first()
+        is not None
+    )
+    is_default_generic_icon = (
+        db.query(DefaultIcon.id).filter(DefaultIcon.icon_id == icon_id).first()
+        is not None
+    )
+    is_owned = icon.created_by_user_id == current_user.id
+    is_referenced_by_user = (
+        db.query(Account.id)
+        .filter(Account.user_id == current_user.id, Account.icon_id == icon_id)
+        .first()
+        is not None
+    )
+    if not (
+        is_default_org_icon
+        or is_default_generic_icon
+        or is_owned
+        or is_referenced_by_user
+    ):
+        raise HTTPException(status_code=404, detail="Icon not found")
+    return Response(content=icon.png_data, media_type="image/png")
+
+
+@router.delete("/icons/{icon_id}", status_code=204)
+def delete_icon(
+    icon_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    icon = db.get(IconAsset, icon_id)
+    if icon is None or icon.created_by_user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Icon not found")
+    db.delete(icon)
+    db.commit()
+    return None
+
+
+@router.get("/organizations", response_model=list[OrganizationSuggestionSchema])
+def list_organizations(
+    query: str = Query(default="", max_length=120),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[OrganizationSuggestionSchema]:
+    needle = query.strip().lower()
+    default_rows = db.query(Organization).order_by(Organization.name.asc()).all()
+    suggestions: dict[str, OrganizationSuggestionSchema] = {}
+
+    for row in default_rows:
+        if needle and needle not in row.name.lower():
+            continue
+        suggestions[row.name.lower()] = OrganizationSuggestionSchema(
+            name=row.name,
+            icon_id=row.icon_id,
+            is_default=row.is_default,
+        )
+
+    account_rows = (
+        db.query(Account.organization, Account.icon_id, Account.created_at)
+        .filter(Account.user_id == current_user.id, Account.organization.isnot(None))
+        .order_by(Account.created_at.desc())
+        .all()
+    )
+    for organization, icon_id, _ in account_rows:
+        if organization is None:
+            continue
+        name = organization.strip()
+        if not name:
+            continue
+        if needle and needle not in name.lower():
+            continue
+        key = name.lower()
+        if key in suggestions:
+            if suggestions[key].icon_id is None and icon_id is not None:
+                suggestions[key].icon_id = icon_id
+            continue
+        suggestions[key] = OrganizationSuggestionSchema(
+            name=name,
+            icon_id=icon_id,
+            is_default=False,
+        )
+
+    return sorted(suggestions.values(), key=lambda item: item.name.lower())
+
+
+@router.put("/accounts/{account_id}/value", response_model=AccountSchema)
+def update_account_value(
+    account_id: UUID,
+    payload: AccountValueUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No value updates provided")
+
+    if "balance_cents" in data:
+        account.balance_cents = data["balance_cents"]
+    if "usd_balance_cents" in data:
+        account.usd_balance_cents = data["usd_balance_cents"]
+
+    _replace_nested_positions(
+        db,
+        account_id,
+        payload.stock_positions,
+        payload.crypto_positions,
+        None,
+    )
+    account.last_update = datetime.utcnow()
     db.commit()
     db.refresh(account)
     return _serialize_account(db, account)

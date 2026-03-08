@@ -40,14 +40,23 @@ export const request = {
   },
   post: <T = unknown>(url: string, data?: unknown, config?: RequestConfig) => {
     const { suppressError, ...axiosConfig } = config || {}
+    if (typeof FormData !== 'undefined' && data instanceof FormData) {
+      axiosConfig.headers = { ...(axiosConfig.headers || {}), 'Content-Type': undefined }
+    }
     return handleRequest<T>(instance.post(url, data, axiosConfig), suppressError)
   },
   put: <T = unknown>(url: string, data?: unknown, config?: RequestConfig) => {
     const { suppressError, ...axiosConfig } = config || {}
+    if (typeof FormData !== 'undefined' && data instanceof FormData) {
+      axiosConfig.headers = { ...(axiosConfig.headers || {}), 'Content-Type': undefined }
+    }
     return handleRequest<T>(instance.put(url, data, axiosConfig), suppressError)
   },
   patch: <T = unknown>(url: string, data?: unknown, config?: RequestConfig) => {
     const { suppressError, ...axiosConfig } = config || {}
+    if (typeof FormData !== 'undefined' && data instanceof FormData) {
+      axiosConfig.headers = { ...(axiosConfig.headers || {}), 'Content-Type': undefined }
+    }
     return handleRequest<T>(instance.patch(url, data, axiosConfig), suppressError)
   },
   delete: <T = unknown>(url: string, config?: RequestConfig) => {

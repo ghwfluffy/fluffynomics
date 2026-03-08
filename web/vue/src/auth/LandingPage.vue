@@ -9,40 +9,64 @@
       </p>
     </div>
 
-    <v-card class="auth-card" elevation="8">
-      <v-tabs v-model="mode" color="primary" grow>
-        <v-tab value="login">Login</v-tab>
-        <v-tab value="register">Register</v-tab>
-      </v-tabs>
+    <section class="auth-panel cds--tile">
+      <div class="tab-row" role="tablist" aria-label="Authentication mode">
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn--active': mode === 'login' }"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'login'"
+          @click="mode = 'login'"
+        >
+          Login
+        </button>
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn--active': mode === 'register' }"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'register'"
+          @click="mode = 'register'"
+        >
+          Register
+        </button>
+      </div>
 
-      <v-card-text>
-        <v-form v-if="mode === 'login'" @submit.prevent="submitLogin">
-          <v-text-field v-model="loginForm.username" label="Username" required />
-          <v-text-field
-            v-model="loginForm.password"
-            label="Password"
-            type="password"
-            required
-          />
-          <v-btn type="submit" block color="primary" class="mt-2">Sign In</v-btn>
-        </v-form>
+      <form v-if="mode === 'login'" class="form-grid" @submit.prevent="submitLogin">
+        <div class="cds--form-item">
+          <label for="login-username" class="cds--label">Username</label>
+          <input id="login-username" v-model="loginForm.username" class="cds--text-input" required />
+        </div>
+        <div class="cds--form-item">
+          <label for="login-password" class="cds--label">Password</label>
+          <input id="login-password" v-model="loginForm.password" class="cds--text-input" type="password" required />
+        </div>
+        <button type="submit" class="cds--btn cds--btn--primary submit-btn">Sign In</button>
+      </form>
 
-        <v-form v-else @submit.prevent="submitRegister">
-          <v-text-field v-model="registerForm.username" label="Username" required />
-          <v-text-field
+      <form v-else class="form-grid" @submit.prevent="submitRegister">
+        <div class="cds--form-item">
+          <label for="register-username" class="cds--label">Username</label>
+          <input id="register-username" v-model="registerForm.username" class="cds--text-input" required />
+        </div>
+        <div class="cds--form-item">
+          <label for="register-password" class="cds--label">Password</label>
+          <input
+            id="register-password"
             v-model="registerForm.password"
-            label="Password"
+            class="cds--text-input"
             type="password"
             required
           />
-          <label class="example-checkbox">
-            <input v-model="registerForm.addExampleData" type="checkbox" />
-            <span>Add example data</span>
-          </label>
-          <v-btn type="submit" block color="primary" class="mt-2">Create Account</v-btn>
-        </v-form>
-      </v-card-text>
-    </v-card>
+        </div>
+        <label class="checkbox-row">
+          <input v-model="registerForm.addExampleData" class="checkbox-input" type="checkbox" />
+          <span>Add example data</span>
+        </label>
+        <button type="submit" class="cds--btn cds--btn--primary submit-btn">Create Account</button>
+      </form>
+    </section>
   </div>
 </template>
 
@@ -73,11 +97,7 @@ const submitLogin = async () => {
 const submitRegister = async () => {
   const username = registerForm.value.username
   const password = registerForm.value.password
-  await register(
-    username,
-    password,
-    registerForm.value.addExampleData,
-  )
+  await register(username, password, registerForm.value.addExampleData)
   await login(username, password)
   await router.push('/app')
   mode.value = 'login'
@@ -128,27 +148,57 @@ const submitRegister = async () => {
   box-shadow: 0 16px 34px -18px rgba(15, 23, 42, 0.45);
 }
 
-.auth-card {
+.auth-panel {
   align-self: center;
   max-width: 460px;
   width: 100%;
   margin-inline: auto;
-  background-image: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 1rem;
 }
 
-.example-checkbox {
-  display: inline-flex;
+.tab-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+}
+
+.tab-btn {
+  border: 0;
+  background: transparent;
+  padding: 0.75rem;
+  cursor: pointer;
+  color: var(--cds-text-secondary);
+}
+
+.tab-btn--active {
+  color: var(--cds-text-primary);
+  box-shadow: inset 0 -2px 0 var(--cds-link-primary);
+  font-weight: 600;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.submit-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.checkbox-row {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-  color: #334155;
-  font-size: 0.95rem;
+  gap: 0.6rem;
+  color: var(--cds-text-secondary);
 }
 
-.example-checkbox input[type='checkbox'] {
+.checkbox-input {
   width: 16px;
   height: 16px;
-  accent-color: #0f766e;
+  margin: 0;
+  accent-color: #0f62fe;
 }
 
 @media (max-width: 960px) {

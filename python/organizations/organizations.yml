@@ -1,0 +1,69 @@
+organizations:
+- name: Security Service
+  icon: security_service.png
+- name: RBFCU
+  icon: rbfcu.png
+- name: JPMorgan Chase
+  icon: jpmorgan_chase.png
+- name: Bank of America
+  icon: bank_of_america.png
+- name: Wells Fargo
+  icon: wells_fargo.png
+- name: Citibank
+  icon: citibank.png
+- name: Capital One
+  icon: capital_one.png
+- name: U.S. Bank
+  icon: us_bank.png
+- name: Deutsche Bank
+  icon: deutsche_bank.png
+- name: Acorns
+  icon: acorns.png
+- name: Robinhood
+  icon: robinhood.png
+- name: Fidelity
+  icon: fidelity.png
+- name: Charles Schwab
+  icon: charles_schwab.png
+- name: Vanguard
+  icon: vanguard.png
+- name: E*TRADE
+  icon: etrade.png
+- name: Webull
+  icon: webull.png
+- name: SoFi
+  icon: sofi.png
+- name: Public.com
+  icon: public_com.png
+- name: Coinbase
+  icon: coinbase.png
+- name: Kraken
+  icon: kraken.png
+- name: Binance
+  icon: binance.png
+- name: Crypto.com
+  icon: crypto_com.png
+- name: PayPal
+  icon: paypal.png
+- name: Venmo
+  icon: venmo.png
+- name: Cash App
+  icon: cash_app.png
+- name: Stripe
+  icon: stripe.png
+- name: Square
+  icon: square.png
+- name: Betterment
+  icon: betterment.png
+- name: Wealthfront
+  icon: wealthfront.png
+- name: Empower
+  icon: empower.png
+- name: American Express
+  icon: american_express.png
+- name: Discover
+  icon: discover.png
+- name: Visa
+  icon: visa.png
+- name: Mastercard
+  icon: mastercard.png

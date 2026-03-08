@@ -1,3 +1,5 @@
+[ ] Organization icons
+[ ] Mobile site
 [ ] dashboard widgets
 [ ] Design
 [ ] Encrypt at rest with PBE

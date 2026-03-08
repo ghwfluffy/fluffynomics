@@ -1,16 +1,3 @@
-account attrs:
-    - date opened
-    - last update
-
-Need a concept of a "Recurring Period":
-    Examples:
-    - Monthly on the 1st
-    - Monthly on the last day of the month
-    - Twice monthly on the 1st and 15th
-    - Yearly on January 1st
-    - Daily on MTWRF
-    - Weekly on Monday
-
 Need to be able to CRUD accounts:
 - Different account types with different attributes each
     - All accounts have:

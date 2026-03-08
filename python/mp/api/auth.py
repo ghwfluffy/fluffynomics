@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -26,10 +27,21 @@ SESSION_COOKIE_NAME = "mp_session"
 DEFAULT_SESSION_SECONDS = 24 * 60 * 60
 MAX_SESSION_SECONDS = 30 * 24 * 60 * 60
 _fernet: Fernet | None = None
+logger = logging.getLogger(__name__)
 
 
 def initialize_session_signing_key() -> None:
     global _fernet
+    configured_secret = os.getenv("SESSION_KEY", "")
+    if configured_secret:
+        if configured_secret == "changeme":
+            logger.warning(
+                "SESSION_KEY is set to the default 'changeme'. "
+                "Use a strong secret outside local development."
+            )
+        digest = hashlib.sha256(configured_secret.encode("utf-8")).digest()
+        _fernet = Fernet(base64.urlsafe_b64encode(digest))
+        return
     _fernet = Fernet(Fernet.generate_key())
 
 

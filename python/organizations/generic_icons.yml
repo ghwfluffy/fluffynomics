@@ -1,0 +1,37 @@
+generic_icons:
+- key: bank
+  label: Bank
+  icon: generic_bank.png
+- key: brokerage
+  label: Brokerage
+  icon: generic_brokerage.png
+- key: credit_card
+  label: Credit Card
+  icon: generic_credit_card.png
+- key: savings
+  label: Savings
+  icon: generic_savings.png
+- key: cash
+  label: Cash
+  icon: generic_cash.png
+- key: investment
+  label: Investment
+  icon: generic_investment.png
+- key: crypto
+  label: Crypto
+  icon: generic_crypto.png
+- key: retirement
+  label: Retirement
+  icon: generic_retirement.png
+- key: loan
+  label: Loan
+  icon: generic_loan.png
+- key: mortgage
+  label: Mortgage
+  icon: generic_mortgage.png
+- key: safe
+  label: Safe
+  icon: generic_safe.png
+- key: treasury_bond
+  label: Treasury bond
+  icon: generic_treasury_bond.png

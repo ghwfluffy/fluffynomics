@@ -1,10 +1,23 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from enum import Enum
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    LargeBinary,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -42,15 +55,18 @@ class Account(Base):
     usd_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retirement_account_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payment_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    date_opened: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    icon_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
+    )
+    icon_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'Icon'")
+    )
+    rank: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
     last_update: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
@@ -71,6 +87,54 @@ class Stock(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class IconAsset(Base):
+    __tablename__ = "icon_assets"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    png_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    icon_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
+    )
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class DefaultIcon(Base):
+    __tablename__ = "default_icons"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    icon_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
@@ -152,8 +216,8 @@ class AccountBaseSchema(BaseModel):
     usd_balance_cents: Optional[int] = None
     retirement_account_type: Optional[str] = None
     payment_amount_cents: Optional[int] = None
-    date_opened: Optional[date] = None
-    last_update: Optional[datetime] = None
+    icon_id: Optional[UUID] = None
+    icon_type: Literal["Letters", "Gravatar", "Icon"] = "Icon"
 
     stock_positions: list[PositionStockSchema] = []
     crypto_positions: list[PositionCryptoSchema] = []
@@ -185,20 +249,62 @@ class AccountUpdateSchema(BaseModel):
     usd_balance_cents: Optional[int] = None
     retirement_account_type: Optional[str] = None
     payment_amount_cents: Optional[int] = None
-    date_opened: Optional[date] = None
-    last_update: Optional[datetime] = None
+    icon_id: Optional[UUID] = None
+    icon_type: Optional[Literal["Letters", "Gravatar", "Icon"]] = None
     stock_positions: Optional[list[PositionStockSchema]] = None
     crypto_positions: Optional[list[PositionCryptoSchema]] = None
     cash_bills: Optional[list[CashBillSchema]] = None
 
 
+class AccountValueUpdateSchema(BaseModel):
+    balance_cents: Optional[int] = None
+    usd_balance_cents: Optional[int] = None
+    stock_positions: Optional[list[PositionStockSchema]] = None
+    crypto_positions: Optional[list[PositionCryptoSchema]] = None
+
+
+class AccountRankUpdateSchema(BaseModel):
+    rank: float
+
+
+class IconUploadResponseSchema(BaseModel):
+    id: UUID
+    hash: str
+
+
+class IconListItemSchema(BaseModel):
+    id: UUID
+    hash: str
+    is_default: bool
+    created_by_me: bool
+
+
+class OrganizationSuggestionSchema(BaseModel):
+    name: str
+    icon_id: Optional[UUID] = None
+    is_default: bool = False
+
+
+class DefaultIconSchema(BaseModel):
+    key: str
+    label: str
+    icon_id: UUID
+
+
 class AccountSchema(AccountBaseSchema):
     id: UUID
     user_id: UUID
+    rank: float
     created_at: datetime
-    updated_at: datetime
+    last_update: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AccountIconType(str, Enum):
+    LETTERS = "Letters"
+    GRAVATAR = "Gravatar"
+    ICON = "Icon"
 
 
 class StockBaseSchema(BaseModel):
