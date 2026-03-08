@@ -159,7 +159,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "last_update": fresh,
         },
     )
-    _ensure_account(
+    emergency_savings = _ensure_account(
         db,
         user,
         "Emergency Savings",
@@ -553,8 +553,8 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "account_number": "XFER-2002",
             "icon_type": "Letters",
             "rank": 1,
-            "linked_account_id": checking.id,
-            "source_account_id": cash.id,
+            "linked_account_id": emergency_savings.id,
+            "source_account_id": checking.id,
             "last_payment_date": date.today() - timedelta(days=30),
             "payment_period": '{"kind":"monthly_day","day":1}',
             "payment_day": 1,

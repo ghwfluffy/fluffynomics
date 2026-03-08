@@ -3,6 +3,10 @@
     <section class="cds--tile widgets">
       <h2>Insights Widgets</h2>
       <p>Placeholder area for trend charts, cashflow graphs, and forecasting widgets.</p>
+      <div class="forecast-row">
+        <BankField v-model="forecastDate" label="Set Forecast Date" type="date" />
+        <button class="cds--btn cds--btn--ghost" type="button" @click="clearForecastDate">Use Today</button>
+      </div>
       <div class="widget-grid">
         <div class="widget-slot">Net Worth Trend</div>
         <div class="widget-slot">Budget vs Actual</div>
@@ -467,6 +471,7 @@
       role="tabpanel"
       aria-labelledby="tab-contracts"
       :accounts="accounts"
+      :forecast-date="forecastDate"
     />
   </div>
 </template>
@@ -583,6 +588,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
 
 const accounts = ref<AccountPayload[]>([])
 const activeTab = ref<'accounts' | 'contracts'>('accounts')
+const forecastDate = ref<string>('')
 const organizations = ref<OrganizationSuggestion[]>([])
 const iconChoices = ref<IconListItem[]>([])
 const createDialog = ref(false)
@@ -1012,7 +1018,8 @@ const lastUpdateTone = (account: AccountPayload) => {
 }
 
 const loadAccounts = async () => {
-  accounts.value = await request.get<AccountPayload[]>('/accounts')
+  const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
+  accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
 }
 
 const loadOrganizations = async () => {
@@ -1448,6 +1455,11 @@ const onWindowClick = (event: MouseEvent) => {
   }
 }
 
+const clearForecastDate = async () => {
+  forecastDate.value = ''
+  await loadAccounts()
+}
+
 onMounted(loadAccounts)
 onMounted(loadOrganizations)
 onMounted(loadIcons)
@@ -1457,6 +1469,13 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('click', onWindowClick)
 })
+
+watch(
+  () => forecastDate.value,
+  async () => {
+    await loadAccounts()
+  },
+)
 
 watch(
   () => createForm.value.organization,
@@ -1510,6 +1529,14 @@ watch(
 .widgets p {
   margin: 0 0 0.8rem;
   color: var(--cds-text-secondary);
+}
+
+.forecast-row {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+  max-width: 460px;
 }
 
 .widget-grid {

@@ -1,5 +1,4 @@
-[ ] Add notes to accounts
-[ ] Table view
+[x] Add notes to accounts
 [\] Design
     [x] Accounts
     [x] Contracts
@@ -7,23 +6,27 @@
         [S] Filters
         [x] Expiration
         [x] Grouping
-    [ ] Automatic asset updates from contracts
+    [x] Automatic asset updates from contracts
     [ ] Expenses/Budget
-    [ ] Assets
-    [ ] Receivables
-    [ ] Credit score
-    [ ] Money visual / forecast
+[ ] Table view
+[ ] dashboard widgets
+Security
+[ ] Encrypt account info at rest with PBE
+[ ] Database backups
+[ ] Verify security of password auth
+[ ] Ability to disable registration (or admin add registration codes)
+Prod deployment
+[ ] Domain
+[ ] Site
+[ ] Lets encrypt w/ ACME
+Nice to have
 [ ] Pull crypto/stock prices automatically
     [ ] tastytrade integration
     [ ] coinbase integration
-[ ] letsencrypt TLS w/ ACME
 [ ] upcoming payment alerts (UI)
 [ ] upcoming payment alerts (SMS)
 [ ] notifications: tasks to review
 [ ] Mobile site
-[ ] dashboard widgets
-[ ] Encrypt at rest with PBE
-[ ] Database backups
-[ ] Verify security of password auth
-[ ] Ability to disable registration (or admin add registration codes)
-[ ] Prod deployment
+[ ] Assets
+[ ] Receivables
+[ ] Credit score

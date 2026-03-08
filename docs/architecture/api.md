@@ -104,12 +104,20 @@ Stocks are user-scoped. DB uniqueness is per user (`user_id, ticker, exchange`).
 Defined in `python/mp/api/contracts.py`.
 
 - `GET /contracts`
+  - supports optional `as_of_date=YYYY-MM-DD` for simulation projection
 - `POST /contracts`
 - `PUT /contracts/{contract_id}`
   - contract `type` is immutable after create
 - `PUT /contracts/{contract_id}/rank`
   - supports tile reorder behavior in category sections
 - `DELETE /contracts/{contract_id}`
+- `POST /contracts/run`
+  - scheduler/manual engine endpoint
+  - supports:
+    - `dry_run` (default `true`)
+    - `as_of_date` or `through_date`
+  - dry-run returns planned postings without mutating balances
+  - apply mode writes postings, updates balances, and advances `last_payment_date`
 
 Validation + ownership rules:
 - `name`, `organization`, and `linked_account_id` are required.
@@ -122,12 +130,19 @@ Validation + ownership rules:
 - icon selection can infer default `icon_id` from matching organization if icon type is `Icon`.
 - `expiration_date` defaults to `2099-01-01` when omitted.
 
+Automatic execution model:
+- Contract posting is idempotent using `contract_postings` unique `(contract_id, effective_date)`.
+- Scheduler and apply runs reuse the same engine (`mp/contracts/engine.py`).
+- Early-pay handling is applied when deriving first upcoming due date:
+  - if `last_payment_date` falls between expected prior due and upcoming due, skip to next-next cycle.
+
 Update-modal ownership:
 - UI intentionally edits `last_payment_date` and `expiration_date` through contract `Update` flow (not the full editor), but API continues to accept either update path.
 
 ## Ownership + Access Control
 
 - Accounts/stocks are always filtered by authenticated `user_id`.
+- Contract reads/writes/runs are always filtered by authenticated `user_id`.
 - Cross-user access is denied server-side even if IDs are known.
 
 ## Important Timestamp Semantics

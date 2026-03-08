@@ -2,11 +2,12 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from mp.api.auth import get_current_user
+from mp.contracts.engine import run_contract_simulation
 from mp.db import get_db
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
@@ -156,6 +157,7 @@ def _owned_account(
 
 @router.get("/contracts", response_model=list[ContractSchema])
 def get_contracts(
+    as_of_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[ContractSchema]:
@@ -167,7 +169,16 @@ def get_contracts(
         )
         .all()
     )
-    return [_serialize_contract(row) for row in rows]
+    serialized = [_serialize_contract(row) for row in rows]
+    if as_of_date is not None:
+        simulation = run_contract_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        projected = simulation.projected_last_payment
+        for item in serialized:
+            if item.id in projected:
+                item.last_payment_date = projected[item.id]
+    return serialized
 
 
 @router.post("/contracts", response_model=ContractSchema)
@@ -331,6 +342,41 @@ def set_contract_rank(
     db.commit()
     db.refresh(contract)
     return _serialize_contract(contract)
+
+
+@router.post("/contracts/run")
+def run_contracts(
+    dry_run: bool = Query(default=True),
+    as_of_date: date | None = Query(default=None),
+    through_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    target_date = through_date or as_of_date or date.today()
+    simulation = run_contract_simulation(
+        db,
+        current_user.id,
+        target_date,
+        apply=not dry_run,
+        lock=not dry_run,
+    )
+    if not dry_run:
+        db.commit()
+    return {
+        "dry_run": dry_run,
+        "as_of_date": target_date.isoformat(),
+        "count": len(simulation.postings),
+        "postings": [
+            {
+                "contract_id": str(item.contract_id),
+                "effective_date": item.effective_date.isoformat(),
+                "delta_cents": item.delta_cents,
+                "status": item.status,
+                "reason": item.reason,
+            }
+            for item in simulation.postings
+        ],
+    }
 
 
 @router.delete("/contracts/{contract_id}", status_code=204)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from mp.db import get_db
 from mp.api.auth import get_current_user
+from mp.contracts.engine import run_contract_simulation
 from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import (
@@ -419,6 +420,7 @@ def _propagate_stock_prices_for_user(
 
 @router.get("/accounts", response_model=list[AccountSchema])
 def get_accounts(
+    as_of_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AccountSchema]:
@@ -428,12 +430,26 @@ def get_accounts(
         .order_by(Account.rank.desc(), Account.created_at.desc())
         .all()
     )
-    return [_serialize_account(db, account) for account in accounts]
+    serialized = [_serialize_account(db, account) for account in accounts]
+    if as_of_date is not None:
+        simulation = run_contract_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        for item in serialized:
+            delta = simulation.account_deltas.get(item.id, 0)
+            if not delta:
+                continue
+            if item.type == "crypto_exchange":
+                item.usd_balance_cents = int(item.usd_balance_cents or 0) + int(delta)
+            else:
+                item.balance_cents = int(item.balance_cents or 0) + int(delta)
+    return serialized
 
 
 @router.get("/accounts/{account_id}", response_model=AccountSchema)
 def get_account(
     account_id: UUID,
+    as_of_date: date | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
@@ -444,7 +460,22 @@ def get_account(
     )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
-    return _serialize_account(db, account)
+    serialized = _serialize_account(db, account)
+    if as_of_date is not None:
+        simulation = run_contract_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        delta = simulation.account_deltas.get(serialized.id, 0)
+        if delta:
+            if serialized.type == "crypto_exchange":
+                serialized.usd_balance_cents = int(
+                    serialized.usd_balance_cents or 0
+                ) + int(delta)
+            else:
+                serialized.balance_cents = int(serialized.balance_cents or 0) + int(
+                    delta
+                )
+    return serialized
 
 
 @router.get(

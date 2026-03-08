@@ -71,6 +71,30 @@ class Contract(Base):
     )
 
 
+class ContractPosting(Base):
+    __tablename__ = "contract_postings"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    contract_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("contracts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    delta_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    applied_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ContractBaseSchema(BaseModel):
     name: str
     type: str

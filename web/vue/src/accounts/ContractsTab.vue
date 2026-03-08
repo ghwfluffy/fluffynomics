@@ -268,7 +268,7 @@ interface Section {
   contracts: ContractPayload[]
 }
 
-const props = defineProps<{ accounts: AccountSummary[] }>()
+const props = defineProps<{ accounts: AccountSummary[]; forecastDate?: string }>()
 
 const PRESET_CATEGORIES = ['Living', 'Entertainment', 'Health', 'Digital', 'Financial', 'Work', 'Family']
 
@@ -692,7 +692,8 @@ const lastUpdateTone = (raw?: string) => {
 }
 
 const loadContracts = async () => {
-  contracts.value = await request.get<ContractPayload[]>('/contracts')
+  const params = props.forecastDate ? { as_of_date: props.forecastDate } : undefined
+  contracts.value = await request.get<ContractPayload[]>('/contracts', { params })
 }
 const loadOrganizations = async () => {
   organizations.value = await request.get<OrganizationSuggestion[]>('/organizations')
@@ -982,6 +983,13 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('click', onWindowClick)
 })
+
+watch(
+  () => props.forecastDate,
+  async () => {
+    await loadContracts()
+  },
+)
 
 watch(
   () => contractForm.value.organization,

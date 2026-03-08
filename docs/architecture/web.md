@@ -40,6 +40,14 @@ consistent across the app.
 
 Use `AddTypePickerButton.vue` for right-aligned "Add ..." flows that open a type-selection dropdown from the action button. This is now shared by Accounts and Contracts tabs.
 
+Forecast-date UX:
+- Dashboard widgets include `Set Forecast Date` (`AccountsPage.vue`).
+- When set, frontend sends `as_of_date` in read calls:
+  - `/accounts`
+  - `/contracts`
+- Clearing the date returns to live mode (today / persisted state).
+- This is read-only simulation mode; write endpoints do not use forecast date.
+
 Organization fuzzy search sources organizations from `GET /organizations` (not only local account state) so defaults and known icons are available immediately.
 
 ## Dashboard Interaction Patterns

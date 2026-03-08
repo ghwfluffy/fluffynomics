@@ -71,6 +71,13 @@ Contracts now carry tile-parity fields to match account dashboard interactions:
 Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
 Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
 
+### Contract postings ledger
+
+- `contract_postings` is append-only posting history for automatic contract execution.
+- Key rule: unique `(contract_id, effective_date)` ensures idempotent apply behavior.
+- Posting records store signed `delta_cents` and `applied_at`.
+- Automatic execution updates account balances and advances `contracts.last_payment_date`.
+
 ### User-scoped uniqueness
 
 - Stocks uniqueness is per user:
@@ -92,6 +99,7 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `app_config`
 - `pending_payments`
 - `contracts`
+- `contract_postings`
 
 ## Example Data Contract
 
