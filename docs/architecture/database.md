@@ -56,6 +56,7 @@ Account timestamp semantics are intentionally split:
 - `account_crypto_positions.exchange_rate_cents` stores per-ticker USD exchange rate used for derived crypto account value.
   - update flows propagate same ticker rate across all of a user's crypto holdings.
 - `stocks.last_price_cents` stores user-scoped price metadata for stock tickers.
+- `account_value_history` stores value snapshots (`value_cents`, `recorded_at`) for account history graphs.
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
 
 ### User-scoped uniqueness
@@ -75,6 +76,7 @@ Account timestamp semantics are intentionally split:
 - `account_stock_positions`
 - `account_crypto_positions`
 - `account_cash_denominations`
+- `account_value_history`
 - `app_config`
 - `pending_payments`
 - `contracts`

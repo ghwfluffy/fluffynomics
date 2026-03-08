@@ -41,6 +41,7 @@ In `AccountsPage.vue`:
 - Tile action menu contains:
   - `Edit`
   - `Update`
+  - `History`
   - `Delete`
 - Update flow:
   - opens custom modal
@@ -50,6 +51,10 @@ In `AccountsPage.vue`:
   - cash balance shown on tile is derived from bill quantities
   - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate
   - crypto tile balance is derived from sum(quantity * exchange_rate)
+- History flow:
+  - opens history modal from tile menu
+  - fetches `GET /accounts/{id}/history`
+  - renders value-over-time line chart
 - Delete flow uses custom confirm modal (no browser `alert/confirm`).
 - Account create/edit modal supports icon upload:
   - uploads to `POST /icons`

@@ -117,6 +117,14 @@ CREATE TABLE IF NOT EXISTS account_cash_denominations (
     PRIMARY KEY (account_id, denomination_cents)
 );
 
+CREATE TABLE IF NOT EXISTS account_value_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    value_cents BIGINT NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS pending_payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

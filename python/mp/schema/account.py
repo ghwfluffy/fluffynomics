@@ -187,6 +187,26 @@ class AccountCashDenomination(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class AccountValueHistory(Base):
+    __tablename__ = "account_value_history"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    value_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class PositionStockSchema(BaseModel):
     stock_id: Optional[UUID] = None
     ticker: Optional[str] = None
@@ -317,6 +337,11 @@ class DefaultIconSchema(BaseModel):
     key: str
     label: str
     icon_id: UUID
+
+
+class AccountValueHistorySchema(BaseModel):
+    value_cents: int
+    recorded_at: datetime
 
 
 class AccountSchema(AccountBaseSchema):

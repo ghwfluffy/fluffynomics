@@ -364,15 +364,79 @@
             <div v-if="activeTileMenuId === account.id" class="tile-menu">
               <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
               <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
+              <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
               <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">
                 Delete
               </button>
             </div>
           </div>
         </article>
-      </div>
+    </div>
 
-      <div v-else class="cds--tile empty-state">No accounts yet.</div>
+    <div v-if="historyDialog" class="modal-backdrop">
+      <section class="confirm-card cds--tile confirm-card--wide">
+        <h3>History - {{ historyAccount?.name }}</h3>
+        <div class="history-chart-wrap">
+          <svg viewBox="0 0 760 260" class="history-chart" role="img" aria-label="Account value history">
+            <line x1="50" y1="210" x2="730" y2="210" class="history-axis" />
+            <line x1="50" y1="20" x2="50" y2="210" class="history-axis" />
+            <line
+              v-for="tick in historyYTicks"
+              :key="`y-grid-${tick.value}`"
+              x1="50"
+              :y1="tick.y"
+              x2="730"
+              :y2="tick.y"
+              class="history-grid"
+            />
+            <text
+              v-for="tick in historyYTicks"
+              :key="`y-label-${tick.value}`"
+              x="44"
+              :y="tick.y + 4"
+              class="history-y-label"
+              text-anchor="end"
+            >
+              {{ cents(tick.value) }}
+            </text>
+            <line
+              v-for="tick in historyXTicks"
+              :key="`x-grid-${tick.key}`"
+              :x1="tick.x"
+              y1="20"
+              :x2="tick.x"
+              y2="210"
+              class="history-grid history-grid--vertical"
+            />
+            <text
+              v-for="tick in historyXTicks"
+              :key="`x-label-${tick.key}`"
+              :x="tick.x"
+              y="226"
+              class="history-x-label"
+              text-anchor="middle"
+            >
+              {{ tick.label }}
+            </text>
+            <polyline v-if="historyPolyline" :points="historyPolyline" class="history-line" />
+            <circle
+              v-for="point in historyChartPoints"
+              :key="point.key"
+              :cx="point.x"
+              :cy="point.y"
+              r="3"
+              class="history-dot"
+            />
+          </svg>
+          <div v-if="!historyItems.length" class="history-empty">No history yet.</div>
+        </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" @click="closeHistoryDialog">Close</button>
+        </div>
+      </section>
+    </div>
+
+      <div v-if="!section.accounts.length" class="cds--tile empty-state">No accounts yet.</div>
     </section>
   </div>
 </template>
@@ -469,6 +533,11 @@ interface IconListItem {
   created_by_me: boolean
 }
 
+interface AccountHistoryPoint {
+  value_cents: number
+  recorded_at: string
+}
+
 const makeCreateForm = (): CreateAccountPayload => ({
   account_number: '',
   name: '',
@@ -490,6 +559,9 @@ const deleteDialog = ref(false)
 const pendingDeleteAccountId = ref<string | null>(null)
 const updateDialog = ref(false)
 const updatingAccount = ref<AccountPayload | null>(null)
+const historyDialog = ref(false)
+const historyAccount = ref<AccountPayload | null>(null)
+const historyItems = ref<AccountHistoryPoint[]>([])
 const updateForm = ref({
   amountCents: 0,
   quantity: '0',
@@ -630,6 +702,91 @@ const updateDescription = computed(() => {
     return 'Update stock tickers, quantities, and share prices.'
   }
   return 'Update the quantity for the first crypto position on this account.'
+})
+
+const HISTORY_LEFT = 50
+const HISTORY_TOP = 20
+const HISTORY_WIDTH = 680
+const HISTORY_HEIGHT = 190
+
+const niceCeil = (value: number) => {
+  if (value <= 0) {
+    return 10000
+  }
+  const exponent = Math.floor(Math.log10(value))
+  const magnitude = 10 ** exponent
+  const normalized = value / magnitude
+  const nice =
+    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return nice * magnitude
+}
+
+const historyScale = computed(() => {
+  if (!historyItems.value.length) {
+    return { minValue: 0, maxValue: 10000, minTime: 0, maxTime: 1 }
+  }
+  const values = historyItems.value.map((item) => Math.max(0, item.value_cents || 0))
+  const maxValue = niceCeil(Math.max(...values) * 1.02)
+  const times = historyItems.value
+    .map((item) => new Date(item.recorded_at).getTime())
+    .filter((t) => Number.isFinite(t))
+  const minTime = times.length ? Math.min(...times) : 0
+  const maxTime = times.length ? Math.max(...times) : minTime + 1
+  return { minValue: 0, maxValue, minTime, maxTime: Math.max(maxTime, minTime + 1) }
+})
+
+const historyChartPoints = computed(() => {
+  if (!historyItems.value.length) {
+    return []
+  }
+  const { minValue, maxValue, minTime, maxTime } = historyScale.value
+  const valueSpan = Math.max(1, maxValue - minValue)
+  const timeSpan = Math.max(1, maxTime - minTime)
+  return historyItems.value.map((item, index) => {
+    const ts = new Date(item.recorded_at).getTime()
+    const x = HISTORY_LEFT + ((ts - minTime) / timeSpan) * HISTORY_WIDTH
+    const y = HISTORY_TOP + ((maxValue - item.value_cents) / valueSpan) * HISTORY_HEIGHT
+    return {
+      key: `${item.recorded_at}-${index}`,
+      x,
+      y,
+    }
+  })
+})
+
+const historyPolyline = computed(() => historyChartPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const historyYTicks = computed(() => {
+  const maxValue = historyScale.value.maxValue
+  const ticks = 4
+  return Array.from({ length: ticks + 1 }, (_, idx) => {
+    const value = (idx / ticks) * maxValue
+    const y = HISTORY_TOP + ((maxValue - value) / Math.max(1, maxValue)) * HISTORY_HEIGHT
+    return { value: Math.round(value), y }
+  })
+})
+const historyXTicks = computed(() => {
+  if (!historyItems.value.length) {
+    return []
+  }
+  const start = new Date(historyScale.value.minTime)
+  const end = new Date(historyScale.value.maxTime)
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
+  const result: Array<{ key: string; x: number; label: string }> = []
+  while (cursor <= end) {
+    const ts = cursor.getTime()
+    const x =
+      HISTORY_LEFT +
+      ((ts - historyScale.value.minTime) /
+        Math.max(1, historyScale.value.maxTime - historyScale.value.minTime)) *
+        HISTORY_WIDTH
+    result.push({
+      key: `${cursor.getFullYear()}-${cursor.getMonth() + 1}`,
+      x,
+      label: cursor.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+    })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  return result
 })
 const showLastPaymentDateField = computed(
   () =>
@@ -1095,6 +1252,19 @@ const closeUpdateDialog = () => {
   updatingAccount.value = null
 }
 
+const openHistoryDialog = async (account: AccountPayload) => {
+  activeTileMenuId.value = null
+  historyAccount.value = account
+  historyItems.value = await request.get<AccountHistoryPoint[]>(`/accounts/${account.id}/history`)
+  historyDialog.value = true
+}
+
+const closeHistoryDialog = () => {
+  historyDialog.value = false
+  historyAccount.value = null
+  historyItems.value = []
+}
+
 const isValidQuantity = (value: string) => /^-?\d+(\.\d+)?$/.test(value.trim())
 
 const addCryptoPosition = () => {
@@ -1391,6 +1561,59 @@ watch(
 
 .confirm-card p {
   margin: 0 0 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.history-chart-wrap {
+  border: 1px solid var(--cds-border-subtle-01);
+  background: #fff;
+  min-height: 260px;
+  position: relative;
+  overflow: hidden;
+}
+
+.history-chart {
+  width: 100%;
+  height: 260px;
+  display: block;
+}
+
+.history-axis {
+  stroke: #94a3b8;
+  stroke-width: 1;
+}
+
+.history-grid {
+  stroke: #e2e8f0;
+  stroke-width: 1;
+}
+
+.history-grid--vertical {
+  stroke-dasharray: 2 4;
+}
+
+.history-line {
+  fill: none;
+  stroke: #0f62fe;
+  stroke-width: 2.5;
+}
+
+.history-dot {
+  fill: #0f62fe;
+}
+
+.history-y-label,
+.history-x-label {
+  fill: #64748b;
+  font-size: 10px;
+}
+
+.history-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--cds-text-secondary);
 }
 

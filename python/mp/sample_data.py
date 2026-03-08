@@ -10,6 +10,7 @@ from mp.schema.account import (
     AccountCashDenomination,
     AccountCryptoPosition,
     AccountStockPosition,
+    AccountValueHistory,
     Organization,
     Stock,
 )
@@ -54,7 +55,73 @@ def _ensure_stock(db: Session, user: User, ticker: str, payload: dict) -> Stock:
         stock = Stock(user_id=user.id, ticker=ticker, **payload)
         db.add(stock)
         db.flush()
+    elif payload.get("last_price_cents") is not None:
+        stock.last_price_cents = payload["last_price_cents"]
     return stock
+
+
+def _account_value_cents(db: Session, account: Account) -> int:
+    if account.type == "cash":
+        denoms = (
+            db.query(AccountCashDenomination).filter_by(account_id=account.id).all()
+        )
+        return int(sum(d.denomination_cents * d.quantity for d in denoms))
+    if account.type in {"crypto_wallet", "crypto_exchange"}:
+        crypto_positions = (
+            db.query(AccountCryptoPosition).filter_by(account_id=account.id).all()
+        )
+        total = int(
+            sum(
+                int(round(float(p.quantity) * int(p.exchange_rate_cents or 0)))
+                for p in crypto_positions
+            )
+        )
+        if account.type == "crypto_exchange":
+            total += int(account.usd_balance_cents or 0)
+        return total
+    if account.type == "stocks_account":
+        stock_positions = (
+            db.query(AccountStockPosition).filter_by(account_id=account.id).all()
+        )
+        if not stock_positions:
+            return int(account.balance_cents or 0)
+        stock_ids = [p.stock_id for p in stock_positions]
+        prices = {
+            s.id: int(s.last_price_cents or 0)
+            for s in db.query(Stock).filter(Stock.id.in_(stock_ids)).all()
+        }
+        total = int(
+            sum(
+                int(round(float(p.quantity) * prices.get(p.stock_id, 0)))
+                for p in stock_positions
+            )
+        )
+        return total + int(account.balance_cents or 0)
+    return int(account.balance_cents or 0)
+
+
+def _ensure_history_seed(db: Session, user: User, account: Account) -> None:
+    existing = db.query(AccountValueHistory).filter_by(account_id=account.id).first()
+    if existing is not None:
+        return
+    base_value = _account_value_cents(db, account)
+    if base_value <= 0:
+        base_value = int(account.balance_cents or account.usd_balance_cents or 10000)
+    seed = sum(ord(ch) for ch in account.name) % 17
+    points = 8
+    for idx in range(points):
+        days_ago = (points - idx) * 21
+        drift = (idx - (points // 2)) * 900
+        jitter = ((seed * (idx + 3)) % 11 - 5) * 275
+        value = max(0, base_value + drift + jitter)
+        db.add(
+            AccountValueHistory(
+                account_id=account.id,
+                user_id=user.id,
+                value_cents=value,
+                recorded_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+            )
+        )
 
 
 def ensure_example_data_for_user(db: Session, user: User) -> None:
@@ -315,13 +382,13 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
         db,
         user,
         "SPY",
-        {"name": "SPDR S&P 500 ETF", "exchange": "NYSE"},
+        {"name": "SPDR S&P 500 ETF", "exchange": "NYSE", "last_price_cents": 59500},
     )
     msft = _ensure_stock(
         db,
         user,
         "MSFT",
-        {"name": "Microsoft Corp.", "exchange": "NASDAQ"},
+        {"name": "Microsoft Corp.", "exchange": "NASDAQ", "last_price_cents": 42000},
     )
 
     if (
@@ -363,6 +430,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
                     account_id=crypto_exchange.id,
                     ticker=ticker,
                     quantity=qty,
+                    exchange_rate_cents=8600000 if ticker == "BTC" else 350000,
                 )
             )
     if (
@@ -376,6 +444,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
                 account_id=crypto_wallet.id,
                 ticker="BTC",
                 quantity=Decimal("0.750"),
+                exchange_rate_cents=8600000,
             )
         )
 
@@ -409,6 +478,15 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "notes": "Example: pending grocery transaction",
         },
     )
+
+    seeded_accounts = (
+        db.query(Account)
+        .filter(Account.user_id == user.id)
+        .order_by(Account.created_at.asc())
+        .all()
+    )
+    for seeded in seeded_accounts:
+        _ensure_history_seed(db, user, seeded)
     db.execute(
         text(
             """

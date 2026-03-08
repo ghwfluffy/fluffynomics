@@ -16,6 +16,8 @@ from mp.schema.account import (
     AccountCashDenomination,
     AccountCreateSchema,
     AccountIconType,
+    AccountValueHistory,
+    AccountValueHistorySchema,
     AccountCryptoPosition,
     DefaultIcon,
     DefaultIconSchema,
@@ -151,6 +153,51 @@ def _hydrate_nested_positions(db: Session, account: Account) -> tuple[list, list
         db.query(AccountCashDenomination).filter_by(account_id=account.id).all()
     )
     return stock_positions, crypto_positions, cash_bills
+
+
+def _compute_account_value_cents(db: Session, account: Account) -> int:
+    stock_positions, crypto_positions, cash_bills = _hydrate_nested_positions(
+        db, account
+    )
+    if account.type == "cash":
+        return int(
+            sum(
+                int(position.denomination_cents) * int(position.quantity)
+                for position in cash_bills
+            )
+        )
+    if account.type in {"crypto_wallet", "crypto_exchange"}:
+        crypto_total = sum(
+            int(round(float(position.quantity) * int(position.exchange_rate_cents)))
+            for position in crypto_positions
+        )
+        if account.type == "crypto_exchange":
+            return int(account.usd_balance_cents or 0) + int(crypto_total)
+        return int(crypto_total)
+    if account.type == "stocks_account":
+        stock_ids = [position.stock_id for position in stock_positions]
+        prices_by_id: dict[UUID, int] = {}
+        if stock_ids:
+            for stock in db.query(Stock).filter(Stock.id.in_(stock_ids)).all():
+                prices_by_id[stock.id] = int(stock.last_price_cents or 0)
+        stock_total = sum(
+            int(
+                round(float(position.quantity) * prices_by_id.get(position.stock_id, 0))
+            )
+            for position in stock_positions
+        )
+        return int(account.balance_cents or 0) + int(stock_total)
+    return int(account.balance_cents or 0)
+
+
+def _record_account_value_history(db: Session, account: Account) -> None:
+    db.add(
+        AccountValueHistory(
+            account_id=account.id,
+            user_id=account.user_id,
+            value_cents=_compute_account_value_cents(db, account),
+        )
+    )
 
 
 def _serialize_account(db: Session, account: Account) -> AccountSchema:
@@ -394,6 +441,38 @@ def get_account(
     return _serialize_account(db, account)
 
 
+@router.get(
+    "/accounts/{account_id}/history", response_model=list[AccountValueHistorySchema]
+)
+def get_account_history(
+    account_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AccountValueHistorySchema]:
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    rows = (
+        db.query(AccountValueHistory)
+        .filter(
+            AccountValueHistory.account_id == account_id,
+            AccountValueHistory.user_id == current_user.id,
+        )
+        .order_by(AccountValueHistory.recorded_at.asc())
+        .all()
+    )
+    return [
+        AccountValueHistorySchema(
+            value_cents=row.value_cents, recorded_at=row.recorded_at
+        )
+        for row in rows
+    ]
+
+
 @router.post("/accounts", response_model=AccountSchema)
 def create_account(
     payload: AccountCreateSchema,
@@ -477,6 +556,7 @@ def create_account(
         _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
     if payload.crypto_positions:
         _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
+    _record_account_value_history(db, account)
 
     db.commit()
     db.refresh(account)
@@ -671,6 +751,7 @@ def update_account(
         _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
     if payload.crypto_positions:
         _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
+    _record_account_value_history(db, account)
 
     db.commit()
     db.refresh(account)
@@ -945,6 +1026,7 @@ def update_account_value(
     if payload.crypto_positions:
         _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
     account.last_update = datetime.utcnow()
+    _record_account_value_history(db, account)
     db.commit()
     db.refresh(account)
     return _serialize_account(db, account)

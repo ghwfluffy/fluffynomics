@@ -34,6 +34,8 @@ Defined in `python/mp/api/accounts.py`.
 
 - `GET /accounts`
 - `GET /accounts/{account_id}`
+- `GET /accounts/{account_id}/history`
+  - returns historical value points (`value_cents`, `recorded_at`) ordered by time
 - `POST /accounts`
 - `PUT /accounts/{account_id}`
 - `PUT /accounts/{account_id}/value`
@@ -44,6 +46,7 @@ Defined in `python/mp/api/accounts.py`.
   - for crypto accounts, accepts multiple `crypto_positions` entries with `ticker`, `quantity`, and `exchange_rate_cents`
   - when crypto `exchange_rate_cents` is provided, backend propagates that rate to all holdings with same ticker for that user
   - sets `accounts.last_update = now()`
+  - records an `account_value_history` point after each successful update
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)
   - used by tile left/right reorder controls
