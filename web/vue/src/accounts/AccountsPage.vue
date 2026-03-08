@@ -173,7 +173,8 @@
               :class="calendarEventToneClass(event)"
               @click="openCalendarEvent(event)"
             >
-              {{ event.label }}
+              <span class="calendar-event-chip-name">{{ event.label }}</span>
+              <span class="calendar-event-chip-amount">{{ signedCents(event.signedAmountCents) }}</span>
             </button>
             <div v-if="cell.events.length > 3" class="calendar-more-events">+{{ cell.events.length - 3 }} more</div>
           </div>
@@ -201,8 +202,8 @@
               >
                 <td>{{ event.dateLabel }} • {{ event.title }}</td>
                 <td class="calendar-upcoming-type">{{ event.kindLabel }}</td>
-                <td>{{ signedCents(event.signedAmountCents) }}</td>
-                <td>{{ signedCents(event.runningTotalCents) }}</td>
+                <td :class="deltaClass(event.signedAmountCents)">{{ signedCents(event.signedAmountCents) }}</td>
+                <td :class="deltaClass(event.runningTotalCents)">{{ signedCents(event.runningTotalCents) }}</td>
               </tr>
             </tbody>
           </table>
@@ -3529,6 +3530,7 @@ watch(
   gap: 6px;
   align-content: start;
   background: #f0f7ff;
+  overflow: hidden;
 }
 
 .calendar-day-cell:nth-child(odd) {
@@ -3562,15 +3564,43 @@ watch(
 .calendar-day-events {
   display: grid;
   gap: 5px;
+  min-width: 0;
 }
 
 .calendar-event-chip {
   border: 0;
-  text-align: left;
   border-radius: 4px;
   padding: 4px 6px;
   font-size: 0.73rem;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+}
+
+.calendar-event-chip-name {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.calendar-event-chip-amount {
+  display: block;
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .calendar-event-chip--positive-small {
