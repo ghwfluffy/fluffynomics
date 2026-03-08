@@ -176,6 +176,19 @@
                 Digital Wallets
               </button>
             </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'delete' }" role="presentation">
+              <button
+                id="tab-profile-delete"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="profileTab === 'delete'"
+                aria-controls="panel-profile-delete"
+                @click="profileTab = 'delete'"
+              >
+                Delete Account
+              </button>
+            </li>
           </ul>
         </div>
 
@@ -269,12 +282,54 @@
             :options="walletAccountDropdownOptions"
           />
         </div>
+        <div
+          v-if="profileTab === 'delete'"
+          id="panel-profile-delete"
+          class="profile-delete-section"
+          role="tabpanel"
+          aria-labelledby="tab-profile-delete"
+        >
+          <h4>Delete Account</h4>
+          <p class="profile-delete-warning">
+            This permanently deletes your user and all account data. This action cannot be undone.
+          </p>
+          <div class="modal-form-grid">
+            <label class="bank-label" for="profile-delete-password">Current Password</label>
+            <input
+              id="profile-delete-password"
+              v-model="profileDeletePassword"
+              class="cds--text-input"
+              type="password"
+              autocomplete="current-password"
+            />
+            <label class="check-row-inline">
+              <input v-model="profileDeleteConfirm" type="checkbox" />
+              <span>I understand this will permanently delete my account.</span>
+            </label>
+          </div>
+          <div class="profile-delete-actions">
+            <button
+              class="cds--btn cds--btn--danger"
+              type="button"
+              :disabled="profileBusy || !profileDeleteConfirm || !profileDeletePassword.trim()"
+              @click="submitDeleteAccount"
+            >
+              {{ profileBusy ? 'Deleting...' : 'Delete My Account' }}
+            </button>
+          </div>
+        </div>
 
         <div class="modal-actions">
           <button class="cds--btn cds--btn--ghost" type="button" :disabled="profileBusy" @click="closeProfileDialog">
             Cancel
           </button>
-          <button class="cds--btn cds--btn--primary" type="button" :disabled="profileBusy" @click="saveProfile">
+          <button
+            v-if="profileTab !== 'delete'"
+            class="cds--btn cds--btn--primary"
+            type="button"
+            :disabled="profileBusy"
+            @click="saveProfile"
+          >
             {{ profileBusy ? 'Saving...' : 'Save Profile' }}
           </button>
         </div>
@@ -444,7 +499,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { currentUser, logout, updateProfile } from '@/lib/auth'
+import { currentUser, deleteOwnAccount, logout, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
@@ -463,12 +518,14 @@ const profileMenuRef = ref<HTMLElement | null>(null)
 const profileMenuOpen = ref(false)
 const profileDialogOpen = ref(false)
 const profileBusy = ref(false)
-const profileTab = ref<'info' | 'password' | 'wallets'>('info')
+const profileTab = ref<'info' | 'password' | 'wallets' | 'delete'>('info')
 const profileCurrentPassword = ref('')
 const profileNewPassword = ref('')
 const profileDraftAvatarIconId = ref<string | null>(null)
 const profilePaypalAccountId = ref('')
 const profileGooglePayAccountId = ref('')
+const profileDeletePassword = ref('')
+const profileDeleteConfirm = ref(false)
 const showProfileIconLibrary = ref(false)
 const profileIconFileInput = ref<HTMLInputElement | null>(null)
 const adminDialogOpen = ref(false)
@@ -573,6 +630,8 @@ const onProfileManageClick = async () => {
   profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
   profilePaypalAccountId.value = currentUser.value?.paypal_account_id || ''
   profileGooglePayAccountId.value = currentUser.value?.google_pay_account_id || ''
+  profileDeletePassword.value = ''
+  profileDeleteConfirm.value = false
   showProfileIconLibrary.value = false
   profileDialogOpen.value = true
   await Promise.all([loadProfileIcons(), loadProfileWalletAccounts()])
@@ -861,6 +920,20 @@ const saveProfile = async () => {
     profileCurrentPassword.value = ''
     profileNewPassword.value = ''
     profileDialogOpen.value = false
+  } finally {
+    profileBusy.value = false
+  }
+}
+
+const submitDeleteAccount = async () => {
+  if (!profileDeleteConfirm.value || !profileDeletePassword.value.trim()) {
+    return
+  }
+  profileBusy.value = true
+  try {
+    await deleteOwnAccount(profileDeletePassword.value)
+    profileDialogOpen.value = false
+    await router.push('/')
   } finally {
     profileBusy.value = false
   }
@@ -1317,6 +1390,33 @@ const runImport = async () => {
 
 .password-section h4 {
   margin: 0 0 10px;
+}
+
+.profile-delete-section {
+  border-top: 1px solid var(--cds-border-subtle-01);
+  padding-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.profile-delete-section h4 {
+  margin: 0;
+}
+
+.profile-delete-warning {
+  color: var(--cds-support-error);
+}
+
+.check-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cds-text-primary);
+}
+
+.profile-delete-actions {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .registration-create-grid {

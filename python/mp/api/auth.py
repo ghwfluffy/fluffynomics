@@ -14,10 +14,12 @@ from sqlalchemy.orm import Session
 from mp.db import get_db
 from mp.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
-from mp.schema.contract import Contract
+from mp.schema.account import AccountValueHistory, NetWorthDailySnapshot, Stock
+from mp.schema.contract import Contract, ContractPosting
 from mp.schema.expense import Expense
 from mp.schema.registration_code import RegistrationCode
 from mp.schema.user import (
+    DeleteAccountSchema,
     LoginResponseSchema,
     LoginSchema,
     ProfileUpdateSchema,
@@ -408,3 +410,67 @@ def update_profile(
         db.commit()
         db.refresh(current_user)
     return current_user
+
+
+@router.post("/delete-account", status_code=204)
+def delete_account(
+    payload: DeleteAccountSchema,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    now = datetime.now(tz=timezone.utc)
+    if _is_password_locked(current_user, now):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Too many failed password attempts. "
+                f"Try again in {_seconds_until_unlock(current_user, now)} seconds."
+            ),
+        )
+    if not _verify_password(payload.current_password, current_user.password_hash):
+        _record_failed_password_attempt(current_user, now)
+        current_user.updated_at = now
+        db.add(current_user)
+        db.commit()
+        if _is_password_locked(current_user, now):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Too many failed password attempts. "
+                    f"Try again in {PASSWORD_LOCKOUT_SECONDS} seconds."
+                ),
+            )
+        raise HTTPException(status_code=400, detail="current_password is invalid")
+
+    _reset_password_attempt_state(current_user)
+    db.add(current_user)
+    db.flush()
+
+    user_id = current_user.id
+    db.query(RegistrationCode).filter(
+        RegistrationCode.created_by_user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(Expense).filter(Expense.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(ContractPosting).filter(ContractPosting.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(Contract).filter(Contract.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(AccountValueHistory).filter(AccountValueHistory.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(NetWorthDailySnapshot).filter(
+        NetWorthDailySnapshot.user_id == user_id
+    ).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(Stock).filter(Stock.user_id == user_id).delete(synchronize_session=False)
+    db.delete(current_user)
+    db.commit()
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return None

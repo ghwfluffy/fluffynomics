@@ -66,6 +66,11 @@ export async function logout(): Promise<void> {
   sessionToken.value = null
 }
 
+export function clearLocalSession(): void {
+  currentUser.value = null
+  sessionToken.value = null
+}
+
 export async function updateProfile(payload: {
   avatar_icon_id?: string | null
   paypal_account_id?: string | null
@@ -76,4 +81,9 @@ export async function updateProfile(payload: {
   const user = await request.put<User>('/auth/profile', payload)
   currentUser.value = user
   return user
+}
+
+export async function deleteOwnAccount(currentPassword: string): Promise<void> {
+  await request.post('/auth/delete-account', { current_password: currentPassword })
+  clearLocalSession()
 }

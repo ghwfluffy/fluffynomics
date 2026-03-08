@@ -23,6 +23,7 @@
   - once at least one user exists, `POST /auth/register` requires `registration_code`.
   - registration codes are looked up case-insensitively (normalized uppercase) and must exist + be unexpired.
 - Profile updates are in `python/mp/api/auth.py` via `PUT /auth/profile`.
+- Self account deletion is in `python/mp/api/auth.py` via `POST /auth/delete-account`.
 - Session model is encrypted+signed token (Fernet) containing:
   - `user_id`
   - `expires_at`
@@ -47,6 +48,12 @@
 - Profile endpoint supports:
   - avatar selection/clearing (`avatar_icon_id`, using icon library/default ownership rules)
   - password change (`current_password`, `new_password`)
+  - digital wallet links (`paypal_account_id`, `google_pay_account_id`) to owned accounts
+- Account deletion endpoint (`POST /auth/delete-account`):
+  - requires current authenticated session and `current_password`.
+  - uses the same brute-force/lockout controls as login/password change.
+  - permanently deletes user-owned data and then the user row.
+  - clears auth session cookie on success.
 - Session signing key:
   - from `SESSION_KEY` env var (preferred)
   - generated at startup if missing

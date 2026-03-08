@@ -96,3 +96,7 @@ class ProfileUpdateSchema(BaseModel):
     google_pay_account_id: Optional[UUID] = None
     current_password: str | None = None
     new_password: str | None = None
+
+
+class DeleteAccountSchema(BaseModel):
+    current_password: str

@@ -101,6 +101,7 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
     - `Info`: avatar selection (icon library / upload / clear) + account-created/last-login/last-password-change info
     - `Password`: password change flow (`current password` + `new password`)
     - `Digital Wallets`: maps `PayPal` / `Google Pay` aliases to concrete accounts
+    - `Delete Account`: requires current password + explicit confirmation checkbox, then permanently deletes the signed-in user account
 - `Administration` (admin users only)
   - opens admin modal with tabs:
     - `Backups`
