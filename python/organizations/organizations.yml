@@ -215,3 +215,9 @@ organizations:
 - name: Zoho
   icon: zoho.png
   url: https://www.zoho.com
+- name: H-E-B
+  icon: heb.png
+  url: https://www.heb.com
+- name: Whataburger
+  icon: whataburger.png
+  url: https://whataburger.com

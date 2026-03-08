@@ -196,6 +196,17 @@ def run_contract_simulation(
     now = datetime.utcnow()
 
     for contract in contracts:
+        if contract.linked_account_id is None:
+            postings.append(
+                SimulatedPosting(
+                    contract_id=contract.id,
+                    effective_date=as_of_date,
+                    delta_cents=0,
+                    status="skipped",
+                    reason="linked account not found",
+                )
+            )
+            continue
         linked = accounts.get(contract.linked_account_id)
         source = (
             accounts.get(contract.source_account_id)

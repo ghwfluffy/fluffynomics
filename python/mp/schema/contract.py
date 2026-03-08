@@ -42,10 +42,10 @@ class Contract(Base):
         String(16), nullable=False, server_default=text("'Icon'")
     )
     rank: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0"))
-    linked_account_id: Mapped[UUID] = mapped_column(
+    linked_account_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("accounts.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
     )
     source_account_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True),
@@ -104,7 +104,7 @@ class ContractBaseSchema(BaseModel):
     icon_id: Optional[UUID] = None
     icon_type: Literal["Letters", "Gravatar", "Icon"] = "Icon"
     rank: Optional[float] = None
-    linked_account_id: UUID
+    linked_account_id: Optional[UUID] = None
     source_account_id: Optional[UUID] = None
     last_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
@@ -118,7 +118,7 @@ class ContractBaseSchema(BaseModel):
 
 
 class ContractCreateSchema(ContractBaseSchema):
-    pass
+    linked_account_id: UUID
 
 
 class ContractUpdateSchema(BaseModel):

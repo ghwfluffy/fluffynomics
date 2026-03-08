@@ -24,6 +24,7 @@ for name in [
     "auth",
     "accounts",
     "contracts",
+    "expenses",
 ]:
     mod = import_module(f"mp.api.{name}")
     router = getattr(mod, "router")

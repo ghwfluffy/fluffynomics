@@ -1,5 +1,5 @@
-MVP
-[ ] Expenses/Budget
+Features
+[ ] Visualized net worth
 Security
 [ ] Encrypt account info at rest with PBE
 [ ] Database backups
@@ -21,3 +21,4 @@ Nice to have
 [ ] Assets
 [ ] Receivables
 [ ] Credit score
+[ ] Bonds/CD

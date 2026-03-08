@@ -41,6 +41,19 @@
             Contracts
           </button>
         </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'expenses' }" role="presentation">
+          <button
+            id="tab-expenses"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'expenses'"
+            aria-controls="panel-expenses"
+            @click="activeTab = 'expenses'"
+          >
+            Expenses
+          </button>
+        </li>
       </ul>
     </div>
 
@@ -589,6 +602,14 @@
       :forecast-date="forecastDate"
       v-model:view-mode="dashboardViewMode"
     />
+
+    <ExpensesTab
+      v-if="activeTab === 'expenses'"
+      id="panel-expenses"
+      role="tabpanel"
+      aria-labelledby="tab-expenses"
+      v-model:view-mode="dashboardViewMode"
+    />
   </div>
 </template>
 
@@ -604,6 +625,7 @@ import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
 import ContractsTab from '@/accounts/ContractsTab.vue'
+import ExpensesTab from '@/accounts/ExpensesTab.vue'
 import VChart, { THEME_KEY } from 'vue-echarts'
 import { use } from 'echarts/core'
 import { LineChart, PieChart } from 'echarts/charts'
@@ -724,7 +746,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
-const activeTab = ref<'overview' | 'accounts' | 'contracts'>('overview')
+const activeTab = ref<'overview' | 'accounts' | 'contracts' | 'expenses'>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')

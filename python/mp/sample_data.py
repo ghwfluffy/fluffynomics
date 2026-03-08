@@ -15,6 +15,7 @@ from mp.schema.account import (
     Stock,
 )
 from mp.schema.contract import Contract
+from mp.schema.expense import Expense
 from mp.schema.user import User
 
 
@@ -68,6 +69,15 @@ def _ensure_contract(db: Session, user: User, name: str, payload: dict) -> Contr
         db.add(contract)
         db.flush()
     return contract
+
+
+def _ensure_expense(db: Session, user: User, name: str, payload: dict) -> Expense:
+    expense = db.query(Expense).filter_by(user_id=user.id, name=name).first()
+    if expense is None:
+        expense = Expense(user_id=user.id, name=name, **payload)
+        db.add(expense)
+        db.flush()
+    return expense
 
 
 def _account_value_cents(db: Session, account: Account) -> int:
@@ -560,6 +570,48 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "payment_day": 1,
             "notes": "Seeded savings transfer",
             "category": "Financial",
+        },
+    )
+    _ensure_expense(
+        db,
+        user,
+        "Groceries",
+        {
+            "category": "Living",
+            "icon_type": "Letters",
+            "estimated_amount_cents": 65000,
+            "general_frequency": '{"kind":"weekly_weekday","weekday":6}',
+            "last_expensed_date": date.today() - timedelta(days=4),
+            "next_expensed_date": date.today() + timedelta(days=3),
+            "next_date_is_static": False,
+        },
+    )
+    _ensure_expense(
+        db,
+        user,
+        "Vet Visit",
+        {
+            "category": "Health",
+            "icon_type": "Letters",
+            "estimated_amount_cents": 12000,
+            "general_frequency": '{"kind":"monthly_day","day":15}',
+            "last_expensed_date": date.today().replace(day=15) - timedelta(days=31),
+            "next_expensed_date": date.today().replace(day=15),
+            "next_date_is_static": False,
+        },
+    )
+    _ensure_expense(
+        db,
+        user,
+        "Vacation",
+        {
+            "category": "Entertainment",
+            "icon_type": "Letters",
+            "estimated_amount_cents": 240000,
+            "general_frequency": '{"kind":"yearly_month_day","month":8,"day":1}',
+            "last_expensed_date": date(date.today().year - 1, 8, 1),
+            "next_expensed_date": date(date.today().year, 8, 1),
+            "next_date_is_static": True,
         },
     )
 

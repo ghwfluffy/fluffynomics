@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from mp.db import get_db
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
+from mp.expenses.engine import run_expense_simulation
 from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import (
@@ -290,7 +291,10 @@ def _forecast_net_worth_points(
     if through_date <= today:
         return [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
 
-    simulation = run_contract_simulation(db, user_id, through_date, apply=False)
+    contract_simulation = run_contract_simulation(
+        db, user_id, through_date, apply=False
+    )
+    expense_simulation = run_expense_simulation(db, user_id, through_date, apply=False)
     contracts = {
         contract.id: contract
         for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
@@ -302,7 +306,7 @@ def _forecast_net_worth_points(
         .all()
     }
     deltas_by_day: dict[date, int] = {}
-    for posting in simulation.postings:
+    for posting in contract_simulation.postings:
         if posting.status == "skipped":
             continue
         if posting.effective_date <= today:
@@ -317,7 +321,11 @@ def _forecast_net_worth_points(
                 if contract.source_account_id is not None
                 else None
             )
-            linked_type = accounts.get(contract.linked_account_id)
+            linked_type = (
+                accounts.get(contract.linked_account_id)
+                if contract.linked_account_id is not None
+                else None
+            )
             source_sign = (
                 _net_worth_sign_for_account_type(source_type) if source_type else 1
             )
@@ -326,13 +334,30 @@ def _forecast_net_worth_points(
             )
             net_delta = (-amount * source_sign) + (amount * linked_sign)
         else:
-            linked_type = accounts.get(contract.linked_account_id)
+            linked_type = (
+                accounts.get(contract.linked_account_id)
+                if contract.linked_account_id is not None
+                else None
+            )
             linked_sign = (
                 _net_worth_sign_for_account_type(linked_type) if linked_type else 1
             )
             net_delta = int(posting.delta_cents) * linked_sign
         deltas_by_day[posting.effective_date] = (
             deltas_by_day.get(posting.effective_date, 0) + net_delta
+        )
+    for expense_posting in expense_simulation.postings:
+        if expense_posting.status == "skipped":
+            continue
+        if expense_posting.effective_date <= today:
+            continue
+        account_type = accounts.get(expense_posting.account_id)
+        account_sign = (
+            _net_worth_sign_for_account_type(account_type) if account_type else 1
+        )
+        net_delta = int(expense_posting.delta_cents) * account_sign
+        deltas_by_day[expense_posting.effective_date] = (
+            deltas_by_day.get(expense_posting.effective_date, 0) + net_delta
         )
 
     points = [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
@@ -580,11 +605,16 @@ def get_accounts(
     )
     serialized = [_serialize_account(db, account) for account in accounts]
     if as_of_date is not None:
-        simulation = run_contract_simulation(
+        contract_simulation = run_contract_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        expense_simulation = run_expense_simulation(
             db, current_user.id, as_of_date, apply=False
         )
         for item in serialized:
-            delta = simulation.account_deltas.get(item.id, 0)
+            delta = contract_simulation.account_deltas.get(
+                item.id, 0
+            ) + expense_simulation.account_deltas.get(item.id, 0)
             if not delta:
                 continue
             if item.type == "crypto_exchange":
@@ -610,10 +640,15 @@ def get_account(
         raise HTTPException(status_code=404, detail="Account not found")
     serialized = _serialize_account(db, account)
     if as_of_date is not None:
-        simulation = run_contract_simulation(
+        contract_simulation = run_contract_simulation(
             db, current_user.id, as_of_date, apply=False
         )
-        delta = simulation.account_deltas.get(serialized.id, 0)
+        expense_simulation = run_expense_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        delta = contract_simulation.account_deltas.get(
+            serialized.id, 0
+        ) + expense_simulation.account_deltas.get(serialized.id, 0)
         if delta:
             if serialized.type == "crypto_exchange":
                 serialized.usd_balance_cents = int(

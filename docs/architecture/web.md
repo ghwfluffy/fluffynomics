@@ -12,11 +12,13 @@
 - Authenticated shell/header: `web/vue/src/AppShell.vue`
 - Dashboard/accounts: `web/vue/src/accounts/AccountsPage.vue`
 - Dashboard/contracts: `web/vue/src/accounts/ContractsTab.vue`
+- Dashboard/expenses: `web/vue/src/accounts/ExpensesTab.vue`
 
 Dashboard top-level tabs are now:
 - `Overview` (widgets/forecast/trend)
 - `Accounts`
 - `Contracts`
+- `Expenses`
 
 `Overview` is the default tab on dashboard load.
 
@@ -56,7 +58,7 @@ Forecast-date UX:
 - This is read-only simulation mode; write endpoints do not use forecast date.
 
 View mode UX:
-- Accounts/Contracts share one table-vs-tiles mode state.
+- Accounts/Contracts/Expenses share one table-vs-tiles mode state.
 - Toggling `Tiles`/`Table` in one tab applies to the other tab for consistency.
 
 Trend widget behavior:
@@ -138,6 +140,20 @@ Contract create/edit also mirrors account create/edit patterns:
 - organization fuzzy dropdown from `/organizations`,
 - icon selection/upload from `/icons` and generated icon variants,
 - immutable type selected before modal opens.
+
+## Expenses UX
+
+Expenses support CRUD in `ExpensesTab.vue` with:
+- name,
+- category,
+- icon selection (`Letters|Gravatar|Icon`),
+- estimated amount,
+- general frequency,
+- last expensed date,
+- next expensed date with static-vs-derived toggle.
+- `Update` menu action edits only operational fields: `enabled`, `last expensed date`, `next expensed date`.
+
+The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.
 
 ## Next-Payment Early-Pay Logic
 

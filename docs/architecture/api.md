@@ -146,16 +146,49 @@ Validation + ownership rules:
 - `linked_account_id` and `source_account_id` must belong to current user.
 - `icon_type` follows account behavior (`Letters|Gravatar|Icon`).
 - icon selection can infer default `icon_id` from matching organization if icon type is `Icon`.
+
+## Expense API Behavior
+
+Defined in `python/mp/api/expenses.py`.
+
+- `GET /expenses`
+- `POST /expenses`
+- `PUT /expenses/{expense_id}`
+- `DELETE /expenses/{expense_id}`
+
+Expense semantics:
+- Fields: `name`, `category`, `icon_id/icon_type`, `estimated_amount_cents`, `linked_account_id`, `general_frequency`, `last_expensed_date`, `next_expensed_date`, `next_date_is_static`.
+- Includes `enabled` boolean so expenses can be turned off without deletion.
+- Validation:
+  - `name` and `category` are required.
+  - `estimated_amount_cents >= 0`.
+  - `linked_account_id` is required on create.
+  - `icon_type` follows `Letters|Gravatar|Icon`.
+  - `general_frequency` accepts recurring-period JSON (legacy keywords are tolerated).
+- Next-date behavior:
+  - if `next_date_is_static=true`, `next_expensed_date` is required and stored directly.
+  - otherwise backend derives `next_expensed_date` from `last_expensed_date + general_frequency`.
 - `expiration_date` defaults to `2099-01-01` when omitted.
 
 Automatic execution model:
 - Contract posting is idempotent using `contract_postings` unique `(contract_id, effective_date)`.
-- Scheduler and apply runs reuse the same engine (`mp/contracts/engine.py`).
+- Scheduler/apply runs execute both engines:
+  - contracts: `mp/contracts/engine.py`
+  - expenses: `mp/expenses/engine.py`
 - Early-pay handling is applied when deriving first upcoming due date:
   - if `last_payment_date` falls between expected prior due and upcoming due, skip to next-next cycle.
 
+Forecast/as-of behavior:
+- `GET /accounts` and `GET /accounts/{id}` with `as_of_date` apply projected deltas from both contracts and expenses.
+- `GET /accounts/net-worth/forecast` includes future deltas from both contracts and expenses.
+- `POST /contracts/run` now executes both simulations for the target date and returns both posting sets.
+
 Update-modal ownership:
 - UI intentionally edits `last_payment_date` and `expiration_date` through contract `Update` flow (not the full editor), but API continues to accept either update path.
+
+Deletion coupling rule:
+- Account-linked objects that are not tightly coupled (`contracts.linked_account_id`, `expenses.linked_account_id`) do not cascade-delete with account deletion.
+- Those references are nullable and use `ON DELETE SET NULL`; API should tolerate historical rows with a missing linked account and require relinking before normal execution semantics.
 
 ## Ownership + Access Control
 

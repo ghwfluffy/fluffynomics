@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.db import get_db
+from mp.expenses.engine import run_expense_simulation
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
 from mp.schema.contract import (
@@ -264,6 +265,9 @@ def update_contract(
         )
     if "icon_type" in data:
         _validate_icon_type(data["icon_type"])
+    linked_account_id = data.get("linked_account_id", contract.linked_account_id)
+    if linked_account_id is None:
+        raise HTTPException(status_code=400, detail="linked_account_id is required")
 
     merged = ContractCreateSchema(
         name=data.get("name", contract.name),
@@ -274,7 +278,7 @@ def update_contract(
         icon_id=data.get("icon_id", contract.icon_id),
         icon_type=data.get("icon_type", contract.icon_type),
         rank=data.get("rank", contract.rank),
-        linked_account_id=data.get("linked_account_id", contract.linked_account_id),
+        linked_account_id=linked_account_id,
         source_account_id=data.get("source_account_id", contract.source_account_id),
         last_payment_date=data.get("last_payment_date", contract.last_payment_date),
         payment_period=data.get("payment_period", contract.payment_period),
@@ -353,7 +357,14 @@ def run_contracts(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     target_date = through_date or as_of_date or date.today()
-    simulation = run_contract_simulation(
+    contract_simulation = run_contract_simulation(
+        db,
+        current_user.id,
+        target_date,
+        apply=not dry_run,
+        lock=not dry_run,
+    )
+    expense_simulation = run_expense_simulation(
         db,
         current_user.id,
         target_date,
@@ -365,7 +376,9 @@ def run_contracts(
     return {
         "dry_run": dry_run,
         "as_of_date": target_date.isoformat(),
-        "count": len(simulation.postings),
+        "count": len(contract_simulation.postings) + len(expense_simulation.postings),
+        "contract_count": len(contract_simulation.postings),
+        "expense_count": len(expense_simulation.postings),
         "postings": [
             {
                 "contract_id": str(item.contract_id),
@@ -374,7 +387,18 @@ def run_contracts(
                 "status": item.status,
                 "reason": item.reason,
             }
-            for item in simulation.postings
+            for item in contract_simulation.postings
+        ],
+        "expense_postings": [
+            {
+                "expense_id": str(item.expense_id),
+                "account_id": str(item.account_id),
+                "effective_date": item.effective_date.isoformat(),
+                "delta_cents": item.delta_cents,
+                "status": item.status,
+                "reason": item.reason,
+            }
+            for item in expense_simulation.postings
         ],
     }
 

@@ -116,6 +116,26 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `pending_payments`
 - `contracts`
 - `contract_postings`
+- `expenses`
+
+### Expenses table intent
+
+- `expenses` stores user-scoped budgeting estimates (not account balances).
+- `expenses.linked_account_id` is intentionally nullable with `ON DELETE SET NULL` so deleting an account never deletes expense definitions.
+- `next_date_is_static` distinguishes fixed next date from derived next date.
+- `general_frequency` is stored as recurring-period JSON for derivation math.
+- automatic expense simulation mutates linked account balances on due dates:
+  - liability-linked expenses increase liability balances
+  - asset-linked expenses decrease balances
+  - these deltas are included in account `as_of_date` projection and net-worth forecast endpoints
+
+### Cross-table delete policy
+
+- Non-tightly-coupled references must not use cascade deletion.
+- Current examples:
+  - `contracts.linked_account_id -> accounts.id` uses `ON DELETE SET NULL`.
+  - `expenses.linked_account_id -> accounts.id` uses `ON DELETE SET NULL`.
+- Tightly-coupled child data may still cascade (for example account positions/history tied directly to account lifecycle).
 
 ## Example Data Contract
 
