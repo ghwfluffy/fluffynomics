@@ -4,6 +4,7 @@
 }
 
 html {
+  font-size: 93.75%;
   overflow-y: scroll;
   scrollbar-gutter: stable;
 }
@@ -13,4 +14,103 @@ body {
   font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
   color: var(--mp-text);
   background: var(--mp-bg);
+}
+
+/* Compact pass: reduce geometry (not transform scaling) so chart hitboxes remain correct. */
+.cds--tile:not(.account-tile) {
+  padding: 0.85rem !important;
+}
+
+.cds--btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 2rem !important;
+  padding: 0 0.85rem !important;
+  font-size: 0.84rem !important;
+  line-height: 1.1 !important;
+}
+
+.cds--btn.cds--btn--sm {
+  min-height: 1.65rem !important;
+  padding: 0 0.6rem !important;
+  font-size: 0.78rem !important;
+}
+
+.cds--text-input,
+.cds--select-input,
+.cds--search-input,
+.bank-input,
+.dropdown-input,
+.dollar-input,
+.percent-input {
+  min-height: 2rem !important;
+  font-size: 0.86rem !important;
+}
+
+.cds--text-area,
+.bank-textarea {
+  min-height: 4rem !important;
+  font-size: 0.86rem !important;
+}
+
+.cds--tabs__nav-link {
+  min-height: 2rem !important;
+  padding: 0.45rem 0.75rem !important;
+}
+
+.cds--data-table th,
+.cds--data-table td {
+  padding: 0.45rem 0.55rem !important;
+}
+
+.modal-card {
+  padding: 0.85rem !important;
+}
+
+.confirm-card {
+  padding: 0.85rem !important;
+}
+
+.account-tile {
+  min-height: 126px !important;
+}
+
+.calendar-day-cell {
+  min-height: 104px !important;
+  padding: 5px !important;
+}
+
+.calendar-event-chip {
+  font-size: 0.68rem !important;
+  padding: 3px 5px !important;
+}
+
+.widget-donut-row {
+  min-height: 130px !important;
+}
+
+.widget-donut-echart {
+  height: 130px !important;
+}
+
+.widget-trend-echart {
+  height: 165px !important;
+}
+
+.history-chart-wrap {
+  min-height: 220px !important;
+}
+
+.history-chart {
+  height: 220px !important;
+}
+
+.mp-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-weight: 600;
+  line-height: 1;
 }

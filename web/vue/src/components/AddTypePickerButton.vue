@@ -1,6 +1,6 @@
 <template>
   <div class="action-row" :data-inline="props.inline ? 'true' : 'false'">
-    <button ref="trigger" class="cds--btn cds--btn--primary" type="button" @click="open = !open">
+    <button ref="trigger" class="cds--btn cds--btn--primary mp-add-btn" type="button" @click="open = !open">
       {{ props.buttonLabel }}
     </button>
     <div v-if="open" ref="picker" class="type-picker" :style="{ width: `${pickerWidth}px` }">
@@ -101,4 +101,5 @@ onUnmounted(() => {
   right: 0;
   z-index: 20;
 }
+
 </style>

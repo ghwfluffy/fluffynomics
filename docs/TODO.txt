@@ -5,6 +5,7 @@ Prod deployment
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
+[ ] paypal / google play linked accounts
 [ ] sunday payday logic
 [ ] delete my account
 [ ] admin manage users (update pw, lock account, see last login, delete account)

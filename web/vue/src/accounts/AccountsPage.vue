@@ -100,22 +100,45 @@
         </article>
         <article class="widget-slot widget-card">
           <h3>Net Change (Last 30 Days)</h3>
-          <div class="widget-kpi" :class="deltaClass(netChangePast30)">{{ signedCents(netChangePast30) }}</div>
+          <div class="widget-kpi" :class="hasPast30SnapshotData ? deltaClass(netChangePast30) : 'delta-muted'">
+            {{ hasPast30SnapshotData ? signedCents(netChangePast30) : 'No data' }}
+          </div>
           <p class="widget-subtext">Compared to 30 days before {{ widgetAnchorLabel }}</p>
         </article>
         <article class="widget-slot widget-card">
           <h3>Net Change (Next 30 Days)</h3>
-          <div class="widget-kpi" :class="deltaClass(netChangeNext30)">{{ signedCents(netChangeNext30) }}</div>
+          <div
+            class="widget-kpi-hover-wrap"
+            @mouseenter="showNext30Breakdown = true"
+            @mouseleave="showNext30Breakdown = false"
+            @focusin="showNext30Breakdown = true"
+            @focusout="showNext30Breakdown = false"
+          >
+            <div class="widget-kpi" :class="deltaClass(netChangeNext30)" tabindex="0">{{ signedCents(netChangeNext30) }}</div>
+            <div v-if="showNext30Breakdown" class="widget-kpi-popout">
+              <div class="widget-kpi-popout-title">Included Changes</div>
+              <div v-if="next30BreakdownBusy" class="widget-kpi-popout-empty">Loading…</div>
+              <div v-else-if="next30BreakdownItems.length === 0" class="widget-kpi-popout-empty">No projected postings.</div>
+              <ul v-else class="widget-kpi-popout-list">
+                <li v-for="item in next30BreakdownItems" :key="item.key">
+                  <span>{{ item.dateLabel }} • {{ item.label }}</span>
+                  <strong :class="deltaClass(item.netDeltaCents)">{{ signedCents(item.netDeltaCents) }}</strong>
+                </li>
+              </ul>
+            </div>
+          </div>
           <p class="widget-subtext">Forecast from {{ widgetAnchorLabel }} using automatic contracts</p>
         </article>
       </div>
       <div class="widget-trend">
         <article class="widget-slot widget-card widget-card--wide">
-          <h3>Current Net Worth: {{ cents(currentNetWorthCents) }}</h3>
-          <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
-          <div class="widget-trend-status">
-            <span v-if="widgetLoading">Updating…</span>
+          <div class="widget-trend-head">
+            <h3>Current Net Worth: {{ cents(currentNetWorthCents) }}</h3>
+            <div class="widget-trend-status">
+              <span v-if="widgetLoading">Updating…</span>
+            </div>
           </div>
+          <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
         </article>
       </div>
       <div class="widget-derived-grid">
@@ -811,6 +834,8 @@ interface ContractCalendarPayload {
   name: string
   type: 'income' | 'payment' | 'transfer'
   amount_cents: number
+  linked_account_id?: string
+  source_account_id?: string
   payment_period?: string
   payment_day?: number
   expiration_date?: string
@@ -823,6 +848,35 @@ interface ExpenseCalendarPayload {
   enabled?: boolean
   general_frequency?: string
   next_expensed_date?: string
+}
+
+interface ContractRunPostingPayload {
+  contract_id: string
+  effective_date: string
+  delta_cents: number
+  status?: string
+  reason?: string | null
+}
+
+interface ExpenseRunPostingPayload {
+  expense_id: string
+  account_id: string
+  effective_date: string
+  delta_cents: number
+  status?: string
+  reason?: string | null
+}
+
+interface ContractRunPreviewPayload {
+  postings: ContractRunPostingPayload[]
+  expense_postings: ExpenseRunPostingPayload[]
+}
+
+interface NetChangeBreakdownItem {
+  key: string
+  dateLabel: string
+  label: string
+  netDeltaCents: number
 }
 
 type RateRow = {
@@ -940,6 +994,11 @@ const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
 const widgetLoading = ref(false)
+const next30BreakdownBusy = ref(false)
+const showNext30Breakdown = ref(false)
+const next30BreakdownItems = ref<NetChangeBreakdownItem[]>([])
+const hasPast30SnapshotData = ref(false)
+const netWorthAnchorCents = ref(0)
 const netWorthPast30Cents = ref(0)
 const netWorthNext30Cents = ref(0)
 const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
@@ -1221,7 +1280,7 @@ const accountTypeLabel = (type: AccountType) =>
     rewards_card: 'Rewards Card',
   })[type]
 
-const isLiabilityAccountType = (type: AccountType) => ['credit_card', 'line_of_credit', 'loan'].includes(type)
+const isLiabilityAccountType = (type?: string) => ['credit_card', 'line_of_credit', 'loan'].includes(String(type || ''))
 
 const netWorthContributionCents = (account: AccountPayload) => {
   const rewards = accountRewardsCents(account)
@@ -1235,8 +1294,8 @@ const netWorthContributionCents = (account: AccountPayload) => {
 const currentNetWorthCents = computed(() =>
   accounts.value.reduce((sum, account) => sum + netWorthContributionCents(account), 0),
 )
-const netChangePast30 = computed(() => currentNetWorthCents.value - netWorthPast30Cents.value)
-const netChangeNext30 = computed(() => netWorthNext30Cents.value - currentNetWorthCents.value)
+const netChangePast30 = computed(() => netWorthAnchorCents.value - netWorthPast30Cents.value)
+const netChangeNext30 = computed(() => netWorthNext30Cents.value - netWorthAnchorCents.value)
 
 const widgetAnchorDate = computed(() => parseDateOnly(forecastDate.value) || new Date())
 const widgetAnchorLabel = computed(() =>
@@ -1572,6 +1631,11 @@ const deltaClass = (value: number) => {
   return 'delta-neutral'
 }
 
+const intOrZero = (value: unknown) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? Math.round(parsed) : 0
+}
+
 const accountRewardsCents = (account: AccountPayload) => Math.max(0, account.rewards_balance_cents || 0)
 
 const balanceLabel = (account: AccountPayload) => {
@@ -1655,17 +1719,88 @@ const getNetWorthAsOf = async (asOf: Date) => {
   return snapshot.reduce((sum, account) => sum + netWorthContributionCents(account), 0)
 }
 
+const buildNext30Breakdown = (
+  preview: ContractRunPreviewPayload,
+  contracts: ContractCalendarPayload[],
+  expenses: ExpenseCalendarPayload[],
+) => {
+  const todayIso = localIsoDate(new Date())
+  const contractsById = new Map(contracts.map((item) => [item.id, item]))
+  const expensesById = new Map(expenses.map((item) => [item.id, item]))
+  const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
+  const rows: Array<{ key: string; dateIso: string; label: string; netDeltaCents: number }> = []
+
+  for (const posting of preview.postings || []) {
+    const dateIso = (posting.effective_date || '').slice(0, 10)
+    if (!dateIso || dateIso <= todayIso || posting.status === 'skipped') {
+      continue
+    }
+    const contract = contractsById.get(posting.contract_id)
+    const label = contract?.name || 'Contract'
+    let netDelta = intOrZero(posting.delta_cents)
+    if (contract?.type === 'transfer') {
+      const amount = intOrZero(contract.amount_cents)
+      const sourceType = contract.source_account_id ? accountTypeById.get(contract.source_account_id) : undefined
+      const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+      const sourceSign = isLiabilityAccountType(sourceType) ? -1 : 1
+      const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
+      netDelta = (-amount * sourceSign) + (amount * linkedSign)
+    } else if (contract?.linked_account_id) {
+      const linkedType = accountTypeById.get(contract.linked_account_id)
+      const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
+      netDelta = intOrZero(posting.delta_cents) * linkedSign
+    }
+    rows.push({
+      key: `contract-${posting.contract_id}-${dateIso}-${rows.length}`,
+      dateIso,
+      label,
+      netDeltaCents: netDelta,
+    })
+  }
+
+  for (const posting of preview.expense_postings || []) {
+    const dateIso = (posting.effective_date || '').slice(0, 10)
+    if (!dateIso || dateIso <= todayIso || posting.status === 'skipped') {
+      continue
+    }
+    const expense = expensesById.get(posting.expense_id)
+    const label = expense?.name || 'Expense'
+    const accountType = accountTypeById.get(posting.account_id)
+    const accountSign = isLiabilityAccountType(accountType) ? -1 : 1
+    rows.push({
+      key: `expense-${posting.expense_id}-${dateIso}-${rows.length}`,
+      dateIso,
+      label,
+      netDeltaCents: intOrZero(posting.delta_cents) * accountSign,
+    })
+  }
+
+  rows.sort((a, b) => (a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso)))
+  return rows.map((row) => ({
+    key: row.key,
+    dateLabel: new Date(`${row.dateIso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    label: row.label,
+    netDeltaCents: row.netDeltaCents,
+  }))
+}
+
 const loadWidgets = async () => {
   const runToken = ++widgetRequestToken
   widgetLoading.value = true
+  next30BreakdownBusy.value = true
   try {
     const anchor = parseDateOnly(forecastDate.value) || new Date()
-    const [past30, next30, netWorthHistory, contracts, expenses] = await Promise.all([
-      getNetWorthAsOf(shiftDays(anchor, -30)),
-      getNetWorthAsOf(shiftDays(anchor, 30)),
+    const next30Target = shiftDays(anchor, 30)
+    const [netWorthHistory, contracts, expenses, next30Preview, next30ForecastSeries] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
       request.get<ContractCalendarPayload[]>('/contracts'),
       request.get<ExpenseCalendarPayload[]>('/expenses'),
+      request.post<ContractRunPreviewPayload>('/contracts/run', undefined, {
+        params: { dry_run: true, through_date: localIsoDate(next30Target) },
+      }),
+      request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
+        params: { through_date: localIsoDate(next30Target) },
+      }),
     ])
     const forecastSeries =
       anchor.getTime() > Date.now()
@@ -1676,19 +1811,49 @@ const loadWidgets = async () => {
     if (runToken !== widgetRequestToken) {
       return
     }
-    netWorthPast30Cents.value = past30
-    netWorthNext30Cents.value = next30
+    const historyPoints = [...netWorthHistory]
+      .map((item) => ({ at: parseDateOnly(item.snapshot_date), value: intOrZero(item.value_cents) }))
+      .filter((item): item is { at: Date; value: number } => item.at !== null)
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+    const lookupHistoryAsOf = (target: Date) => {
+      let found: number | null = null
+      for (const point of historyPoints) {
+        if (point.at.getTime() <= target.getTime()) {
+          found = point.value
+        } else {
+          break
+        }
+      }
+      return found
+    }
+    const anchorFromHistory = lookupHistoryAsOf(anchor)
+    const pastAnchorFromHistory = lookupHistoryAsOf(shiftDays(anchor, -30))
 
+    hasPast30SnapshotData.value = anchorFromHistory !== null && pastAnchorFromHistory !== null
+    netWorthAnchorCents.value = anchorFromHistory ?? currentNetWorthCents.value
+    netWorthPast30Cents.value = pastAnchorFromHistory ?? netWorthAnchorCents.value
+    netWorthNext30Cents.value = next30ForecastSeries.length
+      ? intOrZero(next30ForecastSeries[next30ForecastSeries.length - 1].value_cents)
+      : netWorthAnchorCents.value
+    next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
+
+    const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
     const projectedAnnualCents =
       contracts.reduce((sum, contract) => {
         const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
-        if (contract.type === 'income') {
-          return sum + contract.amount_cents * annualOccurrences
+        if (contract.type === 'transfer') {
+          const amount = intOrZero(contract.amount_cents)
+          const sourceType = contract.source_account_id ? accountTypeById.get(contract.source_account_id) : undefined
+          const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+          const sourceSign = isLiabilityAccountType(sourceType) ? -1 : 1
+          const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
+          return sum + ((-amount * sourceSign) + (amount * linkedSign)) * annualOccurrences
         }
-        if (contract.type === 'payment') {
-          return sum - contract.amount_cents * annualOccurrences
-        }
-        return sum
+        const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+        const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
+        const rawDelta = contract.type === 'income' ? intOrZero(contract.amount_cents) : -intOrZero(contract.amount_cents)
+        const accountDelta = isLiabilityAccountType(linkedType) ? -rawDelta : rawDelta
+        return sum + accountDelta * linkedSign * annualOccurrences
       }, 0) -
       expenses.reduce((sum, expense) => {
         if (expense.enabled === false) {
@@ -1784,6 +1949,7 @@ const loadWidgets = async () => {
   } finally {
     if (runToken === widgetRequestToken) {
       widgetLoading.value = false
+      next30BreakdownBusy.value = false
     }
   }
 }
@@ -3087,6 +3253,10 @@ watch(
   color: #334155;
 }
 
+.delta-muted {
+  color: #64748b;
+}
+
 .widget-donut-row {
   min-height: 146px;
 }
@@ -3100,6 +3270,18 @@ watch(
   margin-top: 12px;
 }
 
+.widget-trend-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.widget-trend-head h3 {
+  margin: 0;
+  white-space: nowrap;
+}
+
 .widget-card--wide {
   padding-bottom: 0.55rem;
 }
@@ -3110,9 +3292,67 @@ watch(
 }
 
 .widget-trend-status {
-  margin-top: 0.25rem;
+  margin: 0;
+  min-height: 1.1em;
   font-size: 0.8rem;
   color: #475569;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.widget-kpi-hover-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.widget-kpi-popout {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  width: min(440px, 75vw);
+  max-height: 230px;
+  overflow: auto;
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  z-index: 18;
+}
+
+.widget-kpi-popout-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  margin-bottom: 5px;
+  color: var(--cds-text-secondary);
+}
+
+.widget-kpi-popout-empty {
+  font-size: 0.72rem;
+  color: var(--cds-text-secondary);
+}
+
+.widget-kpi-popout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.widget-kpi-popout-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.72rem;
+}
+
+.widget-kpi-popout-list li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .widget-derived-grid {

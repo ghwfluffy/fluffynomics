@@ -120,11 +120,21 @@ def _balance_field(account: Account) -> str | None:
     return "balance_cents"
 
 
-def _delta_for_contract(contract: Contract) -> int:
+def _delta_for_contract(
+    contract: Contract, linked_account: Account | None = None
+) -> int:
     amount = int(contract.amount_cents or 0)
-    if contract.type == "income":
-        return amount
-    return -amount
+    delta = amount if contract.type == "income" else -amount
+    # Liability balances are stored as positive debt. For liability-linked
+    # contracts, invert the balance delta so "payment" increases owed balance
+    # and "income" decreases owed balance.
+    if linked_account is not None and linked_account.type in {
+        "credit_card",
+        "line_of_credit",
+        "loan",
+    }:
+        return -delta
+    return delta
 
 
 def _compute_account_value_cents(db: Session, account: Account) -> int:
@@ -248,7 +258,7 @@ def run_contract_simulation(
             continue
         due_dates = list(_iter_due_dates(contract, as_of_date))
         for due_date in due_dates:
-            delta = _delta_for_contract(contract)
+            delta = _delta_for_contract(contract, linked)
             if contract.type == "transfer":
                 if source is None:
                     postings.append(

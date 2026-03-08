@@ -4,7 +4,7 @@
       <ViewModeToggle v-model="viewMode" />
     </div>
     <div v-if="viewMode === 'tiles'" class="action-row">
-      <button class="cds--btn cds--btn--primary" type="button" @click="openCreate">Add Expense</button>
+      <button class="cds--btn cds--btn--primary mp-add-btn" type="button" @click="openCreate">Add Expense</button>
     </div>
 
     <template v-if="viewMode === 'tiles'">
@@ -44,7 +44,7 @@
             :filters="expenseColumnFilters"
             @update:filter="onExpenseColumnFilterUpdate"
           />
-          <button class="cds--btn cds--btn--primary" type="button" @click="openCreate">Add Expense</button>
+          <button class="cds--btn cds--btn--primary mp-add-btn" type="button" @click="openCreate">Add Expense</button>
         </div>
         <table class="cds--data-table cds--data-table--md">
           <thead>

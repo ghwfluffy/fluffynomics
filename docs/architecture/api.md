@@ -158,6 +158,9 @@ Defined in `python/mp/api/contracts.py`.
     - `as_of_date` or `through_date`
   - dry-run returns planned postings without mutating balances
   - apply mode writes postings, updates balances, and advances `last_payment_date`
+  - liability-aware balance deltas:
+    - for linked liability accounts (`credit_card`, `line_of_credit`, `loan`), non-transfer contract deltas are inverted at balance layer
+    - this means `payment` contracts increase liability balances (more owed), while `income` contracts decrease liability balances
 
 Validation + ownership rules:
 - `name`, `organization`, and `linked_account_id` are required.
