@@ -12,6 +12,7 @@
 - `mp.api.accounts` mounted at `/`
 - `mp.api.contracts` mounted at `/`
 - `mp.api.data_portability` mounted at `/data`
+- `mp.api.backups` mounted at `/backups`
 
 ## Auth + Session Model
 
@@ -254,6 +255,15 @@ Defined in `python/mp/api/data_portability.py`.
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and
     - data portability export/import serialization + migration logic.
+
+## Backup API
+
+Defined in `python/mp/api/backups.py`.
+
+- `POST /backups/run-now`
+  - authenticated endpoint that schedules an immediate DB backup run
+  - creates trigger file consumed by backup worker container
+  - returns scheduling status
 
 ## Important Timestamp Semantics
 

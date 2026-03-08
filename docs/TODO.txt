@@ -1,12 +1,13 @@
 Security
-[x] pw change
-[ ] verify authorization checks
+[ ] nginx rate limitting
 [ ] Encrypt account info at rest with PBE
-[ ] Automated database backups
+[x] Automated database backups
 [ ] Registration codes (admin add registration codes)
     [ ] Admin site settings
     [ ] Test mode (allow test data creation)
     [ ] Reg codes
+    [ ] force backup
+    [ ] site backup/restore
 Prod deployment
 [ ] Domain
 [ ] Site

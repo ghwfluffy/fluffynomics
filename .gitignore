@@ -4,3 +4,5 @@ node_modules
 *.swp
 python/venv
 outfile.tmp
+backups/*
+!backups/backup_loop.sh

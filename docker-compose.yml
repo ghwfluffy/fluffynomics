@@ -21,6 +21,7 @@ services:
       - database
     volumes:
       - ./python:/app
+      - ./backups:/app/backups
 
   web:
     image: mp-web
@@ -47,6 +48,28 @@ services:
       - api
     volumes:
       - ./web/vue:/app
+
+  db-backup:
+    image: postgres:16
+    depends_on:
+      - database
+    environment:
+      PGHOST: database
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION: "100"
+      BACKUP_UID: ${BACKUP_UID:-1000}
+      BACKUP_GID: ${BACKUP_GID:-1000}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-02}
+      BACKUP_MINUTE_UTC: ${BACKUP_MINUTE_UTC:-00}
+      BACKUP_TRIGGER_FILE: /backups/.trigger-now
+    command: ["/bin/sh", "/scripts/backup_loop.sh"]
+    volumes:
+      - ./backups:/backups
+      - ./backups/backup_loop.sh:/scripts/backup_loop.sh:ro
 
 volumes:
   postgres_data:

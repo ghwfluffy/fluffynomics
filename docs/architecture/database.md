@@ -5,6 +5,22 @@
 - PostgreSQL (dockerized via `docker-compose.yml`)
 - App schema managed by migration files in `python/mp/db/migrations/`
 - ORM models in `python/mp/schema/*.py`
+- Local filesystem backup target directory: `./backups` (mounted into backup worker container)
+
+## Operational Backups
+
+- `docker-compose.yml` includes a `db-backup` worker service that runs `pg_dump` nightly.
+- Backup files are timestamped gzip dumps in `./backups`, named like:
+  - `pgdump-<db>-YYYYMMDDTHHMMSSZ.sql.gz`
+- Nightly schedule controls:
+  - `BACKUP_HOUR_UTC` (default `02`)
+  - `BACKUP_MINUTE_UTC` (default `00`)
+- Retention controls:
+  - `BACKUP_RETENTION` default `100` newest files retained.
+- Ownership controls:
+  - `BACKUP_UID`/`BACKUP_GID` environment values (default `1000:1000`) are chowned onto created backup files.
+- Immediate run trigger:
+  - API endpoint `POST /backups/run-now` writes a trigger file consumed by backup worker.
 
 ## Source of Truth
 
