@@ -146,6 +146,8 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `users.avatar_icon_id` (nullable FK -> `icon_assets.id`, `ON DELETE SET NULL`)
 - `users.last_login_at` (nullable timestamp)
 - `users.password_changed_at` (nullable timestamp)
+- `users.failed_password_attempts` (non-null integer, default `0`)
+- `users.password_lockout_until` (nullable timestamp for short lockout window)
 
 ## Data Portability Replace Semantics
 

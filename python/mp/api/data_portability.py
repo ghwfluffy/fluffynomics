@@ -32,7 +32,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 2
+PAYLOAD_SCHEMA_VERSION = 3
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -515,9 +515,22 @@ def _upgrade_payload_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 3
+    profile = _required_dict(upgraded.get("user_profile"), "user_profile")
+    if "failed_password_attempts" not in profile:
+        profile["failed_password_attempts"] = 0
+    if "password_lockout_until" not in profile:
+        profile["password_lockout_until"] = None
+    upgraded["user_profile"] = profile
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
+    2: _upgrade_payload_v2_to_v3,
 }
 
 
@@ -732,6 +745,9 @@ def _replace_user_data(
     user.password_changed_at = _parse_optional_datetime(
         user_profile.get("password_changed_at"), "user_profile.password_changed_at"
     )
+    # Keep lockout counters local-only; do not restore from import payload.
+    user.failed_password_attempts = 0
+    user.password_lockout_until = None
     user.created_at = (
         _parse_optional_datetime(
             user_profile.get("created_at"), "user_profile.created_at"

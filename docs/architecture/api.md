@@ -31,6 +31,11 @@
   - `last_login_at`
   - `password_changed_at`
 - Login updates `last_login_at`.
+- Password brute-force protection:
+  - enforced on password-bearing auth flows (`POST /auth/login`, password-change branch of `PUT /auth/profile`)
+  - threshold: `10` consecutive failed password attempts
+  - lockout window: `30` seconds (`429` while locked)
+  - successful password verification resets failed-attempt and lockout state
 - Profile endpoint supports:
   - avatar selection/clearing (`avatar_icon_id`, using icon library/default ownership rules)
   - password change (`current_password`, `new_password`)
@@ -242,7 +247,9 @@ Defined in `python/mp/api/data_portability.py`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
-- Current payload schema version: `2` (adds `user_profile` and explicit `contract_postings` compatibility default).
+- Current payload schema version: `3`.
+- Security metadata rule:
+  - brute-force lockout state (`failed_password_attempts`, `password_lockout_until`) is intentionally not exported/imported and remains local runtime state.
 - Schema-change rule:
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and

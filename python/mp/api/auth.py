@@ -32,6 +32,8 @@ DEFAULT_SESSION_SECONDS = 24 * 60 * 60
 MAX_SESSION_SECONDS = 30 * 24 * 60 * 60
 _fernet: Fernet | None = None
 logger = logging.getLogger(__name__)
+MAX_BAD_PASSWORD_ATTEMPTS = 10
+PASSWORD_LOCKOUT_SECONDS = 30
 
 
 def initialize_session_signing_key() -> None:
@@ -141,6 +143,31 @@ def _is_icon_selectable_for_user(db: Session, user_id: UUID, icon_id: UUID) -> b
     return is_referenced_by_user
 
 
+def _is_password_locked(user: User, now: datetime) -> bool:
+    lockout_until = user.password_lockout_until
+    return lockout_until is not None and lockout_until > now
+
+
+def _seconds_until_unlock(user: User, now: datetime) -> int:
+    lockout_until = user.password_lockout_until
+    if lockout_until is None:
+        return 0
+    remaining = (lockout_until - now).total_seconds()
+    return max(0, int(remaining + 0.999))
+
+
+def _record_failed_password_attempt(user: User, now: datetime) -> None:
+    attempts = int(user.failed_password_attempts or 0) + 1
+    user.failed_password_attempts = attempts
+    if attempts >= MAX_BAD_PASSWORD_ATTEMPTS:
+        user.password_lockout_until = now + timedelta(seconds=PASSWORD_LOCKOUT_SECONDS)
+
+
+def _reset_password_attempt_state(user: User) -> None:
+    user.failed_password_attempts = 0
+    user.password_lockout_until = None
+
+
 def _parse_session_token(raw_token: str | None) -> UUID:
     if not raw_token:
         raise HTTPException(
@@ -207,12 +234,36 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
 def login(
     payload: LoginSchema, response: Response, db: Session = Depends(get_db)
 ) -> LoginResponseSchema:
+    now = datetime.now(tz=timezone.utc)
     user = db.query(User).filter_by(username=payload.username).first()
-    if user is None or not _verify_password(payload.password, user.password_hash):
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    if _is_password_locked(user, now):
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "Too many failed password attempts. "
+                f"Try again in {_seconds_until_unlock(user, now)} seconds."
+            ),
+        )
+    if not _verify_password(payload.password, user.password_hash):
+        _record_failed_password_attempt(user, now)
+        user.updated_at = now
+        db.add(user)
+        db.commit()
+        if _is_password_locked(user, now):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Too many failed password attempts. "
+                    f"Try again in {PASSWORD_LOCKOUT_SECONDS} seconds."
+                ),
+            )
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
-    user.last_login_at = datetime.now(tz=timezone.utc)
-    user.updated_at = datetime.now(tz=timezone.utc)
+    _reset_password_attempt_state(user)
+    user.last_login_at = now
+    user.updated_at = now
     db.commit()
     db.refresh(user)
 
@@ -266,6 +317,14 @@ def update_profile(
         changed = True
 
     if "new_password" in data:
+        if _is_password_locked(current_user, now):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Too many failed password attempts. "
+                    f"Try again in {_seconds_until_unlock(current_user, now)} seconds."
+                ),
+            )
         if payload.new_password is None or not payload.new_password.strip():
             raise HTTPException(status_code=400, detail="new_password cannot be empty")
         if not payload.current_password:
@@ -274,7 +333,20 @@ def update_profile(
                 detail="current_password is required when changing password",
             )
         if not _verify_password(payload.current_password, current_user.password_hash):
+            _record_failed_password_attempt(current_user, now)
+            current_user.updated_at = now
+            db.add(current_user)
+            db.commit()
+            if _is_password_locked(current_user, now):
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        "Too many failed password attempts. "
+                        f"Try again in {PASSWORD_LOCKOUT_SECONDS} seconds."
+                    ),
+                )
             raise HTTPException(status_code=400, detail="current_password is invalid")
+        _reset_password_attempt_state(current_user)
         current_user.password_hash = _hash_password(payload.new_password)
         current_user.password_changed_at = now
         changed = True
