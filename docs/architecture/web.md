@@ -13,6 +13,13 @@
 - Dashboard/accounts: `web/vue/src/accounts/AccountsPage.vue`
 - Dashboard/contracts: `web/vue/src/accounts/ContractsTab.vue`
 
+Dashboard top-level tabs are now:
+- `Overview` (widgets/forecast/trend)
+- `Accounts`
+- `Contracts`
+
+`Overview` is the default tab on dashboard load.
+
 ## Design System Direction
 
 - Base visual language is Carbon.
@@ -41,18 +48,30 @@ consistent across the app.
 Use `AddTypePickerButton.vue` for right-aligned "Add ..." flows that open a type-selection dropdown from the action button. This is now shared by Accounts and Contracts tabs.
 
 Forecast-date UX:
-- Dashboard widgets include a popover `Set Forecast Date` control (`AccountsPage.vue`).
+- Dashboard widgets live under the `Overview` tab and include a popover `Set Forecast Date` control (`AccountsPage.vue`).
 - When set, frontend sends `as_of_date` in read calls:
   - `/accounts`
   - `/contracts`
 - Clearing the date returns to live mode (today / persisted state).
 - This is read-only simulation mode; write endpoints do not use forecast date.
 
+View mode UX:
+- Accounts/Contracts share one table-vs-tiles mode state.
+- Toggling `Tiles`/`Table` in one tab applies to the other tab for consistency.
+
 Trend widget behavior:
 - Net worth trend sources historical data from `GET /accounts/net-worth/history`.
 - Endpoint returns daily snapshots; frontend rolls to month-level points for readability.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
+
+### Architecture Decision: Trend Merge Semantics
+
+- Frontend treats historical and forecast series as distinct sources:
+  - history = persisted reality snapshots,
+  - forecast = simulated future path.
+- Merge is date-keyed and time-ordered to produce one continuous chart line.
+- This keeps UI logic simple and deterministic while allowing backend forecast logic to evolve without changing chart rendering contracts.
 
 Organization fuzzy search sources organizations from `GET /organizations` (not only local account state) so defaults and known icons are available immediately.
 

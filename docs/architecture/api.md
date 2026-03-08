@@ -33,6 +33,13 @@
 
 Defined in `python/mp/api/accounts.py`.
 
+### Architecture Decision: Net-Worth Data Strategy
+
+- Historical trend source is precomputed daily snapshots (`net_worth_daily_snapshot`) exposed via `GET /accounts/net-worth/history`.
+- Forecast trend source is contract-event projection points via `GET /accounts/net-worth/forecast`.
+- The API intentionally avoids full on-demand historical recomputation for every chart request because replaying long event streams does not scale predictably.
+- Fallback replay from `account_value_history` exists only when snapshots are missing (bootstrap/backfill safety path).
+
 - `GET /accounts`
 - `GET /accounts/{account_id}`
 - `GET /accounts/{account_id}/history`

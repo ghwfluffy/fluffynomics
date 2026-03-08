@@ -75,6 +75,17 @@ Contracts now carry tile-parity fields to match account dashboard interactions:
 Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
 Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
 
+### Architecture Decision: Snapshot Consistency Model
+
+- `net_worth_daily_snapshot` is updated synchronously when account value history is recorded from account update flows.
+- Snapshot granularity is intentionally **daily latest-value**:
+  - multiple updates in one day overwrite the same `(user_id, snapshot_date)` row,
+  - no separate end-of-day batch job is required.
+- Tradeoff: this is not a market-close canonical EOD ledger; it is an operational product snapshot optimized for:
+  - low-latency dashboard reads,
+  - deterministic backup/restore behavior,
+  - bounded query cost for long-lived users.
+
 ### Contract postings ledger
 
 - `contract_postings` is append-only posting history for automatic contract execution.

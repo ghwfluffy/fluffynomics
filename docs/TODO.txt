@@ -1,15 +1,5 @@
-[x] Add notes to accounts
-[\] Design
-    [x] Accounts
-    [x] Contracts
-        [x] Notes (only on edit modal)
-        [S] Filters
-        [x] Expiration
-        [x] Grouping
-    [x] Automatic asset updates from contracts
-    [ ] Expenses/Budget
-[x] Table view
-[x] dashboard widgets
+MVP
+[ ] Expenses/Budget
 Security
 [ ] Encrypt account info at rest with PBE
 [ ] Database backups
