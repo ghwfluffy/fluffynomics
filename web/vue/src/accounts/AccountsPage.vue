@@ -46,12 +46,17 @@
     </div>
 
     <div v-if="activeTab === 'accounts'" id="panel-accounts" role="tabpanel" aria-labelledby="tab-accounts">
-      <AddTypePickerButton
-        button-label="Add New Account"
-        placeholder="Select account type"
-        :options="accountTypes"
-        @select="onAccountTypePicked"
-      />
+      <div class="top-controls">
+        <ViewModeToggle v-model="dashboardViewMode" />
+      </div>
+      <div v-if="dashboardViewMode === 'tiles'">
+        <AddTypePickerButton
+          button-label="Add New Account"
+          placeholder="Select account type"
+          :options="accountTypes"
+          @select="onAccountTypePicked"
+        />
+      </div>
     </div>
 
     <div v-if="createDialog" class="modal-backdrop">
@@ -326,77 +331,142 @@
       </section>
     </div>
 
-    <template v-if="activeTab === 'accounts'">
-    <section v-for="section in sections" :key="section.key" class="section-wrap">
-      <h2 class="section-title">{{ section.title }}</h2>
-
-      <div v-if="section.accounts.length" class="section-grid">
-        <article v-for="(account, index) in section.accounts" :key="account.id" class="cds--tile account-tile">
-          <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="tile-icon" alt="Account icon" />
-          <div v-else class="tile-icon tile-icon--empty" />
-          <button
-            v-if="index > 0"
-            class="tile-rank-trigger"
-            type="button"
-            title="Move left"
-            @click="moveAccountLeft(section, index, $event)"
-          >
-            ◀
-          </button>
-          <button
-            v-if="index < section.accounts.length - 1"
-            class="tile-rank-trigger tile-rank-trigger--right"
-            type="button"
-            title="Move right"
-            @click="moveAccountRight(section, index, $event)"
-          >
-            ▶
-          </button>
-          <span
-            class="tile-update-clock"
-            :class="lastUpdateTone(account)"
-            :title="lastUpdateTooltip(account)"
-            aria-label="Last update status"
-          />
-          <a
-            v-if="account.url?.trim()"
-            class="tile-link"
-            :href="normalizedAccountUrl(account.url)"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open account link"
-            @click.stop
-          >
-            ↗
-          </a>
-          <div class="tile-title">{{ account.name }}</div>
-          <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
-          <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
-          <div class="tile-balance" :class="balanceTone(section.key)">
-            {{ balanceLabel(account) }}
-          </div>
-          <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
-          <div class="tile-type">{{ account.type.replaceAll('_', ' ') }}</div>
-          <div class="tile-actions">
+    <template v-if="activeTab === 'accounts' && dashboardViewMode === 'tiles'">
+      <section v-for="section in sections" :key="section.key" class="section-wrap">
+        <h2 class="section-title">{{ section.title }}</h2>
+        <div v-if="section.accounts.length" class="section-grid">
+          <article v-for="(account, index) in section.accounts" :key="account.id" class="cds--tile account-tile">
+            <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="tile-icon" alt="Account icon" />
+            <div v-else class="tile-icon tile-icon--empty" />
             <button
-              class="tile-menu-trigger"
+              v-if="index > 0"
+              class="tile-rank-trigger"
               type="button"
-              aria-label="Account menu"
-              @click.stop="toggleTileMenu(account.id)"
+              title="Move left"
+              @click="moveAccountLeft(section, index, $event)"
             >
-              <span class="tile-menu-dots" aria-hidden="true"></span>
+              ◀
             </button>
-            <div v-if="activeTileMenuId === account.id" class="tile-menu">
-              <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
-              <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
-              <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
-              <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">
-                Delete
-              </button>
+            <button
+              v-if="index < section.accounts.length - 1"
+              class="tile-rank-trigger tile-rank-trigger--right"
+              type="button"
+              title="Move right"
+              @click="moveAccountRight(section, index, $event)"
+            >
+              ▶
+            </button>
+            <span
+              class="tile-update-clock"
+              :class="lastUpdateTone(account)"
+              :title="lastUpdateTooltip(account)"
+              aria-label="Last update status"
+            />
+            <a
+              v-if="account.url?.trim()"
+              class="tile-link"
+              :href="normalizedAccountUrl(account.url)"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open account link"
+              @click.stop
+            >
+              ↗
+            </a>
+            <div class="tile-title">{{ account.name }}</div>
+            <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
+            <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
+            <div class="tile-balance" :class="balanceTone(section.key)">
+              {{ balanceLabel(account) }}
             </div>
-          </div>
-        </article>
-    </div>
+            <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
+            <div class="tile-type">{{ account.type.replaceAll('_', ' ') }}</div>
+            <div class="tile-actions">
+              <button
+                class="tile-menu-trigger"
+                type="button"
+                aria-label="Account menu"
+                @click.stop="toggleTileMenu(account.id)"
+              >
+                <span class="tile-menu-dots" aria-hidden="true"></span>
+              </button>
+              <div v-if="activeTileMenuId === account.id" class="tile-menu">
+                <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
+                <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
+                <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
+                <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+        <div v-else class="cds--tile empty-state">No accounts yet.</div>
+      </section>
+    </template>
+
+    <section v-if="activeTab === 'accounts' && dashboardViewMode === 'table'" class="section-wrap">
+      <div class="cds--data-table-container">
+        <div class="table-toolbar-row">
+          <DataTableControls
+            v-model="accountsTableFilter"
+            placeholder="Filter accounts"
+            :filters="accountsColumnFilters"
+            @update:filter="onAccountsColumnFilterUpdate"
+          />
+          <AddTypePickerButton
+            inline
+            button-label="Add New Account"
+            placeholder="Select account type"
+            :options="accountTypes"
+            @select="onAccountTypePicked"
+          />
+        </div>
+        <table class="cds--data-table cds--data-table--md">
+          <thead>
+            <tr>
+              <th></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('section')">Section</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('name')">Name</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('organization')">Organization</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('last4')">Last 4</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('type')">Type</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('balance')">Balance</button></th>
+              <th><button class="sort-btn" type="button" @click="setAccountsSort('last_update')">Last Update</button></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="account in accountsTableRows" :key="account.id">
+              <td class="table-icon-cell">
+                <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="table-icon" alt="Account icon" />
+                <div v-else class="table-icon table-icon--empty" aria-hidden="true"></div>
+              </td>
+              <td>{{ sectionTitleByType(account.type) }}</td>
+              <td>{{ account.name }}</td>
+              <td>{{ account.organization || 'Unknown' }}</td>
+              <td>•••• {{ last4(account.account_number) }}</td>
+              <td>{{ account.type.replaceAll('_', ' ') }}</td>
+              <td>{{ balanceLabel(account).replace('Balance ', '') }}</td>
+              <td>{{ formatLastUpdate(account.last_update) }}</td>
+              <td class="table-actions-cell">
+                <div class="table-overflow-menu">
+                  <button class="tile-menu-trigger table-menu-trigger" type="button" aria-label="Account menu" @click.stop="toggleTileMenu(account.id)">
+                    <span aria-hidden="true">⋮</span>
+                  </button>
+                  <div v-if="activeTileMenuId === account.id" class="tile-menu table-menu-list">
+                    <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
+                    <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
+                    <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
+                    <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <div v-if="historyDialog" class="modal-backdrop">
       <section class="confirm-card cds--tile confirm-card--wide">
@@ -461,17 +531,14 @@
       </section>
     </div>
 
-      <div v-if="!section.accounts.length" class="cds--tile empty-state">No accounts yet.</div>
-    </section>
-    </template>
-
     <ContractsTab
-      v-else
+      v-if="activeTab === 'contracts'"
       id="panel-contracts"
       role="tabpanel"
       aria-labelledby="tab-contracts"
       :accounts="accounts"
       :forecast-date="forecastDate"
+      v-model:view-mode="dashboardViewMode"
     />
   </div>
 </template>
@@ -485,6 +552,8 @@ import PercentField from '@/components/PercentField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
+import ViewModeToggle from '@/components/ViewModeToggle.vue'
+import DataTableControls from '@/components/DataTableControls.vue'
 import ContractsTab from '@/accounts/ContractsTab.vue'
 
 type AccountType =
@@ -589,6 +658,13 @@ const makeCreateForm = (): CreateAccountPayload => ({
 const accounts = ref<AccountPayload[]>([])
 const activeTab = ref<'accounts' | 'contracts'>('accounts')
 const forecastDate = ref<string>('')
+const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
+const accountsTableFilter = ref('')
+const accountsSortKey = ref<'section' | 'name' | 'organization' | 'last4' | 'type' | 'balance' | 'last_update'>('section')
+const accountsSortDir = ref<'asc' | 'desc'>('asc')
+const accountsSectionValues = ref<string[]>([])
+const accountsOrganizationValues = ref<string[]>([])
+const accountsTypeValues = ref<string[]>([])
 const organizations = ref<OrganizationSuggestion[]>([])
 const iconChoices = ref<IconListItem[]>([])
 const createDialog = ref(false)
@@ -701,6 +777,127 @@ const sections = computed<Section[]>(() =>
     accounts: accounts.value.filter((account) => section.types.includes(account.type)),
   })),
 )
+
+const accountsSectionOptions = computed(() =>
+  Array.from(new Set(accounts.value.map((account) => sectionTitleByType(account.type)))).sort((a, b) => a.localeCompare(b)),
+)
+const accountsOrganizationOptions = computed(() =>
+  Array.from(new Set(accounts.value.map((account) => account.organization || 'Unknown'))).sort((a, b) => a.localeCompare(b)),
+)
+const accountsTypeOptions = computed(() =>
+  Array.from(new Set(accounts.value.map((account) => account.type.replaceAll('_', ' ')))).sort((a, b) => a.localeCompare(b)),
+)
+
+const accountsColumnFilters = computed(() => [
+  { key: 'section', label: 'Section', options: accountsSectionOptions.value, selected: accountsSectionValues.value },
+  {
+    key: 'organization',
+    label: 'Organization',
+    options: accountsOrganizationOptions.value,
+    selected: accountsOrganizationValues.value,
+  },
+  { key: 'type', label: 'Type', options: accountsTypeOptions.value, selected: accountsTypeValues.value },
+])
+
+const accountsTableRows = computed(() => {
+  const needle = accountsTableFilter.value.trim().toLowerCase()
+  const rows = accounts.value.filter((account) => {
+    if (!needle) {
+      return true
+    }
+    const haystack = [
+      sectionTitleByType(account.type),
+      account.name,
+      account.organization || '',
+      account.account_number,
+      account.type,
+      balanceLabel(account),
+      formatLastUpdate(account.last_update),
+    ]
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(needle)
+  })
+  const filteredByColumns = rows.filter((account) => {
+    const section = sectionTitleByType(account.type)
+    const organization = account.organization || 'Unknown'
+    const typeLabel = account.type.replaceAll('_', ' ')
+    if (accountsSectionValues.value.length && !accountsSectionValues.value.includes(section)) {
+      return false
+    }
+    if (accountsOrganizationValues.value.length && !accountsOrganizationValues.value.includes(organization)) {
+      return false
+    }
+    if (accountsTypeValues.value.length && !accountsTypeValues.value.includes(typeLabel)) {
+      return false
+    }
+    return true
+  })
+  const sorted = [...filteredByColumns].sort((a, b) => {
+    const key = accountsSortKey.value
+    const av =
+      key === 'section'
+        ? sectionTitleByType(a.type)
+        : key === 'name'
+          ? a.name
+          : key === 'organization'
+            ? a.organization || ''
+            : key === 'last4'
+              ? last4(a.account_number)
+              : key === 'type'
+                ? a.type
+                : key === 'balance'
+                  ? tableBalanceCents(a)
+                  : new Date(a.last_update || 0).getTime()
+    const bv =
+      key === 'section'
+        ? sectionTitleByType(b.type)
+        : key === 'name'
+          ? b.name
+          : key === 'organization'
+            ? b.organization || ''
+            : key === 'last4'
+              ? last4(b.account_number)
+              : key === 'type'
+                ? b.type
+                : key === 'balance'
+                  ? tableBalanceCents(b)
+                  : new Date(b.last_update || 0).getTime()
+    if (typeof av === 'number' && typeof bv === 'number') {
+      return accountsSortDir.value === 'asc' ? av - bv : bv - av
+    }
+    return accountsSortDir.value === 'asc'
+      ? String(av).localeCompare(String(bv))
+      : String(bv).localeCompare(String(av))
+  })
+  return sorted
+})
+
+const setAccountsSort = (key: typeof accountsSortKey.value) => {
+  if (accountsSortKey.value === key) {
+    accountsSortDir.value = accountsSortDir.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  accountsSortKey.value = key
+  accountsSortDir.value = 'asc'
+}
+
+const onAccountsColumnFilterUpdate = (payload: { key: string; selected: string[] }) => {
+  if (payload.key === 'section') {
+    accountsSectionValues.value = payload.selected
+    return
+  }
+  if (payload.key === 'organization') {
+    accountsOrganizationValues.value = payload.selected
+    return
+  }
+  if (payload.key === 'type') {
+    accountsTypeValues.value = payload.selected
+  }
+}
+
+const sectionTitleByType = (type: AccountType) =>
+  sectionDefinitions.find((section) => section.types.includes(type))?.title || 'Other'
 
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
@@ -899,6 +1096,35 @@ const balanceLabel = (account: AccountPayload) => {
     return `Balance ${cents(computed)}`
   }
   return `Balance ${cents(account.balance_cents)}`
+}
+
+const tableBalanceCents = (account: AccountPayload) => {
+  if (account.type === 'stocks_account') {
+    const total = (account.stock_positions || []).reduce((sum, position) => {
+      const qty = Number.parseFloat(position.quantity || '0')
+      const price = position.last_price_cents || 0
+      if (!Number.isFinite(qty)) {
+        return sum
+      }
+      return sum + Math.round(qty * price)
+    }, 0)
+    return total + (account.balance_cents || 0)
+  }
+  if (account.type === 'crypto_wallet' || account.type === 'crypto_exchange') {
+    const total = (account.crypto_positions || []).reduce((sum, position) => {
+      const qty = Number.parseFloat(position.quantity || '0')
+      const rateCents = position.exchange_rate_cents || 0
+      if (!Number.isFinite(qty)) {
+        return sum
+      }
+      return sum + Math.round(qty * rateCents)
+    }, 0)
+    return total + (account.type === 'crypto_exchange' ? account.usd_balance_cents || 0 : 0)
+  }
+  if (account.type === 'cash') {
+    return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
+  }
+  return account.balance_cents || 0
 }
 
 const balanceTone = (sectionKey: string) =>
@@ -1531,6 +1757,22 @@ watch(
   color: var(--cds-text-secondary);
 }
 
+.top-controls {
+  margin-top: 0.75rem;
+  margin-bottom: 0.7rem;
+}
+
+.table-toolbar-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.table-toolbar-row :deep(.toolbar-shell) {
+  flex: 1;
+}
+
 .forecast-row {
   display: flex;
   align-items: end;
@@ -1643,6 +1885,57 @@ watch(
   align-items: center;
   justify-content: center;
   color: var(--cds-text-secondary);
+}
+
+.table-actions-cell {
+  position: relative;
+  width: 1%;
+}
+
+.table-overflow-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.table-menu-trigger {
+  min-width: 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 4px;
+  background: transparent;
+  color: #161616;
+  font-size: 1rem;
+}
+
+.table-menu-list {
+  right: 0;
+  left: auto;
+  min-width: 9rem;
+}
+
+.table-icon-cell {
+  width: 1%;
+}
+
+.table-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--cds-border-subtle-01);
+  object-fit: cover;
+}
+
+.table-icon--empty {
+  background: #e2e8f0;
+}
+
+.sort-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
 }
 
 .modal-card h3 {
@@ -1868,6 +2161,10 @@ watch(
 }
 
 @media (max-width: 900px) {
+  .table-toolbar-row {
+    flex-wrap: wrap;
+  }
+
   .form-grid {
     grid-template-columns: 1fr;
   }

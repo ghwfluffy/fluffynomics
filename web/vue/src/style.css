@@ -3,6 +3,11 @@
   --mp-text: #0f172a;
 }
 
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;

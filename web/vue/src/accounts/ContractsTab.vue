@@ -1,12 +1,18 @@
 <template>
   <section class="section-wrap">
-    <AddTypePickerButton
-      button-label="Add Contract"
-      placeholder="Select contract type"
-      :options="contractTypeOptions"
-      @select="onContractTypePicked"
-    />
+    <div class="top-controls">
+      <ViewModeToggle v-model="contractsViewMode" />
+    </div>
+    <div v-if="contractsViewMode === 'tiles'">
+      <AddTypePickerButton
+        button-label="Add Contract"
+        placeholder="Select contract type"
+        :options="contractTypeOptions"
+        @select="onContractTypePicked"
+      />
+    </div>
 
+    <template v-if="contractsViewMode === 'tiles'">
     <section v-for="section in sections" :key="section.key" class="section-wrap">
       <h2 class="section-title">{{ section.title }}</h2>
       <div v-if="section.contracts.length" class="section-grid">
@@ -79,6 +85,69 @@
         </article>
       </div>
       <div v-else class="cds--tile empty-state">No contracts yet.</div>
+    </section>
+    </template>
+
+    <section v-if="contractsViewMode === 'table'" class="section-wrap">
+      <div class="cds--data-table-container">
+        <div class="table-toolbar-row">
+          <DataTableControls
+            v-model="contractsTableFilter"
+            placeholder="Filter contracts"
+            :filters="contractsColumnFilters"
+            @update:filter="onContractsColumnFilterUpdate"
+          />
+          <AddTypePickerButton
+            inline
+            button-label="Add Contract"
+            placeholder="Select contract type"
+            :options="contractTypeOptions"
+            @select="onContractTypePicked"
+          />
+        </div>
+        <table class="cds--data-table cds--data-table--md">
+          <thead>
+            <tr>
+              <th></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('group')">Group</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('name')">Name</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('organization')">Organization</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('type')">Type</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('amount')">Amount</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('next_payment_days')">Next Payment</button></th>
+              <th><button class="sort-btn" type="button" @click="setContractsSort('status')">Status</button></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="contract in contractsTableRows" :key="contract.id">
+              <td class="table-icon-cell">
+                <img v-if="contractIconUrl(contract)" :src="contractIconUrl(contract)" class="table-icon" alt="Contract icon" />
+                <div v-else class="table-icon table-icon--empty" aria-hidden="true"></div>
+              </td>
+              <td>{{ contractGroupLabel(contract) }}</td>
+              <td>{{ contract.name }}</td>
+              <td>{{ contract.organization || 'Unknown' }}</td>
+              <td>{{ contractTypeLabel(contract.type) }}</td>
+              <td>{{ cents(contract.amount_cents) }}</td>
+              <td>{{ nextPaymentCountdownLabel(contract) }}</td>
+              <td>{{ contract.automatic ? 'Automatic' : 'Manual' }}</td>
+              <td class="table-actions-cell">
+                <div class="table-overflow-menu">
+                  <button class="tile-menu-trigger table-menu-trigger" type="button" aria-label="Contract menu" @click.stop="toggleTileMenu(contract.id)">
+                    <span aria-hidden="true">⋮</span>
+                  </button>
+                  <div v-if="activeTileMenuId === contract.id" class="tile-menu table-menu-list">
+                    <button type="button" class="tile-menu-option" @click="startEditContract(contract)">Edit</button>
+                    <button type="button" class="tile-menu-option" @click="openUpdateDialog(contract)">Update</button>
+                    <button type="button" class="tile-menu-option tile-menu-option--danger" @click="openDeleteContract(contract.id)">Delete</button>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <div v-if="contractDialog" class="modal-backdrop">
@@ -214,6 +283,8 @@ import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
+import ViewModeToggle from '@/components/ViewModeToggle.vue'
+import DataTableControls from '@/components/DataTableControls.vue'
 
 interface AccountSummary {
   id: string
@@ -268,7 +339,16 @@ interface Section {
   contracts: ContractPayload[]
 }
 
-const props = defineProps<{ accounts: AccountSummary[]; forecastDate?: string }>()
+const props = withDefaults(
+  defineProps<{ accounts: AccountSummary[]; forecastDate?: string; viewMode?: 'tiles' | 'table' }>(),
+  {
+    viewMode: 'tiles',
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:viewMode', value: 'tiles' | 'table'): void
+}>()
 
 const PRESET_CATEGORIES = ['Living', 'Entertainment', 'Health', 'Digital', 'Financial', 'Work', 'Family']
 
@@ -294,6 +374,17 @@ const makeContractForm = (): ContractForm => ({
 })
 
 const contracts = ref<ContractPayload[]>([])
+const contractsViewMode = computed<'tiles' | 'table'>({
+  get: () => props.viewMode,
+  set: (value) => emit('update:viewMode', value),
+})
+const contractsTableFilter = ref('')
+const contractsSortKey = ref<'group' | 'name' | 'organization' | 'type' | 'amount' | 'next_payment_days' | 'status'>('group')
+const contractsSortDir = ref<'asc' | 'desc'>('asc')
+const contractsGroupValues = ref<string[]>([])
+const contractsOrganizationValues = ref<string[]>([])
+const contractsTypeValues = ref<string[]>([])
+const contractsStatusValues = ref<string[]>([])
 const organizations = ref<OrganizationSuggestion[]>([])
 const iconChoices = ref<IconListItem[]>([])
 const contractDialog = ref(false)
@@ -370,12 +461,138 @@ const sections = computed<Section[]>(() => {
   return grouped
 })
 
+const contractsTableRows = computed(() => {
+  const needle = contractsTableFilter.value.trim().toLowerCase()
+  const rows = contracts.value.filter((contract) => {
+    if (!needle) {
+      return true
+    }
+    const haystack = [
+      contractGroupLabel(contract),
+      contract.name,
+      contract.organization || '',
+      contractTypeLabel(contract.type),
+      cents(contract.amount_cents),
+      nextPaymentCountdownLabel(contract),
+      contract.automatic ? 'Automatic' : 'Manual',
+    ]
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(needle)
+  })
+  const filteredByColumns = rows.filter((contract) => {
+    const group = contractGroupLabel(contract)
+    const org = contract.organization || 'Unknown'
+    const type = contractTypeLabel(contract.type)
+    const status = contract.automatic ? 'Automatic' : 'Manual'
+    if (contractsGroupValues.value.length && !contractsGroupValues.value.includes(group)) {
+      return false
+    }
+    if (contractsOrganizationValues.value.length && !contractsOrganizationValues.value.includes(org)) {
+      return false
+    }
+    if (contractsTypeValues.value.length && !contractsTypeValues.value.includes(type)) {
+      return false
+    }
+    if (contractsStatusValues.value.length && !contractsStatusValues.value.includes(status)) {
+      return false
+    }
+    return true
+  })
+  return [...filteredByColumns].sort((a, b) => {
+    const key = contractsSortKey.value
+    const av =
+      key === 'group'
+        ? contractGroupLabel(a)
+        : key === 'name'
+          ? a.name
+          : key === 'organization'
+            ? a.organization || ''
+            : key === 'type'
+              ? a.type
+              : key === 'amount'
+                ? (a.amount_cents || 0)
+                : key === 'next_payment_days'
+                  ? nextPaymentDays(a)
+                  : a.automatic ? 0 : 1
+    const bv =
+      key === 'group'
+        ? contractGroupLabel(b)
+        : key === 'name'
+          ? b.name
+          : key === 'organization'
+            ? b.organization || ''
+            : key === 'type'
+              ? b.type
+              : key === 'amount'
+                ? (b.amount_cents || 0)
+                : key === 'next_payment_days'
+                  ? nextPaymentDays(b)
+                  : b.automatic ? 0 : 1
+    if (typeof av === 'number' && typeof bv === 'number') {
+      return contractsSortDir.value === 'asc' ? av - bv : bv - av
+    }
+    return contractsSortDir.value === 'asc'
+      ? String(av).localeCompare(String(bv))
+      : String(bv).localeCompare(String(av))
+  })
+})
+
+const setContractsSort = (key: typeof contractsSortKey.value) => {
+  if (contractsSortKey.value === key) {
+    contractsSortDir.value = contractsSortDir.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  contractsSortKey.value = key
+  contractsSortDir.value = 'asc'
+}
+
+const onContractsColumnFilterUpdate = (payload: { key: string; selected: string[] }) => {
+  if (payload.key === 'group') {
+    contractsGroupValues.value = payload.selected
+    return
+  }
+  if (payload.key === 'organization') {
+    contractsOrganizationValues.value = payload.selected
+    return
+  }
+  if (payload.key === 'type') {
+    contractsTypeValues.value = payload.selected
+    return
+  }
+  if (payload.key === 'status') {
+    contractsStatusValues.value = payload.selected
+  }
+}
+
 const categoryOptions = computed(() =>
   Array.from(new Set([...PRESET_CATEGORIES, ...contracts.value.map((c) => c.category || 'Financial')])).map((value) => ({
     label: value,
     value,
   })),
 )
+
+const contractsGroupOptions = computed(() =>
+  Array.from(new Set(contracts.value.map((contract) => contractGroupLabel(contract)))).sort((a, b) => a.localeCompare(b)),
+)
+const contractsOrganizationOptions = computed(() =>
+  Array.from(new Set(contracts.value.map((contract) => contract.organization || 'Unknown'))).sort((a, b) => a.localeCompare(b)),
+)
+const contractsTypeOptionsFilter = computed(() =>
+  Array.from(new Set(contracts.value.map((contract) => contractTypeLabel(contract.type)))).sort((a, b) => a.localeCompare(b)),
+)
+const contractsStatusOptions = computed(() => ['Automatic', 'Manual'])
+const contractsColumnFilters = computed(() => [
+  { key: 'group', label: 'Group', options: contractsGroupOptions.value, selected: contractsGroupValues.value },
+  {
+    key: 'organization',
+    label: 'Organization',
+    options: contractsOrganizationOptions.value,
+    selected: contractsOrganizationValues.value,
+  },
+  { key: 'type', label: 'Type', options: contractsTypeOptionsFilter.value, selected: contractsTypeValues.value },
+  { key: 'status', label: 'Status', options: contractsStatusOptions.value, selected: contractsStatusValues.value },
+])
 
 const organizationDropdownOptions = computed(() =>
   organizations.value.map((value) => ({
@@ -427,6 +644,8 @@ const contractIconUrl = (contract: ContractPayload) => resolveIconUrl(contract.i
 const contractTypeLabel = (type: string) => ({ income: 'Income', payment: 'Payment', transfer: 'Transfer' }[type] || type)
 const contractTypeGroupLabel = (type: string) =>
   ({ income: 'Incoming', payment: 'Payment', transfer: 'Transfer' }[type] || type)
+const contractGroupLabel = (contract: ContractPayload) =>
+  isExpired(contract) ? 'Expired' : `${contractTypeGroupLabel(contract.type)} ${contract.category || 'Financial'}`
 const accountNameById = (accountId?: string) => props.accounts.find((account) => account.id === accountId)?.name || 'Unknown account'
 
 const ordinal = (value: number) => {
@@ -660,14 +879,21 @@ const formatPaymentDate = (value: Date | null) => {
 const nextPaymentTooltip = (contract: ContractPayload) => `next payment: ${formatPaymentDate(nextPaymentDate(contract))}`
 
 const nextPaymentCountdownLabel = (contract: ContractPayload) => {
+  const days = nextPaymentDays(contract)
+  if (days < 0) {
+    return 'Next payment: Unknown'
+  }
+  return `Next payment: ${days} day${days === 1 ? '' : 's'}`
+}
+
+const nextPaymentDays = (contract: ContractPayload) => {
   const next = nextPaymentDate(contract)
   if (!next) {
-    return 'Next payment: Unknown'
+    return -1
   }
   const today = startOfDay(new Date())
   const target = startOfDay(next)
-  const days = Math.max(0, Math.floor((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
-  return `Next payment: ${days} day${days === 1 ? '' : 's'}`
+  return Math.max(0, Math.floor((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
 }
 
 const lastUpdateTone = (raw?: string) => {
@@ -1021,8 +1247,74 @@ watch(
   margin-top: 0.75rem;
 }
 
+.top-controls {
+  margin-bottom: 0.7rem;
+}
+
+.table-toolbar-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.table-toolbar-row :deep(.toolbar-shell) {
+  flex: 1;
+}
+
 .section-title {
   margin: 0 0 0.75rem;
+}
+
+.table-actions-cell {
+  position: relative;
+  width: 1%;
+}
+
+.table-overflow-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.table-menu-trigger {
+  min-width: 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 4px;
+  background: transparent;
+  color: #161616;
+  font-size: 1rem;
+}
+
+.table-menu-list {
+  right: 0;
+  left: auto;
+  min-width: 9rem;
+}
+
+.table-icon-cell {
+  width: 1%;
+}
+
+.table-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--cds-border-subtle-01);
+  object-fit: cover;
+}
+
+.table-icon--empty {
+  background: #e2e8f0;
+}
+
+.sort-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
 }
 
 .tile-automatic-icon {
@@ -1201,6 +1493,10 @@ watch(
 }
 
 @media (max-width: 1000px) {
+  .table-toolbar-row {
+    flex-wrap: wrap;
+  }
+
   .form-grid {
     grid-template-columns: 1fr;
   }

@@ -1,15 +1,15 @@
 <template>
-  <div class="action-row">
+  <div class="action-row" :data-inline="props.inline ? 'true' : 'false'">
     <button ref="trigger" class="cds--btn cds--btn--primary" type="button" @click="open = !open">
-      {{ buttonLabel }}
+      {{ props.buttonLabel }}
     </button>
     <div v-if="open" ref="picker" class="type-picker" :style="{ width: `${pickerWidth}px` }">
       <UnifiedDropdown
         auto-open
         :scrollable="false"
         menu-only
-        :placeholder="placeholder"
-        :options="options"
+        :placeholder="props.placeholder"
+        :options="props.options"
         @update:modelValue="onPick"
       />
     </div>
@@ -25,13 +25,15 @@ interface Option {
   value: string
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     buttonLabel: string
     placeholder?: string
     options: Option[]
+    inline?: boolean
   }>(),
   {
+    inline: false,
     placeholder: 'Select type',
   },
 )
@@ -87,6 +89,10 @@ onUnmounted(() => {
   margin-bottom: 1.25rem;
   display: flex;
   justify-content: flex-end;
+}
+
+.action-row[data-inline='true'] {
+  margin-bottom: 0;
 }
 
 .type-picker {
