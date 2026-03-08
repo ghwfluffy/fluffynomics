@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     apr_bps INT,
     billing_day INT CHECK (billing_day BETWEEN 1 AND 31),
     payment_day INT CHECK (payment_day BETWEEN 1 AND 31),
+    last_payment_date DATE,
     expiration_date DATE,
     cvc TEXT,
     usd_balance_cents BIGINT,

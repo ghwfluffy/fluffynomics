@@ -31,5 +31,4 @@ Fluffynomics brings your accounts and investments together so you can track your
 
 - `web/`: Vue app + NGINX container for TLS/static serving
 - `python/`: FastAPI app, ORM models, API routes, DB upgrade logic
-- `python/mp/db/migrations/`: schema source of truth and revisioned upgrades
 - `docker-compose.yml`: local service orchestration

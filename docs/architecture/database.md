@@ -51,6 +51,8 @@ Account timestamp semantics are intentionally split:
 - `accounts.icon_id` references `icon_assets.id`.
 - `accounts.icon_type` is enum-like constrained text: `Letters`, `Gravatar`, `Icon`.
   - for `Letters`/`Gravatar`, `accounts.icon_id` is expected to be null and icon bytes are generated on demand
+- `accounts.last_payment_date` stores the most recently recorded payment date for payable accounts (`line_of_credit`, `credit_card`, `loan`).
+- Cash balances should be treated as derived from `account_cash_denominations` quantities (not an independently authored static `accounts.balance_cents` value).
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
 
 ### User-scoped uniqueness

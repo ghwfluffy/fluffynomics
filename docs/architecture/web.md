@@ -46,6 +46,8 @@ In `AccountsPage.vue`:
   - opens custom modal
   - calls `PUT /accounts/{id}/value`
   - intended to refresh business values and drive `last_update`
+  - for `cash` accounts, update modal edits bill quantities (`$1,$2,$5,$10,$20,$50,$100`) instead of static balance input
+  - cash balance shown on tile is derived from bill quantities
 - Delete flow uses custom confirm modal (no browser `alert/confirm`).
 - Account create/edit modal supports icon upload:
   - uploads to `POST /icons`
@@ -58,6 +60,8 @@ In `AccountsPage.vue`:
   - users can choose from icon library via `GET /icons` (defaults + their uploads)
   - generic defaults are available via backend default icon catalog (`GET /default-icons`) for consistent fallback choices
   - right-click on a user-uploaded icon in the picker opens delete action (`DELETE /icons/{id}`)
+  - all account types expose an editable `url` field near the bottom of the modal
+  - account tiles show a hyperlink icon when URL is present; opening uses a new browser tab
 
 ## Ranking / Reorder UX
 

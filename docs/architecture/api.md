@@ -39,6 +39,8 @@ Defined in `python/mp/api/accounts.py`.
 - `PUT /accounts/{account_id}/value`
   - dedicated “value update” endpoint used by dashboard Update modal
   - updates balance/position values only
+  - for `line_of_credit`/`credit_card`/`loan`, can also set `last_payment_date`
+  - for `cash` accounts, accepts `cash_bills` quantities and balance is derived from denominations
   - sets `accounts.last_update = now()`
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)

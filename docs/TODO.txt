@@ -1,7 +1,9 @@
-[ ] Organization icons
+[\] Design
+[ ] letsencrypt TLS w/ ACME
+[ ] upcoming payment alerts (UI)
+[ ] upcoming payment alerts (SMS)
 [ ] Mobile site
 [ ] dashboard widgets
-[ ] Design
 [ ] Encrypt at rest with PBE
 [ ] Database backups
 [ ] Verify security of password auth

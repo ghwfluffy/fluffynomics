@@ -50,6 +50,7 @@ class Account(Base):
     apr_bps: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     billing_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     expiration_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     cvc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     usd_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -211,6 +212,7 @@ class AccountBaseSchema(BaseModel):
     apr_bps: Optional[int] = None
     billing_day: Optional[int] = None
     payment_day: Optional[int] = None
+    last_payment_date: Optional[date] = None
     expiration_date: Optional[date] = None
     cvc: Optional[str] = None
     usd_balance_cents: Optional[int] = None
@@ -244,6 +246,7 @@ class AccountUpdateSchema(BaseModel):
     apr_bps: Optional[int] = None
     billing_day: Optional[int] = None
     payment_day: Optional[int] = None
+    last_payment_date: Optional[date] = None
     expiration_date: Optional[date] = None
     cvc: Optional[str] = None
     usd_balance_cents: Optional[int] = None
@@ -259,8 +262,10 @@ class AccountUpdateSchema(BaseModel):
 class AccountValueUpdateSchema(BaseModel):
     balance_cents: Optional[int] = None
     usd_balance_cents: Optional[int] = None
+    last_payment_date: Optional[date] = None
     stock_positions: Optional[list[PositionStockSchema]] = None
     crypto_positions: Optional[list[PositionCryptoSchema]] = None
+    cash_bills: Optional[list[CashBillSchema]] = None
 
 
 class AccountRankUpdateSchema(BaseModel):

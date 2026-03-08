@@ -148,6 +148,11 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
     stock_positions, crypto_positions, cash_bills = _hydrate_nested_positions(
         db, account
     )
+    derived_cash_balance = None
+    if account.type == "cash":
+        derived_cash_balance = sum(
+            position.denomination_cents * position.quantity for position in cash_bills
+        )
     return AccountSchema(
         id=account.id,
         user_id=account.user_id,
@@ -158,7 +163,9 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         organization=account.organization,
         url=account.url,
         notes=account.notes,
-        balance_cents=account.balance_cents,
+        balance_cents=derived_cash_balance
+        if derived_cash_balance is not None
+        else account.balance_cents,
         fee_amount_cents=account.fee_amount_cents,
         fee_period=account.fee_period,
         routing_number=account.routing_number,
@@ -167,6 +174,7 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         apr_bps=account.apr_bps,
         billing_day=account.billing_day,
         payment_day=account.payment_day,
+        last_payment_date=account.last_payment_date,
         expiration_date=account.expiration_date,
         cvc=account.cvc,
         usd_balance_cents=account.usd_balance_cents,
@@ -299,7 +307,7 @@ def create_account(
         organization=payload.organization.strip() if payload.organization else None,
         url=payload.url,
         notes=payload.notes,
-        balance_cents=payload.balance_cents,
+        balance_cents=None if payload.type == "cash" else payload.balance_cents,
         fee_amount_cents=payload.fee_amount_cents,
         fee_period=payload.fee_period,
         routing_number=payload.routing_number,
@@ -308,6 +316,7 @@ def create_account(
         apr_bps=payload.apr_bps,
         billing_day=payload.billing_day,
         payment_day=payload.payment_day,
+        last_payment_date=payload.last_payment_date,
         expiration_date=payload.expiration_date,
         cvc=payload.cvc,
         usd_balance_cents=payload.usd_balance_cents,
@@ -416,6 +425,7 @@ def update_account(
         apr_bps=data.get("apr_bps", account.apr_bps),
         billing_day=data.get("billing_day", account.billing_day),
         payment_day=data.get("payment_day", account.payment_day),
+        last_payment_date=data.get("last_payment_date", account.last_payment_date),
         expiration_date=data.get("expiration_date", account.expiration_date),
         cvc=data.get("cvc", account.cvc),
         usd_balance_cents=data.get("usd_balance_cents", account.usd_balance_cents),
@@ -487,6 +497,7 @@ def update_account(
         "apr_bps",
         "billing_day",
         "payment_day",
+        "last_payment_date",
         "expiration_date",
         "cvc",
         "usd_balance_cents",
@@ -502,6 +513,9 @@ def update_account(
             ):
                 value = value.strip()
             setattr(account, field, value)
+
+    if account.type == "cash":
+        account.balance_cents = None
 
     account.icon_type = merged_payload.icon_type
     account.icon_id = merged_payload.icon_id
@@ -736,17 +750,19 @@ def update_account_value(
     if not data:
         raise HTTPException(status_code=400, detail="No value updates provided")
 
-    if "balance_cents" in data:
+    if "balance_cents" in data and account.type != "cash":
         account.balance_cents = data["balance_cents"]
     if "usd_balance_cents" in data:
         account.usd_balance_cents = data["usd_balance_cents"]
+    if "last_payment_date" in data:
+        account.last_payment_date = data["last_payment_date"]
 
     _replace_nested_positions(
         db,
         account_id,
         payload.stock_positions,
         payload.crypto_positions,
-        None,
+        payload.cash_bills,
     )
     account.last_update = datetime.utcnow()
     db.commit()

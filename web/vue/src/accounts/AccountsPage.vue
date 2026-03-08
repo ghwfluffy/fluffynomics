@@ -38,6 +38,15 @@
           <BankField v-model="createForm.name" label="Account Name" required />
           <BankField v-model="createForm.account_number" label="Account Number" required />
 
+          <div v-if="needsRouting" class="column-spacer" aria-hidden="true"></div>
+          <BankField v-if="needsRouting" v-model="createForm.routing_number" label="Routing Number" />
+
+          <div v-if="createForm.type === 'credit_card'" class="column-spacer" aria-hidden="true"></div>
+          <div v-if="createForm.type === 'credit_card'" class="field-row-inline">
+            <BankField v-model="createForm.expiration_date" label="Expiration Date" type="date" />
+            <BankField v-model="createForm.cvc" label="CVC" />
+          </div>
+
           <UnifiedDropdown
             v-model="createForm.organization"
             label="Organization"
@@ -71,33 +80,38 @@
             <DollarField v-model="createForm.balance_cents" label="Balance" />
           </div>
 
-          <template v-if="needsFee">
+          <div v-if="needsFee" class="fee-row">
             <DollarField v-model="createForm.fee_amount_cents" label="Fee Amount" />
-            <RecurringPeriodField v-model="createForm.fee_period" label="Fee Period" />
-          </template>
-
-          <div v-if="needsRouting">
-            <BankField v-model="createForm.routing_number" label="Routing Number" />
+            <RecurringPeriodField v-if="showFeePeriod" v-model="createForm.fee_period" label="Fee Period" />
           </div>
 
-          <template v-if="needsApy">
-            <BankField v-model="createForm.apy_bps" label="APY (bps)" type="number" />
-            <BankField v-model="createForm.compound_period" label="Compound Period" :options="compoundPeriodOptions" />
-          </template>
-
-          <template v-if="needsApr">
-            <BankField v-model="createForm.apr_bps" label="APR (bps)" type="number" />
+          <div v-if="needsApy" class="field-row">
+            <PercentField v-model="createForm.apy_bps" label="APY" />
             <BankField
-              v-if="needsCompoundPeriod"
               v-model="createForm.compound_period"
               label="Compound Period"
               :options="compoundPeriodOptions"
             />
+          </div>
+
+          <template v-if="needsApr && !needsCompoundPeriod">
+            <PercentField v-model="createForm.apr_bps" label="APR" />
+          </template>
+          <div v-if="needsApr && needsCompoundPeriod" class="field-row">
+            <PercentField v-model="createForm.apr_bps" label="APR" />
+            <BankField
+              v-model="createForm.compound_period"
+              label="Compound Period"
+              :options="compoundPeriodOptions"
+            />
+          </div>
+
+          <div v-if="needsBillingDay || needsPaymentDay" class="field-row">
             <BankField v-if="needsBillingDay" v-model="createForm.billing_day" label="Billing Day" type="number" />
             <BankField v-if="needsPaymentDay" v-model="createForm.payment_day" label="Payment Day" type="number" />
-          </template>
+          </div>
 
-          <template v-if="needsExpiration">
+          <template v-if="needsExpiration && createForm.type !== 'credit_card'">
             <BankField v-model="createForm.expiration_date" label="Expiration Date" type="date" />
             <BankField v-if="needsCvc" v-model="createForm.cvc" label="CVC" />
           </template>
@@ -116,6 +130,10 @@
 
           <div v-if="createForm.type === 'loan'">
             <DollarField v-model="createForm.payment_amount_cents" label="Payment Amount" />
+          </div>
+
+          <div class="field-row">
+            <BankField v-model="createForm.url" label="Account URL" type="url" />
           </div>
 
           <div class="modal-actions">
@@ -204,7 +222,22 @@
             v-model="updateForm.amountCents"
             :label="updateAmountLabel"
           />
-          <template v-else>
+          <div v-else-if="updateMode === 'cash_bills'" class="cash-bills-grid">
+            <BankField v-model="updateForm.cashBills[100]" label="$1 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[200]" label="$2 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[500]" label="$5 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[1000]" label="$10 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[2000]" label="$20 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[5000]" label="$50 bills" type="number" />
+            <BankField v-model="updateForm.cashBills[10000]" label="$100 bills" type="number" />
+          </div>
+          <BankField
+            v-if="showLastPaymentDateField"
+            v-model="updateForm.lastPaymentDate"
+            label="Last Payment Date"
+            type="date"
+          />
+          <template v-else-if="updateMode === 'quantity'">
             <BankField v-model="updateForm.quantity" label="Quantity" />
             <BankField v-if="updatingAccount?.type === 'crypto_wallet'" v-model="updateForm.ticker" label="Ticker" />
           </template>
@@ -248,12 +281,24 @@
             :title="lastUpdateTooltip(account)"
             aria-label="Last update status"
           />
+          <a
+            v-if="account.url?.trim()"
+            class="tile-link"
+            :href="normalizedAccountUrl(account.url)"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open account link"
+            @click.stop
+          >
+            ↗
+          </a>
           <div class="tile-title">{{ account.name }}</div>
           <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
           <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
           <div class="tile-balance" :class="balanceTone(section.key)">
             {{ balanceLabel(account) }}
           </div>
+          <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
           <div class="tile-type">{{ account.type.replaceAll('_', ' ') }}</div>
           <div class="tile-actions">
             <button
@@ -285,6 +330,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
+import PercentField from '@/components/PercentField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
@@ -310,11 +356,15 @@ interface AccountPayload {
   name: string
   type: AccountType
   organization?: string
+  url?: string
+  payment_day?: number
+  last_payment_date?: string
   last_update?: string
   balance_cents?: number
   usd_balance_cents?: number
   stock_positions?: Array<{ stock_id: string; quantity: string }>
   crypto_positions?: Array<{ ticker: string; quantity: string }>
+  cash_bills?: Array<{ denomination_cents: number; quantity: number }>
 }
 
 interface Section {
@@ -329,6 +379,7 @@ interface CreateAccountPayload {
   name: string
   type: AccountType
   organization?: string
+  url?: string
   balance_cents?: number
   fee_amount_cents?: number
   fee_period?: string
@@ -338,6 +389,7 @@ interface CreateAccountPayload {
   apr_bps?: number
   billing_day?: number
   payment_day?: number
+  last_payment_date?: string
   expiration_date?: string
   cvc?: string
   usd_balance_cents?: number
@@ -388,6 +440,16 @@ const updateForm = ref({
   amountCents: 0,
   quantity: '0',
   ticker: '',
+  lastPaymentDate: '',
+  cashBills: {
+    100: 0,
+    200: 0,
+    500: 0,
+    1000: 0,
+    2000: 0,
+    5000: 0,
+    10000: 0,
+  } as Record<number, number>,
 })
 const showTypePicker = ref(false)
 const activeTileMenuId = ref<string | null>(null)
@@ -443,6 +505,7 @@ const needsBalance = computed(() =>
 const needsFee = computed(() =>
   ['checking', 'savings', 'line_of_credit', 'credit_card'].includes(createForm.value.type),
 )
+const showFeePeriod = computed(() => needsFee.value && (createForm.value.fee_amount_cents || 0) !== 0)
 const needsRouting = computed(() => ['checking', 'savings'].includes(createForm.value.type))
 const needsApy = computed(() => createForm.value.type === 'savings')
 const needsApr = computed(() => ['line_of_credit', 'credit_card', 'loan'].includes(createForm.value.type))
@@ -464,9 +527,13 @@ const sections = computed<Section[]>(() =>
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
 const submitLabel = computed(() => (editingAccountId.value ? 'Save Changes' : 'Create'))
-const updateMode = computed<'dollars' | 'quantity'>(() =>
-  ['stocks_account', 'crypto_wallet'].includes(updatingAccount.value?.type || '') ? 'quantity' : 'dollars',
-)
+const updateMode = computed<'dollars' | 'quantity' | 'cash_bills'>(() => {
+  const type = updatingAccount.value?.type || ''
+  if (type === 'cash') {
+    return 'cash_bills'
+  }
+  return ['stocks_account', 'crypto_wallet'].includes(type) ? 'quantity' : 'dollars'
+})
 const updateAmountLabel = computed(() =>
   updatingAccount.value?.type === 'crypto_exchange' ? 'USD Balance' : 'Balance',
 )
@@ -477,11 +544,19 @@ const updateDescription = computed(() => {
   if (updateMode.value === 'dollars') {
     return 'Update the current account balance amount.'
   }
+  if (updateMode.value === 'cash_bills') {
+    return 'Update bill quantities. Cash balance is calculated from bill counts.'
+  }
   if (updatingAccount.value.type === 'stocks_account') {
     return 'Update the quantity for the first stock position on this account.'
   }
   return 'Update the quantity for the first crypto position on this account.'
 })
+const showLastPaymentDateField = computed(
+  () =>
+    updateMode.value === 'dollars' &&
+    ['line_of_credit', 'credit_card', 'loan'].includes(updatingAccount.value?.type || ''),
+)
 
 const organizationOptions = computed(() => organizations.value.map((item) => item.name))
 
@@ -520,11 +595,83 @@ const balanceLabel = (account: AccountPayload) => {
   if (account.type === 'crypto_exchange') {
     return `USD ${cents(account.usd_balance_cents)}`
   }
+  if (account.type === 'cash') {
+    const computed = (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
+    return `Balance ${cents(computed)}`
+  }
   return `Balance ${cents(account.balance_cents)}`
 }
 
 const balanceTone = (sectionKey: string) =>
   ['credit_cards', 'payables'].includes(sectionKey) ? 'balance-liability' : 'balance-asset'
+
+const parseDateOnly = (raw?: string) => {
+  if (!raw) {
+    return null
+  }
+  const parsed = new Date(`${raw.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  parsed.setHours(0, 0, 0, 0)
+  return parsed
+}
+
+const lastDayOfMonth = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
+
+const monthlyDate = (year: number, monthZeroBased: number, paymentDay: number) => {
+  const safeDay = Math.min(Math.max(paymentDay, 1), lastDayOfMonth(year, monthZeroBased))
+  const date = new Date(year, monthZeroBased, safeDay)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
+const plusMonths = (base: Date, count: number, paymentDay: number) =>
+  monthlyDate(base.getFullYear(), base.getMonth() + count, paymentDay)
+
+const computePaymentDates = (account: AccountPayload) => {
+  if (!['line_of_credit', 'credit_card', 'loan'].includes(account.type)) {
+    return null
+  }
+  const paymentDay = account.payment_day || 0
+  if (paymentDay <= 0) {
+    return null
+  }
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const scheduledThisMonth = monthlyDate(today.getFullYear(), today.getMonth(), paymentDay)
+  const mostRecentScheduled = scheduledThisMonth <= today ? scheduledThisMonth : plusMonths(scheduledThisMonth, -1, paymentDay)
+  let nextScheduled = scheduledThisMonth > today ? scheduledThisMonth : plusMonths(scheduledThisMonth, 1, paymentDay)
+
+  const recorded = parseDateOnly(account.last_payment_date)
+  let effectiveLast = recorded
+  if (today > mostRecentScheduled && (!effectiveLast || effectiveLast < mostRecentScheduled)) {
+    effectiveLast = mostRecentScheduled
+  }
+
+  // If payment was made early (after last scheduled date but before/at upcoming schedule),
+  // treat upcoming schedule as already handled and move to the following cycle.
+  if (recorded && recorded > mostRecentScheduled && recorded <= nextScheduled) {
+    nextScheduled = plusMonths(nextScheduled, 1, paymentDay)
+  }
+  return { last: effectiveLast, next: nextScheduled }
+}
+
+const formatPaymentDate = (date: Date | null) => {
+  if (!date) {
+    return 'Unknown'
+  }
+  const month = date.toLocaleString('en-US', { month: 'short' })
+  return `${month} ${ordinal(date.getDate())}`
+}
+
+const paymentSummary = (account: AccountPayload) => {
+  const dates = computePaymentDates(account)
+  if (!dates) {
+    return null
+  }
+  return `Last pay ${formatPaymentDate(dates.last)} • Next pay ${formatPaymentDate(dates.next)}`
+}
 
 const ordinal = (value: number) => {
   const mod100 = value % 100
@@ -584,6 +731,16 @@ const loadIcons = async () => {
 }
 
 const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
+const normalizedAccountUrl = (raw?: string) => {
+  const value = (raw || '').trim()
+  if (!value) {
+    return '#'
+  }
+  if (/^https?:\/\//i.test(value)) {
+    return value
+  }
+  return `https://${value}`
+}
 const generatedIconUrl = (iconType: 'Letters' | 'Gravatar', organization?: string) => {
   const seed = (organization || '').trim() || 'Organization'
   const encoded = encodeURIComponent(seed)
@@ -803,9 +960,18 @@ const openUpdateDialog = (account: AccountPayload) => {
     updateForm.value.ticker = firstPosition?.ticker || ''
   } else if (account.type === 'crypto_exchange') {
     updateForm.value.amountCents = account.usd_balance_cents || 0
+  } else if (account.type === 'cash') {
+    const nextBills: Record<number, number> = { 100: 0, 200: 0, 500: 0, 1000: 0, 2000: 0, 5000: 0, 10000: 0 }
+    for (const bill of account.cash_bills || []) {
+      if (bill.denomination_cents in nextBills) {
+        nextBills[bill.denomination_cents] = bill.quantity
+      }
+    }
+    updateForm.value.cashBills = nextBills
   } else {
     updateForm.value.amountCents = account.balance_cents || 0
   }
+  updateForm.value.lastPaymentDate = account.last_payment_date?.slice(0, 10) || ''
   updateDialog.value = true
 }
 
@@ -829,6 +995,14 @@ const submitUpdateValue = async () => {
     } else {
       payload.balance_cents = updateForm.value.amountCents
     }
+    if (showLastPaymentDateField.value) {
+      payload.last_payment_date = updateForm.value.lastPaymentDate || null
+    }
+  } else if (updateMode.value === 'cash_bills') {
+    payload.cash_bills = Object.entries(updateForm.value.cashBills).map(([denomination, quantity]) => ({
+      denomination_cents: Number.parseInt(denomination, 10),
+      quantity: Math.max(0, Math.floor(Number(quantity) || 0)),
+    }))
   } else if (account.type === 'stocks_account') {
     if (!isValidQuantity(updateForm.value.quantity)) {
       errorMessage.value = 'Quantity must be a valid number'
@@ -958,6 +1132,15 @@ watch(
     }
   },
 )
+
+watch(
+  () => createForm.value.fee_amount_cents,
+  (next) => {
+    if ((next || 0) === 0) {
+      createForm.value.fee_period = undefined
+    }
+  },
+)
 </script>
 
 <style scoped>
@@ -1049,6 +1232,36 @@ watch(
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.fee-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-row-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cash-bills-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.column-spacer {
+  min-height: 1px;
 }
 
 .modal-actions {
@@ -1269,6 +1482,23 @@ watch(
   border: 2px solid currentColor;
   cursor: default;
   display: inline-block;
+}
+
+.tile-link {
+  position: absolute;
+  right: 1.95rem;
+  top: 0.42rem;
+  text-decoration: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #64748b;
+  border-radius: 3px;
+  color: #111827;
+  font-size: 0.75rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tile-update-clock::before,
