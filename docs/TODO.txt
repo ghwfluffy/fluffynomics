@@ -1,5 +1,4 @@
 Security
-[ ] nginx rate limitting
 [ ] Encrypt account info at rest with PBE
 Prod deployment
 [ ] Domain

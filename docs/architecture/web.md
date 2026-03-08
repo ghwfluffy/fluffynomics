@@ -229,3 +229,6 @@ Color mapping:
 
 - Built web app served by NGINX (`web/Dockerfile`, `web/nginx.conf`).
 - API requests should go through `/api/*` via NGINX proxy.
+- Edge rate limiting is enforced in `web/nginx.conf`:
+  - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),
+  - broader per-IP request + connection limits for `/api/*`.
