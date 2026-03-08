@@ -67,9 +67,26 @@ Stocks:
 - ticker
 - exchange (IE: NYSE)
 
+Contracts:
+- They all have:
+    - Automatic (boolean)
+    - Amount (USD)
+    - Linked account (UUID)
+    - Last payment
+    - Payment period
+    - Payment day
+    - Notes
+    - Category (user defined, presets are: Living, Entertainment, Health, Digital, Financial, Work, Family)
+- Types:
+    - Income
+    - Payment
+        - URL
+        - Account number
+        - Billing day
+    - Transfer
+        - Source account (UUID)
+
 TODO:
-- Contracts
-- Recurring deposits
 - Expenses/Budget
 - Assets
 - Receivables

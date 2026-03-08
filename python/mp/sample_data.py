@@ -14,6 +14,7 @@ from mp.schema.account import (
     Organization,
     Stock,
 )
+from mp.schema.contract import Contract
 from mp.schema.user import User
 
 
@@ -58,6 +59,15 @@ def _ensure_stock(db: Session, user: User, ticker: str, payload: dict) -> Stock:
     elif payload.get("last_price_cents") is not None:
         stock.last_price_cents = payload["last_price_cents"]
     return stock
+
+
+def _ensure_contract(db: Session, user: User, name: str, payload: dict) -> Contract:
+    contract = db.query(Contract).filter_by(user_id=user.id, name=name).first()
+    if contract is None:
+        contract = Contract(user_id=user.id, name=name, **payload)
+        db.add(contract)
+        db.flush()
+    return contract
 
 
 def _account_value_cents(db: Session, account: Account) -> int:
@@ -487,33 +497,69 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
     )
     for seeded in seeded_accounts:
         _ensure_history_seed(db, user, seeded)
-    db.execute(
-        text(
-            """
-            INSERT INTO contracts (
-                name, amount, delta_amount, frequency, next_payment,
-                automatic, payment_account_id, category, active, notes
-            )
-            SELECT
-                :name, :amount, :delta_amount, :frequency, :next_payment,
-                :automatic, :payment_account_id, :category, :active, :notes
-            WHERE NOT EXISTS (
-                SELECT 1 FROM contracts
-                WHERE payment_account_id = :payment_account_id AND name = :name
-            )
-            """
-        ),
+    _ensure_contract(
+        db,
+        user,
+        "Example Paycheck",
         {
-            "name": "Example paycheck",
-            "amount": 325000,
-            "delta_amount": 10000,
-            "frequency": "BiWeekly",
-            "next_payment": date.today(),
+            "type": "income",
             "automatic": True,
-            "payment_account_id": checking.id,
-            "category": "income",
-            "active": True,
+            "amount_cents": 325000,
+            "organization": "Employer Payroll",
+            "account_number": "PAY-1001",
+            "icon_type": "Letters",
+            "rank": 3,
+            "linked_account_id": checking.id,
+            "source_account_id": None,
+            "last_payment_date": date.today() - timedelta(days=14),
+            "payment_period": '{"kind":"biweekly_weekday","weekday":4,"start_date":"2025-01-03"}',
+            "payment_day": 1,
             "notes": "Seeded sample contract",
+            "category": "Work",
+        },
+    )
+    _ensure_contract(
+        db,
+        user,
+        "Example Rent",
+        {
+            "type": "payment",
+            "automatic": True,
+            "amount_cents": 165000,
+            "organization": "Main Street Apartments",
+            "icon_type": "Letters",
+            "rank": 2,
+            "linked_account_id": checking.id,
+            "source_account_id": None,
+            "last_payment_date": date.today().replace(day=1),
+            "payment_period": '{"kind":"monthly_day","day":1}',
+            "payment_day": 1,
+            "notes": "Seeded housing payment",
+            "category": "Living",
+            "url": "https://rent.example.com",
+            "account_number": "RENT-001",
+            "billing_day": 25,
+        },
+    )
+    _ensure_contract(
+        db,
+        user,
+        "Example Transfer to Savings",
+        {
+            "type": "transfer",
+            "automatic": True,
+            "amount_cents": 50000,
+            "organization": "Internal Transfer",
+            "account_number": "XFER-2002",
+            "icon_type": "Letters",
+            "rank": 1,
+            "linked_account_id": checking.id,
+            "source_account_id": cash.id,
+            "last_payment_date": date.today() - timedelta(days=30),
+            "payment_period": '{"kind":"monthly_day","day":1}',
+            "payment_day": 1,
+            "notes": "Seeded savings transfer",
+            "category": "Financial",
         },
     )
 

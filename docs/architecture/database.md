@@ -59,6 +59,18 @@ Account timestamp semantics are intentionally split:
 - `account_value_history` stores value snapshots (`value_cents`, `recorded_at`) for account history graphs.
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
 
+### Contracts parity fields
+
+Contracts now carry tile-parity fields to match account dashboard interactions:
+- `organization` (text),
+- `icon_id` (nullable FK to `icon_assets`),
+- `icon_type` (`Letters|Gravatar|Icon`),
+- `rank` (`DOUBLE PRECISION` float for in-section ordering).
+- `expiration_date` (`DATE`, default `2099-01-01`) for lifecycle grouping (active vs expired).
+
+Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
+Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
+
 ### User-scoped uniqueness
 
 - Stocks uniqueness is per user:

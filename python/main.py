@@ -22,6 +22,7 @@ app.add_middleware(
 for name in [
     "auth",
     "accounts",
+    "contracts",
 ]:
     mod = import_module(f"mp.api.{name}")
     router = getattr(mod, "router")

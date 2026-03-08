@@ -57,6 +57,8 @@ ACCOUNT_TYPES = {
     "rewards_card",
 }
 
+LEGACY_RECURRING_PERIODS = {"daily", "weekly", "biweekly", "monthly", "yearly"}
+
 
 def _validate_account_type(account_type: str) -> None:
     if account_type not in ACCOUNT_TYPES:
@@ -99,10 +101,14 @@ def _validate_icon_type(icon_type: str | None) -> None:
 def _validate_recurring_period(raw: str | None) -> None:
     if raw is None:
         return
-    if not raw.strip():
+    normalized = raw.strip()
+    if not normalized:
+        return
+    if normalized.lower() in LEGACY_RECURRING_PERIODS:
+        # Backward compatibility for older seeded/example rows.
         return
     try:
-        parse_recurring_period(raw)
+        parse_recurring_period(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

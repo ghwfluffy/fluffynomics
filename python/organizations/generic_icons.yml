@@ -35,3 +35,27 @@ generic_icons:
 - key: treasury_bond
   label: Treasury bond
   icon: generic_treasury_bond.png
+- key: work
+  label: Work
+  icon: work.png
+- key: rent
+  label: Rent
+  icon: rent.png
+- key: water_utility
+  label: Water Utility
+  icon: water_utility.png
+- key: electric_utility
+  label: Electric Utility
+  icon: electric_utility.png
+- key: texas
+  label: Texas
+  icon: texas_icon.png
+- key: tls_certificate
+  label: TLS Certificate
+  icon: tls_certificate.png
+- key: us_flag
+  label: U.S. Flag
+  icon: us_flag.png
+- key: tv
+  label: TV
+  icon: tv.png

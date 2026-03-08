@@ -1,7 +1,13 @@
+[ ] Add notes to accounts
+[ ] Table view
 [\] Design
     [x] Accounts
-    [ ] Contracts
-    [ ] Recurring deposits
+    [x] Contracts
+        [x] Notes (only on edit modal)
+        [S] Filters
+        [x] Expiration
+        [x] Grouping
+    [ ] Automatic asset updates from contracts
     [ ] Expenses/Budget
     [ ] Assets
     [ ] Receivables
@@ -13,6 +19,7 @@
 [ ] letsencrypt TLS w/ ACME
 [ ] upcoming payment alerts (UI)
 [ ] upcoming payment alerts (SMS)
+[ ] notifications: tasks to review
 [ ] Mobile site
 [ ] dashboard widgets
 [ ] Encrypt at rest with PBE

@@ -10,25 +10,44 @@
       </div>
     </section>
 
-    <div class="action-row">
-      <button
-        ref="typePickerButton"
-        class="cds--btn cds--btn--primary"
-        type="button"
-        @click="showTypePicker = !showTypePicker"
-      >
-        Add New Account
-      </button>
-      <div v-if="showTypePicker" class="type-picker" :style="{ width: `${typePickerWidth}px` }">
-        <UnifiedDropdown
-          auto-open
-          :scrollable="false"
-          menu-only
-          placeholder="Select account type"
-          :options="accountTypes"
-          @update:modelValue="onAccountTypePicked"
-        />
-      </div>
+    <div class="cds--tabs" role="navigation" aria-label="Dashboard Sections">
+      <ul class="cds--tabs__nav" role="tablist">
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'accounts' }" role="presentation">
+          <button
+            id="tab-accounts"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'accounts'"
+            aria-controls="panel-accounts"
+            @click="activeTab = 'accounts'"
+          >
+            Accounts
+          </button>
+        </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'contracts' }" role="presentation">
+          <button
+            id="tab-contracts"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'contracts'"
+            aria-controls="panel-contracts"
+            @click="activeTab = 'contracts'"
+          >
+            Contracts
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="activeTab === 'accounts'" id="panel-accounts" role="tabpanel" aria-labelledby="tab-accounts">
+      <AddTypePickerButton
+        button-label="Add New Account"
+        placeholder="Select account type"
+        :options="accountTypes"
+        @select="onAccountTypePicked"
+      />
     </div>
 
     <div v-if="createDialog" class="modal-backdrop">
@@ -135,6 +154,7 @@
           <div class="field-row">
             <BankField v-model="createForm.url" label="Account URL" type="url" />
           </div>
+          <BankField v-model="createForm.notes" class="notes-field" label="Notes" multiline />
 
           <div class="modal-actions">
             <button class="cds--btn cds--btn--ghost" type="button" @click="closeCreateDialog">Cancel</button>
@@ -302,6 +322,7 @@
       </section>
     </div>
 
+    <template v-if="activeTab === 'accounts'">
     <section v-for="section in sections" :key="section.key" class="section-wrap">
       <h2 class="section-title">{{ section.title }}</h2>
 
@@ -438,17 +459,28 @@
 
       <div v-if="!section.accounts.length" class="cds--tile empty-state">No accounts yet.</div>
     </section>
+    </template>
+
+    <ContractsTab
+      v-else
+      id="panel-contracts"
+      role="tabpanel"
+      aria-labelledby="tab-contracts"
+      :accounts="accounts"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
 import PercentField from '@/components/PercentField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
+import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
+import ContractsTab from '@/accounts/ContractsTab.vue'
 
 type AccountType =
   | 'checking'
@@ -550,6 +582,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
+const activeTab = ref<'accounts' | 'contracts'>('accounts')
 const organizations = ref<OrganizationSuggestion[]>([])
 const iconChoices = ref<IconListItem[]>([])
 const createDialog = ref(false)
@@ -589,11 +622,8 @@ const updateForm = ref({
     10000: 0,
   } as Record<number, number>,
 })
-const showTypePicker = ref(false)
 const activeTileMenuId = ref<string | null>(null)
-const typePickerButton = ref<HTMLElement | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
-const typePickerWidth = ref(220)
 const iconPickerDialog = ref(false)
 const iconPickerDraftId = ref<string | undefined>(undefined)
 const iconPickerDraftType = ref<'Letters' | 'Gravatar' | 'Icon'>('Icon')
@@ -1020,17 +1050,12 @@ const selectedFormIconUrl = computed(() =>
   resolveIconUrl(createForm.value.icon_id, createForm.value.icon_type, createForm.value.organization || createForm.value.name),
 )
 
-const syncTypePickerWidth = () => {
-  typePickerWidth.value = typePickerButton.value?.offsetWidth || 220
-}
-
 const closeCreateDialog = () => {
   createDialog.value = false
   editingAccountId.value = null
 }
 
 const openCreateDialog = (type: AccountType) => {
-  showTypePicker.value = false
   createForm.value = makeCreateForm()
   createForm.value.type = type
   editingAccountId.value = null
@@ -1406,16 +1431,6 @@ const moveAccountRight = async (section: Section, index: number, event?: MouseEv
 
 const onWindowClick = (event: MouseEvent) => {
   const target = event.target as Node
-  if (showTypePicker.value) {
-    if (typePickerButton.value?.contains(target)) {
-      return
-    }
-    const picker = document.querySelector('.type-picker')
-    if (picker && picker.contains(target)) {
-      return
-    }
-    showTypePicker.value = false
-  }
   if (activeTileMenuId.value) {
     const tileMenu = document.querySelector('.tile-menu')
     const tileMenuTrigger = document.querySelector('.tile-menu-trigger')
@@ -1437,13 +1452,9 @@ onMounted(loadAccounts)
 onMounted(loadOrganizations)
 onMounted(loadIcons)
 onMounted(async () => {
-  await nextTick()
-  syncTypePickerWidth()
-  window.addEventListener('resize', syncTypePickerWidth)
   window.addEventListener('click', onWindowClick)
 })
 onUnmounted(() => {
-  window.removeEventListener('resize', syncTypePickerWidth)
   window.removeEventListener('click', onWindowClick)
 })
 
@@ -1480,6 +1491,8 @@ watch(
 </script>
 
 <style scoped>
+@import './sharedTile.css';
+
 .dashboard {
   max-width: 1320px;
   margin: 0 auto;
@@ -1514,18 +1527,6 @@ watch(
   font-weight: 600;
   color: var(--cds-text-secondary);
   background: var(--cds-layer-hover);
-}
-
-.action-row {
-  position: relative;
-  margin-bottom: 1.25rem;
-}
-
-.type-picker {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 20;
 }
 
 .modal-backdrop {
@@ -1645,6 +1646,10 @@ watch(
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.notes-field {
+  grid-column: 1 / -1;
 }
 
 .cash-bills-grid {
@@ -1828,256 +1833,14 @@ watch(
   margin: 0 0 0.75rem;
 }
 
-.section-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.account-tile {
-  min-height: 148px;
-  border-radius: 12px;
-  position: relative;
-  padding-bottom: 2rem;
-  padding-left: 2.3rem;
-  padding-top: 0.62rem;
-}
-
-.tile-icon {
-  position: absolute;
-  left: 0.55rem;
-  top: 0.7rem;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  border: 1px solid var(--cds-border-subtle-01);
-  object-fit: cover;
-}
-
-.tile-icon--empty {
-  background: #e2e8f0;
-}
-
-.tile-rank-trigger {
-  position: absolute;
-  left: 0.35rem;
-  top: 50%;
-  transform: translateY(-50%);
-  border: 0;
-  background: transparent;
-  color: var(--cds-text-secondary);
-  font-size: 0.65rem;
-  line-height: 1;
-  padding: 0;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.tile-rank-trigger:hover,
-.tile-rank-trigger:focus-visible {
-  color: var(--cds-text-primary);
-  outline: none;
-}
-
-.account-tile:hover .tile-rank-trigger,
-.account-tile:focus-within .tile-rank-trigger {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.tile-rank-trigger--right {
-  left: auto;
-  right: 2rem;
-}
-
-.tile-update-clock {
-  position: absolute;
-  right: 0.75rem;
-  top: 0.42rem;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2px solid currentColor;
-  cursor: default;
-  display: inline-block;
-}
-
-.tile-link {
-  position: absolute;
-  right: 1.95rem;
-  top: 0.42rem;
-  text-decoration: none;
-  width: 18px;
-  height: 18px;
-  border: 1px solid #64748b;
-  border-radius: 3px;
-  color: #111827;
-  font-size: 0.75rem;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tile-update-clock::before,
-.tile-update-clock::after {
-  content: '';
-  position: absolute;
-  background: currentColor;
-  left: 50%;
-  top: 50%;
-  transform-origin: bottom center;
-}
-
-.tile-update-clock::before {
-  width: 2px;
-  height: 6px;
-  transform: translate(-50%, -100%) rotate(0deg);
-}
-
-.tile-update-clock::after {
-  width: 2px;
-  height: 5px;
-  transform: translate(-50%, -100%) rotate(60deg);
-}
-
-.clock-fresh {
-  color: #16a34a;
-}
-
-.clock-recent {
-  color: #2563eb;
-}
-
-.clock-aging {
-  color: #111827;
-}
-
-.clock-stale {
-  color: #b91c1c;
-}
-
-.tile-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--cds-text-primary);
-  margin-top: 0.05rem;
-  margin-bottom: 2px;
-  line-height: 1.2;
-}
-
-.tile-sub {
-  font-size: 0.87rem;
-  color: var(--cds-text-secondary);
-}
-
-.tile-balance {
-  margin-top: 10px;
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.balance-asset {
-  color: #047857;
-}
-
-.balance-liability {
-  color: #b91c1c;
-}
-
-.tile-type {
-  margin-top: 6px;
-  font-size: 0.78rem;
-  color: var(--cds-text-secondary);
-  text-transform: capitalize;
-}
-
-.tile-actions {
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0.6rem;
-}
-
-.tile-menu-trigger {
-  border: 0;
-  background: #000;
-  color: #fff;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  padding: 0;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tile-menu-trigger:hover,
-.tile-menu-trigger:focus-visible {
-  background: #111827;
-  outline: 2px solid #94a3b8;
-  outline-offset: 1px;
-}
-
-.tile-menu-dots {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow:
-    0 -6px 0 #fff,
-    0 6px 0 #fff;
-}
-
-.tile-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 4px);
-  border: 1px solid var(--cds-border-subtle-01);
-  background: var(--cds-layer);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
-  min-width: 120px;
-  overflow: hidden;
-}
-
-.tile-menu-option {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--cds-text-primary);
-  text-align: left;
-  padding: 0.55rem 0.7rem;
-  cursor: pointer;
-}
-
-.tile-menu-option:hover,
-.tile-menu-option:focus-visible {
-  background: #e0f2fe;
-  outline: none;
-}
-
-.tile-menu-option--danger {
-  color: #b91c1c;
-}
-
 .empty-state {
   color: var(--cds-text-secondary);
 }
 
 @media (max-width: 1200px) {
-  .section-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 900px) {
-  .section-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .form-grid {
     grid-template-columns: 1fr;
   }
@@ -2092,10 +1855,6 @@ watch(
 }
 
 @media (max-width: 640px) {
-  .section-grid {
-    grid-template-columns: 1fr;
-  }
-
   .icon-grid-scroll {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

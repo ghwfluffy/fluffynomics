@@ -10,6 +10,7 @@
 
 - `mp.api.auth` mounted at `/auth`
 - `mp.api.accounts` mounted at `/`
+- `mp.api.contracts` mounted at `/`
 
 ## Auth + Session Model
 
@@ -97,6 +98,32 @@ Stock price propagation:
 - Updating `last_price_cents` on one stock propagates to same-ticker stocks for that user.
 
 Stocks are user-scoped. DB uniqueness is per user (`user_id, ticker, exchange`).
+
+## Contract API Behavior
+
+Defined in `python/mp/api/contracts.py`.
+
+- `GET /contracts`
+- `POST /contracts`
+- `PUT /contracts/{contract_id}`
+  - contract `type` is immutable after create
+- `PUT /contracts/{contract_id}/rank`
+  - supports tile reorder behavior in category sections
+- `DELETE /contracts/{contract_id}`
+
+Validation + ownership rules:
+- `name`, `organization`, and `linked_account_id` are required.
+- `type` must be one of `income|payment|transfer`.
+- `source_account_id` is required only for `transfer`.
+- `payment_day` is required (`1..31`).
+- `account_number` is optional for contracts.
+- `linked_account_id` and `source_account_id` must belong to current user.
+- `icon_type` follows account behavior (`Letters|Gravatar|Icon`).
+- icon selection can infer default `icon_id` from matching organization if icon type is `Icon`.
+- `expiration_date` defaults to `2099-01-01` when omitted.
+
+Update-modal ownership:
+- UI intentionally edits `last_payment_date` and `expiration_date` through contract `Update` flow (not the full editor), but API continues to accept either update path.
 
 ## Ownership + Access Control
 

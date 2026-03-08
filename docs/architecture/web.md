@@ -11,6 +11,7 @@
 - Landing + login/register: `web/vue/src/auth/LandingPage.vue`
 - Authenticated shell/header: `web/vue/src/AppShell.vue`
 - Dashboard/accounts: `web/vue/src/accounts/AccountsPage.vue`
+- Dashboard/contracts: `web/vue/src/accounts/ContractsTab.vue`
 
 ## Design System Direction
 
@@ -21,6 +22,12 @@
   - `web/vue/src/components/DollarField.vue`
   - `web/vue/src/components/RecurringPeriodField.vue`
   - `web/vue/src/components/UnifiedDropdown.vue`
+  - `web/vue/src/components/AddTypePickerButton.vue` (right-aligned add button + type dropdown)
+
+Shared tile visual definitions now live in:
+- `web/vue/src/accounts/sharedTile.css`
+
+Both account and contract tiles should consume that shared stylesheet instead of redefining tile layout/styles independently.
 
 ## Dropdown Consistency Rule
 
@@ -30,6 +37,8 @@ Use `UnifiedDropdown` for dropdown/combobox-style menus (account type picker, or
 - option rendering,
 - searchable/custom entry behavior,
 consistent across the app.
+
+Use `AddTypePickerButton.vue` for right-aligned "Add ..." flows that open a type-selection dropdown from the action button. This is now shared by Accounts and Contracts tabs.
 
 Organization fuzzy search sources organizations from `GET /organizations` (not only local account state) so defaults and known icons are available immediately.
 
@@ -77,6 +86,36 @@ In `AccountsPage.vue`:
   - `◀` moves one slot left (not shown on first tile in section)
   - `▶` moves one slot right (not shown on last tile in section)
 - Frontend computes a new rank between neighboring ranks and calls `PUT /accounts/{id}/rank`.
+
+Contracts use the same float-rank strategy within each category section and call `PUT /contracts/{id}/rank`.
+
+## Contracts Tile Parity
+
+Contracts intentionally mirror account tile UX:
+- grouped sections (by category),
+- left/right rank arrows,
+- icon + organization + last4 identity rows,
+- link icon and update-age clock badge,
+- bottom-right three-dot menu for edit/delete.
+- `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
+- Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections.
+- active contracts are grouped by `type + category` (example: `Incoming Work`, `Payment Digital`).
+
+Contract create/edit also mirrors account create/edit patterns:
+- organization fuzzy dropdown from `/organizations`,
+- icon selection/upload from `/icons` and generated icon variants,
+- immutable type selected before modal opens.
+
+## Next-Payment Early-Pay Logic
+
+Contracts and payable accounts use the same intent:
+- if a recorded payment is newer than the expected prior scheduled payment but still before the upcoming scheduled payment, treat it as an **early payment** and move “next payment” forward by one extra cycle.
+
+Implementation references:
+- Accounts: `computePaymentDates()` in `web/vue/src/accounts/AccountsPage.vue`
+- Contracts: `nextPaymentDate()` in `web/vue/src/accounts/ContractsTab.vue`
+
+Keep this behavior consistent across future scheduling/forecasting UI so “next payment” does not incorrectly show the already-covered upcoming cycle.
 
 ## Last-Update Visual Indicator
 
