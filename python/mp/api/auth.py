@@ -16,6 +16,7 @@ from mp.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
 from mp.schema.contract import Contract
 from mp.schema.expense import Expense
+from mp.schema.registration_code import RegistrationCode
 from mp.schema.user import (
     LoginResponseSchema,
     LoginSchema,
@@ -214,6 +215,21 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
 
     now = datetime.now(tz=timezone.utc)
     existing_user_count = db.query(User).count()
+    if existing_user_count > 0:
+        raw_code = (payload.registration_code or "").strip().upper()
+        if not raw_code:
+            raise HTTPException(status_code=400, detail="registration_code is required")
+        registration_code = (
+            db.query(RegistrationCode).filter(RegistrationCode.code == raw_code).first()
+        )
+        if registration_code is None:
+            raise HTTPException(status_code=400, detail="registration_code is invalid")
+        if (
+            registration_code.expires_at is not None
+            and registration_code.expires_at <= now
+        ):
+            raise HTTPException(status_code=400, detail="registration_code is expired")
+
     user = User(
         username=payload.username,
         password_hash=_hash_password(payload.password),

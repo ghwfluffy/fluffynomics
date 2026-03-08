@@ -210,10 +210,47 @@
     </div>
 
     <div v-if="adminDialogOpen" class="modal-backdrop">
-      <section class="modal-card cds--tile">
+      <section class="modal-card modal-card--wide cds--tile">
         <h3>Administration</h3>
-        <p>Administrative backup controls.</p>
-        <div class="modal-form-grid">
+        <div class="cds--tabs" role="navigation" aria-label="Administration sections">
+          <ul class="cds--tabs__nav" role="tablist">
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': adminTab === 'backups' }" role="presentation">
+              <button
+                id="tab-admin-backups"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="adminTab === 'backups'"
+                aria-controls="panel-admin-backups"
+                @click="adminTab = 'backups'"
+              >
+                Backups
+              </button>
+            </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': adminTab === 'registration' }" role="presentation">
+              <button
+                id="tab-admin-registration"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="adminTab === 'registration'"
+                aria-controls="panel-admin-registration"
+                @click="adminTab = 'registration'"
+              >
+                Registration
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div
+          v-if="adminTab === 'backups'"
+          id="panel-admin-backups"
+          class="modal-form-grid"
+          role="tabpanel"
+          aria-labelledby="tab-admin-backups"
+        >
+          <p>Administrative backup controls.</p>
           <button class="cds--btn cds--btn--secondary" type="button" :disabled="adminBusy" @click="triggerLocalBackupNow">
             {{ adminBusy ? 'Scheduling...' : 'Trigger Local Backup Now' }}
           </button>
@@ -242,8 +279,88 @@
             {{ adminRestoreBusy ? 'Restoring...' : 'Restore Full Site Backup' }}
           </button>
         </div>
+
+        <div
+          v-else
+          id="panel-admin-registration"
+          class="modal-form-grid"
+          role="tabpanel"
+          aria-labelledby="tab-admin-registration"
+        >
+          <p>Create and manage registration codes for new accounts.</p>
+          <div class="registration-create-grid">
+            <div class="cds--form-item">
+              <label for="registration-name" class="cds--label">Name</label>
+              <input id="registration-name" v-model="registrationCreateName" class="cds--text-input" placeholder="Who is this code for?" />
+            </div>
+            <div class="cds--form-item">
+              <label for="registration-expires-at" class="cds--label">Expires At (optional)</label>
+              <input id="registration-expires-at" v-model="registrationCreateExpiresAt" class="cds--text-input" type="datetime-local" />
+            </div>
+            <button class="cds--btn cds--btn--primary" type="button" :disabled="registrationBusy" @click="createRegistrationCode">
+              {{ registrationBusy ? 'Creating...' : 'Create Code' }}
+            </button>
+          </div>
+
+          <div class="registration-table-wrap">
+            <table class="registration-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Expires</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in registrationCodes" :key="item.id">
+                  <td>
+                    <input
+                      v-model="registrationEditById[item.id].name"
+                      class="cds--text-input registration-inline-input"
+                      type="text"
+                    />
+                  </td>
+                  <td>
+                    <div class="registration-code-cell">
+                      <code>{{ maskRegistrationCode(item.code) }}</code>
+                      <button
+                        class="registration-copy-btn"
+                        type="button"
+                        :disabled="registrationBusy"
+                        title="Copy code"
+                        aria-label="Copy registration code"
+                        @click="copyRegistrationCode(item.code)"
+                      >
+                        ⧉
+                      </button>
+                    </div>
+                  </td>
+                  <td>
+                    <input
+                      v-model="registrationEditById[item.id].expiresAtLocal"
+                      class="cds--text-input registration-inline-input"
+                      type="datetime-local"
+                    />
+                  </td>
+                  <td class="registration-actions">
+                    <button class="cds--btn cds--btn--ghost cds--btn--sm" type="button" :disabled="registrationBusy" @click="saveRegistrationCode(item.id)">
+                      Save
+                    </button>
+                    <button class="cds--btn cds--btn--danger cds--btn--sm" type="button" :disabled="registrationBusy" @click="deleteRegistrationCode(item.id)">
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="registrationCodes.length === 0">
+                  <td colspan="4" class="registration-empty">No registration codes yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="modal-actions">
-          <button class="cds--btn cds--btn--ghost" type="button" :disabled="adminBusy || adminRestoreBusy" @click="closeAdminDialog">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="adminBusy || adminRestoreBusy || registrationBusy" @click="closeAdminDialog">
             Close
           </button>
         </div>
@@ -253,7 +370,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, logout, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
@@ -290,7 +407,30 @@ type IconChoice = {
   is_default: boolean
 }
 
+type AdminTab = 'backups' | 'registration'
+
+type RegistrationCodeItem = {
+  id: string
+  code: string
+  name: string
+  expires_at: string | null
+  created_by_user_id: string
+  created_at: string
+  updated_at: string
+}
+
+type RegistrationCodeEdit = {
+  name: string
+  expiresAtLocal: string
+}
+
 const profileIconChoices = ref<IconChoice[]>([])
+const adminTab = ref<AdminTab>('backups')
+const registrationBusy = ref(false)
+const registrationCodes = ref<RegistrationCodeItem[]>([])
+const registrationEditById = ref<Record<string, RegistrationCodeEdit>>({})
+const registrationCreateName = ref('')
+const registrationCreateExpiresAt = ref('')
 
 const avatarInitials = computed(() => {
   const username = (currentUser.value?.username || '').trim()
@@ -354,6 +494,7 @@ const onProfileManageClick = async () => {
 
 const onAdministrationClick = () => {
   closeProfileMenu()
+  adminTab.value = 'backups'
   adminRestoreFile.value = null
   adminRestoreFileName.value = ''
   adminDialogOpen.value = true
@@ -375,10 +516,120 @@ const onProfileLogoutClick = async () => {
 }
 
 const closeAdminDialog = () => {
-  if (adminBusy.value || adminRestoreBusy.value) {
+  if (adminBusy.value || adminRestoreBusy.value || registrationBusy.value) {
     return
   }
   adminDialogOpen.value = false
+}
+
+const isoToDateTimeLocal = (value: string | null) => {
+  if (!value) {
+    return ''
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return ''
+  }
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const year = parsed.getFullYear()
+  const month = pad(parsed.getMonth() + 1)
+  const day = pad(parsed.getDate())
+  const hours = pad(parsed.getHours())
+  const minutes = pad(parsed.getMinutes())
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+const dateTimeLocalToIso = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toISOString()
+}
+
+const rebuildRegistrationEditDrafts = () => {
+  const drafts: Record<string, RegistrationCodeEdit> = {}
+  for (const item of registrationCodes.value) {
+    drafts[item.id] = {
+      name: item.name,
+      expiresAtLocal: isoToDateTimeLocal(item.expires_at),
+    }
+  }
+  registrationEditById.value = drafts
+}
+
+const loadRegistrationCodes = async () => {
+  registrationBusy.value = true
+  try {
+    registrationCodes.value = await request.get<RegistrationCodeItem[]>('/admin/registration-codes')
+    rebuildRegistrationEditDrafts()
+  } finally {
+    registrationBusy.value = false
+  }
+}
+
+const createRegistrationCode = async () => {
+  const name = registrationCreateName.value.trim()
+  if (!name) {
+    errorMessage.value = 'Name is required'
+    snackbar.value = true
+    return
+  }
+  registrationBusy.value = true
+  try {
+    await request.post<RegistrationCodeItem>('/admin/registration-codes', {
+      name,
+      expires_at: dateTimeLocalToIso(registrationCreateExpiresAt.value),
+    })
+    registrationCreateName.value = ''
+    registrationCreateExpiresAt.value = ''
+    await loadRegistrationCodes()
+  } finally {
+    registrationBusy.value = false
+  }
+}
+
+const saveRegistrationCode = async (id: string) => {
+  const draft = registrationEditById.value[id]
+  if (!draft) {
+    return
+  }
+  registrationBusy.value = true
+  try {
+    await request.put<RegistrationCodeItem>(`/admin/registration-codes/${id}`, {
+      name: draft.name.trim(),
+      expires_at: dateTimeLocalToIso(draft.expiresAtLocal),
+    })
+    await loadRegistrationCodes()
+  } finally {
+    registrationBusy.value = false
+  }
+}
+
+const maskRegistrationCode = (code: string) => {
+  const trimmed = (code || '').trim()
+  if (!trimmed) {
+    return '...'
+  }
+  return `${trimmed.slice(0, 2)}...`
+}
+
+const copyRegistrationCode = async (code: string) => {
+  await navigator.clipboard.writeText(code)
+}
+
+const deleteRegistrationCode = async (id: string) => {
+  registrationBusy.value = true
+  try {
+    await request.delete(`/admin/registration-codes/${id}`)
+    await loadRegistrationCodes()
+  } finally {
+    registrationBusy.value = false
+  }
 }
 
 const triggerLocalBackupNow = async () => {
@@ -522,6 +773,13 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('pointerdown', onWindowPointerDown)
+})
+
+watch(adminTab, async (tab) => {
+  if (!adminDialogOpen.value || tab !== 'registration') {
+    return
+  }
+  await loadRegistrationCodes()
 })
 
 const openExportDialog = () => {
@@ -914,8 +1172,76 @@ const runImport = async () => {
   margin: 0 0 10px;
 }
 
+.registration-create-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: end;
+}
+
+.registration-table-wrap {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--cds-border-subtle-01);
+}
+
+.registration-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.registration-table th,
+.registration-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.registration-inline-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.registration-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.registration-code-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.registration-copy-btn {
+  border: 1px solid var(--cds-border-subtle-01);
+  border-radius: 4px;
+  background: var(--cds-layer);
+  color: var(--cds-text-primary);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.registration-copy-btn:hover {
+  background: var(--cds-layer-hover);
+}
+
+.registration-empty {
+  color: var(--cds-text-secondary);
+}
+
 @media (max-width: 760px) {
   .profile-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-create-grid {
     grid-template-columns: 1fr;
   }
 }

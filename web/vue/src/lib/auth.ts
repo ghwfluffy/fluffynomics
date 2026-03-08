@@ -48,11 +48,13 @@ export async function register(
   username: string,
   password: string,
   addExampleData = false,
+  registrationCode?: string,
 ): Promise<User> {
   return request.post<User>('/auth/register', {
     username,
     password,
     add_example_data: addExampleData,
+    registration_code: registrationCode || null,
   })
 }
 

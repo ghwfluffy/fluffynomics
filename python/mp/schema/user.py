@@ -64,6 +64,7 @@ class UserCreateSchema(BaseModel):
     username: str
     password: str
     add_example_data: bool = False
+    registration_code: str | None = None
 
 
 class LoginSchema(BaseModel):

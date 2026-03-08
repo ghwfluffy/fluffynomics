@@ -22,6 +22,7 @@ app.add_middleware(
 # APIs
 for name in [
     "auth",
+    "admin",
     "accounts",
     "contracts",
     "expenses",

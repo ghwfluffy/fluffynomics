@@ -1,11 +1,6 @@
 Security
 [ ] nginx rate limitting
 [ ] Encrypt account info at rest with PBE
-[x] Automated database backups
-[ ] Registration codes (admin add registration codes)
-    [ ] Admin site settings
-    [ ] Test mode (allow test data creation)
-    [ ] Reg codes
 Prod deployment
 [ ] Domain
 [ ] Site

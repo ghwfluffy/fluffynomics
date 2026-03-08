@@ -9,6 +9,7 @@
 ## Router Layout
 
 - `mp.api.auth` mounted at `/auth`
+- `mp.api.admin` mounted at `/admin`
 - `mp.api.accounts` mounted at `/`
 - `mp.api.contracts` mounted at `/`
 - `mp.api.data_portability` mounted at `/data`
@@ -17,6 +18,10 @@
 ## Auth + Session Model
 
 - Registration/login/logout/me are in `python/mp/api/auth.py`.
+- Registration rule:
+  - first account can register without a code.
+  - once at least one user exists, `POST /auth/register` requires `registration_code`.
+  - registration codes are looked up case-insensitively (normalized uppercase) and must exist + be unexpired.
 - Profile updates are in `python/mp/api/auth.py` via `PUT /auth/profile`.
 - Session model is encrypted+signed token (Fernet) containing:
   - `user_id`
@@ -271,6 +276,23 @@ Defined in `python/mp/api/backups.py`.
   - admin-only endpoint accepting uploaded backup payload
   - supports gzip SQL dumps (`.sql.gz`) and plain SQL dumps (`.sql`)
   - restores full site contents into the configured Postgres DB
+
+## Admin API
+
+Defined in `python/mp/api/admin.py`.
+
+- `GET /admin/registration-codes`
+  - admin-only list of all registration codes
+- `POST /admin/registration-codes`
+  - admin-only create
+  - server generates a unique 32-character uppercase alphanumeric `code`
+  - payload accepts:
+    - `name` (required)
+    - `expires_at` (optional)
+- `PUT /admin/registration-codes/{code_id}`
+  - admin-only update of `name` and/or `expires_at`
+- `DELETE /admin/registration-codes/{code_id}`
+  - admin-only removal
 
 ## Important Timestamp Semantics
 

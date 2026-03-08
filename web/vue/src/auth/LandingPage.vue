@@ -60,6 +60,15 @@
             required
           />
         </div>
+        <div class="cds--form-item">
+          <label for="register-code" class="cds--label">Registration Code</label>
+          <input
+            id="register-code"
+            v-model="registerForm.registrationCode"
+            class="cds--text-input"
+            placeholder="Required after the first account"
+          />
+        </div>
         <label class="checkbox-row">
           <input v-model="registerForm.addExampleData" class="checkbox-input" type="checkbox" />
           <span>Add example data</span>
@@ -86,6 +95,7 @@ const loginForm = ref({
 const registerForm = ref({
   username: '',
   password: '',
+  registrationCode: '',
   addExampleData: false,
 })
 
@@ -97,13 +107,19 @@ const submitLogin = async () => {
 const submitRegister = async () => {
   const username = registerForm.value.username
   const password = registerForm.value.password
-  await register(username, password, registerForm.value.addExampleData)
+  await register(
+    username,
+    password,
+    registerForm.value.addExampleData,
+    registerForm.value.registrationCode.trim() || undefined,
+  )
   await login(username, password)
   await router.push('/app')
   mode.value = 'login'
   loginForm.value.username = username
   registerForm.value.addExampleData = false
   registerForm.value.password = ''
+  registerForm.value.registrationCode = ''
 }
 </script>
 
