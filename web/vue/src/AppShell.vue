@@ -28,6 +28,15 @@
               class="profile-menu-item"
               type="button"
               role="menuitem"
+              @click="onManageUsersClick"
+            >
+              Manage Users
+            </button>
+            <button
+              v-if="currentUser?.is_admin"
+              class="profile-menu-item"
+              type="button"
+              role="menuitem"
               @click="onAdministrationClick"
             >
               Administration
@@ -339,43 +348,11 @@
     <div v-if="adminDialogOpen" class="modal-backdrop">
       <section class="modal-card modal-card--wide cds--tile">
         <h3>Administration</h3>
-        <div class="cds--tabs" role="navigation" aria-label="Administration sections">
-          <ul class="cds--tabs__nav" role="tablist">
-            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': adminTab === 'backups' }" role="presentation">
-              <button
-                id="tab-admin-backups"
-                class="cds--tabs__nav-link"
-                role="tab"
-                type="button"
-                :aria-selected="adminTab === 'backups'"
-                aria-controls="panel-admin-backups"
-                @click="adminTab = 'backups'"
-              >
-                Backups
-              </button>
-            </li>
-            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': adminTab === 'registration' }" role="presentation">
-              <button
-                id="tab-admin-registration"
-                class="cds--tabs__nav-link"
-                role="tab"
-                type="button"
-                :aria-selected="adminTab === 'registration'"
-                aria-controls="panel-admin-registration"
-                @click="adminTab = 'registration'"
-              >
-                Registration
-              </button>
-            </li>
-          </ul>
-        </div>
-
         <div
-          v-if="adminTab === 'backups'"
           id="panel-admin-backups"
           class="modal-form-grid"
           role="tabpanel"
-          aria-labelledby="tab-admin-backups"
+          aria-label="Backups"
         >
           <p>Administrative backup controls.</p>
           <button class="cds--btn cds--btn--secondary" type="button" :disabled="adminBusy" @click="triggerLocalBackupNow">
@@ -406,13 +383,130 @@
             {{ adminRestoreBusy ? 'Restoring...' : 'Restore Full Site Backup' }}
           </button>
         </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="adminBusy || adminRestoreBusy" @click="closeAdminDialog">
+            Close
+          </button>
+        </div>
+      </section>
+    </div>
 
+    <div v-if="manageUsersDialogOpen" class="modal-backdrop">
+      <section class="modal-card modal-card--wide cds--tile">
+        <h3>Manage Users</h3>
+        <div class="cds--tabs" role="navigation" aria-label="User management sections">
+          <ul class="cds--tabs__nav" role="tablist">
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': manageUsersTab === 'users' }" role="presentation">
+              <button
+                id="tab-manage-users-users"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="manageUsersTab === 'users'"
+                aria-controls="panel-manage-users-users"
+                @click="manageUsersTab = 'users'"
+              >
+                Users
+              </button>
+            </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': manageUsersTab === 'registration' }" role="presentation">
+              <button
+                id="tab-manage-users-registration"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="manageUsersTab === 'registration'"
+                aria-controls="panel-manage-users-registration"
+                @click="manageUsersTab = 'registration'"
+              >
+                Registration
+              </button>
+            </li>
+          </ul>
+        </div>
         <div
-          v-else
-          id="panel-admin-registration"
+          v-if="manageUsersTab === 'users'"
+          id="panel-manage-users-users"
           class="modal-form-grid"
           role="tabpanel"
-          aria-labelledby="tab-admin-registration"
+          aria-labelledby="tab-manage-users-users"
+        >
+          <p>Manage account access for all users.</p>
+          <div class="manage-users-table-wrap">
+            <table class="manage-users-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Last Login</th>
+                  <th>Account Created</th>
+                  <th>Role</th>
+                  <th>Lock</th>
+                  <th>Password</th>
+                  <th>Delete</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="user in managedUsers" :key="user.id">
+                  <td>{{ user.username }}</td>
+                  <td>{{ formatDateTime(user.last_login_at) }}</td>
+                  <td>{{ formatDateTime(user.created_at) }}</td>
+                  <td>
+                    <div class="cds--checkbox-wrapper manage-users-admin-check">
+                      <input
+                        :id="`managed-user-admin-${user.id}`"
+                        class="cds--checkbox"
+                        type="checkbox"
+                        :checked="user.is_admin"
+                        :disabled="manageUsersBusy || isManagedSelf(user)"
+                        @change="onManagedUserAdminCheckboxChange(user, $event)"
+                      />
+                      <label :for="`managed-user-admin-${user.id}`" class="cds--checkbox-label">Admin</label>
+                    </div>
+                  </td>
+                  <td>
+                    <button
+                      class="cds--btn cds--btn--ghost cds--btn--sm"
+                      type="button"
+                      :disabled="manageUsersBusy || isManagedSelf(user)"
+                      @click="toggleManagedUserLock(user)"
+                    >
+                      {{ isManagedUserLocked(user) ? 'Unlock' : 'Lock' }}
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      class="cds--btn cds--btn--secondary cds--btn--sm"
+                      type="button"
+                      :disabled="manageUsersBusy || isManagedSelf(user)"
+                      @click="openManagedUserPasswordModal(user)"
+                    >
+                      Update Password
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      class="cds--btn cds--btn--danger cds--btn--sm"
+                      type="button"
+                      :disabled="manageUsersBusy || isManagedSelf(user)"
+                      @click="deleteManagedUser(user)"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="managedUsers.length === 0">
+                  <td colspan="7" class="registration-empty">No users found.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div
+          v-else
+          id="panel-manage-users-registration"
+          class="modal-form-grid"
+          role="tabpanel"
+          aria-labelledby="tab-manage-users-registration"
         >
           <p>Create and manage registration codes for new accounts.</p>
           <div class="registration-create-grid">
@@ -428,7 +522,6 @@
               {{ registrationBusy ? 'Creating...' : 'Create Code' }}
             </button>
           </div>
-
           <div class="registration-table-wrap">
             <table class="registration-table">
               <thead>
@@ -487,8 +580,62 @@
           </div>
         </div>
         <div class="modal-actions">
-          <button class="cds--btn cds--btn--ghost" type="button" :disabled="adminBusy || adminRestoreBusy || registrationBusy" @click="closeAdminDialog">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="manageUsersBusy || registrationBusy" @click="closeManageUsersDialog">
             Close
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="manageUserPasswordDialogOpen" class="modal-backdrop">
+      <section class="modal-card cds--tile">
+        <h3>Update Password: {{ managePasswordTargetUsername }}</h3>
+        <div class="modal-form-grid">
+          <label class="bank-label" for="admin-user-password">New Password</label>
+          <input
+            id="admin-user-password"
+            v-model="managePasswordDraft"
+            class="cds--text-input"
+            type="password"
+            autocomplete="new-password"
+          />
+          <label class="bank-label" for="admin-user-password-verify">Verify Password</label>
+          <input
+            id="admin-user-password-verify"
+            v-model="managePasswordVerifyDraft"
+            class="cds--text-input"
+            type="password"
+            autocomplete="new-password"
+          />
+        </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="manageUsersBusy" @click="closeManagedUserPasswordModal">
+            Cancel
+          </button>
+          <button
+            class="cds--btn cds--btn--primary"
+            type="button"
+            :disabled="manageUsersBusy || !managePasswordDraft.trim() || !managePasswordVerifyDraft.trim()"
+            @click="submitManagedUserPasswordUpdate"
+          >
+            {{ manageUsersBusy ? 'Updating...' : 'Update Password' }}
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="manageUserDeleteDialogOpen" class="modal-backdrop">
+      <section class="modal-card cds--tile">
+        <h3>Delete User</h3>
+        <p>
+          Delete user "{{ manageDeleteTargetUsername }}" and all of their data? This action cannot be undone.
+        </p>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="manageUsersBusy" @click="closeManagedUserDeleteModal">
+            Cancel
+          </button>
+          <button class="cds--btn cds--btn--danger" type="button" :disabled="manageUsersBusy" @click="confirmDeleteManagedUser">
+            {{ manageUsersBusy ? 'Deleting...' : 'Delete User' }}
           </button>
         </div>
       </section>
@@ -540,7 +687,7 @@ type IconChoice = {
   is_default: boolean
 }
 
-type AdminTab = 'backups' | 'registration'
+type ManageUsersTab = 'users' | 'registration'
 
 type RegistrationCodeItem = {
   id: string
@@ -557,6 +704,16 @@ type RegistrationCodeEdit = {
   expiresAtLocal: string
 }
 
+type ManagedUser = {
+  id: string
+  username: string
+  is_admin: boolean
+  last_login_at: string | null
+  password_changed_at: string | null
+  created_at: string
+  password_lockout_until: string | null
+}
+
 type WalletAccountSummary = {
   id: string
   name: string
@@ -565,12 +722,23 @@ type WalletAccountSummary = {
 
 const profileIconChoices = ref<IconChoice[]>([])
 const profileWalletAccounts = ref<WalletAccountSummary[]>([])
-const adminTab = ref<AdminTab>('backups')
 const registrationBusy = ref(false)
 const registrationCodes = ref<RegistrationCodeItem[]>([])
 const registrationEditById = ref<Record<string, RegistrationCodeEdit>>({})
 const registrationCreateName = ref('')
 const registrationCreateExpiresAt = ref('')
+const manageUsersDialogOpen = ref(false)
+const manageUsersTab = ref<ManageUsersTab>('users')
+const manageUsersBusy = ref(false)
+const managedUsers = ref<ManagedUser[]>([])
+const manageUserPasswordDialogOpen = ref(false)
+const managePasswordTargetUserId = ref('')
+const managePasswordTargetUsername = ref('')
+const managePasswordDraft = ref('')
+const managePasswordVerifyDraft = ref('')
+const manageUserDeleteDialogOpen = ref(false)
+const manageDeleteTargetUserId = ref('')
+const manageDeleteTargetUsername = ref('')
 
 const avatarInitials = computed(() => {
   const username = (currentUser.value?.username || '').trim()
@@ -639,10 +807,16 @@ const onProfileManageClick = async () => {
 
 const onAdministrationClick = () => {
   closeProfileMenu()
-  adminTab.value = 'backups'
   adminRestoreFile.value = null
   adminRestoreFileName.value = ''
   adminDialogOpen.value = true
+}
+
+const onManageUsersClick = async () => {
+  closeProfileMenu()
+  manageUsersTab.value = 'users'
+  manageUsersDialogOpen.value = true
+  await loadManagedUsers()
 }
 
 const onProfileExportClick = () => {
@@ -661,10 +835,143 @@ const onProfileLogoutClick = async () => {
 }
 
 const closeAdminDialog = () => {
-  if (adminBusy.value || adminRestoreBusy.value || registrationBusy.value) {
+  if (adminBusy.value || adminRestoreBusy.value) {
     return
   }
   adminDialogOpen.value = false
+}
+
+const closeManageUsersDialog = () => {
+  if (manageUsersBusy.value || registrationBusy.value) {
+    return
+  }
+  manageUserPasswordDialogOpen.value = false
+  manageUserDeleteDialogOpen.value = false
+  manageUsersDialogOpen.value = false
+}
+
+const loadManagedUsers = async () => {
+  manageUsersBusy.value = true
+  try {
+    managedUsers.value = await request.get<ManagedUser[]>('/admin/users')
+  } finally {
+    manageUsersBusy.value = false
+  }
+}
+
+const isManagedSelf = (user: ManagedUser) => currentUser.value?.id === user.id
+
+const isManagedUserLocked = (user: ManagedUser) => {
+  if (!user.password_lockout_until) {
+    return false
+  }
+  const lockUntil = new Date(user.password_lockout_until)
+  if (Number.isNaN(lockUntil.getTime())) {
+    return false
+  }
+  return lockUntil.getTime() > Date.now()
+}
+
+const openManagedUserPasswordModal = (user: ManagedUser) => {
+  if (isManagedSelf(user)) {
+    return
+  }
+  managePasswordTargetUserId.value = user.id
+  managePasswordTargetUsername.value = user.username
+  managePasswordDraft.value = ''
+  managePasswordVerifyDraft.value = ''
+  manageUserPasswordDialogOpen.value = true
+}
+
+const closeManagedUserPasswordModal = () => {
+  if (manageUsersBusy.value) {
+    return
+  }
+  manageUserPasswordDialogOpen.value = false
+}
+
+const closeManagedUserDeleteModal = () => {
+  if (manageUsersBusy.value) {
+    return
+  }
+  manageUserDeleteDialogOpen.value = false
+}
+
+const submitManagedUserPasswordUpdate = async () => {
+  if (!managePasswordTargetUserId.value) {
+    return
+  }
+  const draft = managePasswordDraft.value.trim()
+  const verify = managePasswordVerifyDraft.value.trim()
+  if (!draft || !verify) {
+    return
+  }
+  if (draft !== verify) {
+    errorMessage.value = 'Password and verify password must match'
+    snackbar.value = true
+    return
+  }
+  manageUsersBusy.value = true
+  try {
+    await request.put(`/admin/users/${managePasswordTargetUserId.value}/password`, { new_password: draft })
+    manageUserPasswordDialogOpen.value = false
+    await loadManagedUsers()
+  } finally {
+    manageUsersBusy.value = false
+  }
+}
+
+const toggleManagedUserLock = async (user: ManagedUser) => {
+  if (isManagedSelf(user)) {
+    return
+  }
+  manageUsersBusy.value = true
+  try {
+    await request.put(`/admin/users/${user.id}/lock`, { locked: !isManagedUserLocked(user) })
+    await loadManagedUsers()
+  } finally {
+    manageUsersBusy.value = false
+  }
+}
+
+const onManagedUserAdminCheckboxChange = async (user: ManagedUser, event: Event) => {
+  if (isManagedSelf(user)) {
+    return
+  }
+  const target = event.target as HTMLInputElement
+  const isAdmin = !!target.checked
+  manageUsersBusy.value = true
+  try {
+    await request.put(`/admin/users/${user.id}/admin`, { is_admin: isAdmin })
+    await loadManagedUsers()
+  } finally {
+    manageUsersBusy.value = false
+  }
+}
+
+const deleteManagedUser = async (user: ManagedUser) => {
+  if (isManagedSelf(user)) {
+    return
+  }
+  manageDeleteTargetUserId.value = user.id
+  manageDeleteTargetUsername.value = user.username
+  manageUserDeleteDialogOpen.value = true
+}
+
+const confirmDeleteManagedUser = async () => {
+  if (!manageDeleteTargetUserId.value) {
+    return
+  }
+  manageUsersBusy.value = true
+  try {
+    await request.delete(`/admin/users/${manageDeleteTargetUserId.value}`)
+    manageUserDeleteDialogOpen.value = false
+    manageDeleteTargetUserId.value = ''
+    manageDeleteTargetUsername.value = ''
+    await loadManagedUsers()
+  } finally {
+    manageUsersBusy.value = false
+  }
 }
 
 const isoToDateTimeLocal = (value: string | null) => {
@@ -958,6 +1265,18 @@ const onWindowKeyDown = (event: KeyboardEvent) => {
     closeAdminDialog()
     return
   }
+  if (manageUserPasswordDialogOpen.value) {
+    closeManagedUserPasswordModal()
+    return
+  }
+  if (manageUserDeleteDialogOpen.value) {
+    closeManagedUserDeleteModal()
+    return
+  }
+  if (manageUsersDialogOpen.value) {
+    closeManageUsersDialog()
+    return
+  }
   if (profileDialogOpen.value) {
     closeProfileDialog()
     return
@@ -985,8 +1304,8 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onWindowKeyDown)
 })
 
-watch(adminTab, async (tab) => {
-  if (!adminDialogOpen.value || tab !== 'registration') {
+watch(manageUsersTab, async (tab) => {
+  if (!manageUsersDialogOpen.value || tab !== 'registration') {
     return
   }
   await loadRegistrationCodes()
@@ -1417,6 +1736,30 @@ const runImport = async () => {
 .profile-delete-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.manage-users-table-wrap {
+  overflow-x: auto;
+}
+
+.manage-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.manage-users-table th,
+.manage-users-table td {
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+  padding: 8px 6px;
+  vertical-align: top;
+}
+
+.manage-users-admin-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .registration-create-grid {

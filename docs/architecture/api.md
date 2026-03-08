@@ -324,6 +324,20 @@ Defined in `python/mp/api/admin.py`.
   - admin-only update of `name` and/or `expires_at`
 - `DELETE /admin/registration-codes/{code_id}`
   - admin-only removal
+- `GET /admin/users`
+  - admin-only list of users with role/lock/timestamp fields
+- `PUT /admin/users/{user_id}/password`
+  - admin-only password reset for target user
+  - clears target lockout state
+- `PUT /admin/users/{user_id}/lock`
+  - admin-only lock/unlock toggle via `locked: bool`
+- `PUT /admin/users/{user_id}/admin`
+  - admin-only admin role toggle via `is_admin: bool`
+  - rejects removing admin role from the last remaining admin
+- `DELETE /admin/users/{user_id}`
+  - admin-only user delete
+  - rejects deleting the last remaining admin
+  - rejects deleting self via admin endpoint (self-delete uses profile delete flow)
 
 ## Important Timestamp Semantics
 
