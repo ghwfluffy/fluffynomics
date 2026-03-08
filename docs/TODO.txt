@@ -6,8 +6,6 @@ Security
     [ ] Admin site settings
     [ ] Test mode (allow test data creation)
     [ ] Reg codes
-    [ ] force backup
-    [ ] site backup/restore
 Prod deployment
 [ ] Domain
 [ ] Site

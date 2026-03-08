@@ -23,6 +23,15 @@
             <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileManageClick">
               Profile
             </button>
+            <button
+              v-if="currentUser?.is_admin"
+              class="profile-menu-item"
+              type="button"
+              role="menuitem"
+              @click="onAdministrationClick"
+            >
+              Administration
+            </button>
             <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileExportClick">
               Export Data
             </button>
@@ -199,6 +208,47 @@
         </div>
       </section>
     </div>
+
+    <div v-if="adminDialogOpen" class="modal-backdrop">
+      <section class="modal-card cds--tile">
+        <h3>Administration</h3>
+        <p>Administrative backup controls.</p>
+        <div class="modal-form-grid">
+          <button class="cds--btn cds--btn--secondary" type="button" :disabled="adminBusy" @click="triggerLocalBackupNow">
+            {{ adminBusy ? 'Scheduling...' : 'Trigger Local Backup Now' }}
+          </button>
+          <button class="cds--btn cds--btn--secondary" type="button" :disabled="adminBusy" @click="downloadFullSiteBackup">
+            Download Full Site Backup
+          </button>
+          <div class="import-file-row">
+            <button class="cds--btn cds--btn--ghost" type="button" @click="openAdminRestorePicker">
+              Choose Restore File
+            </button>
+            <span>{{ adminRestoreFileName || 'No restore file selected' }}</span>
+          </div>
+          <input
+            ref="adminRestoreFileInput"
+            class="import-file-input"
+            type="file"
+            accept=".gz,application/gzip"
+            @change="onAdminRestoreFileSelected"
+          />
+          <button
+            class="cds--btn cds--btn--danger"
+            type="button"
+            :disabled="adminRestoreBusy || !adminRestoreFile"
+            @click="restoreFullSiteBackup"
+          >
+            {{ adminRestoreBusy ? 'Restoring...' : 'Restore Full Site Backup' }}
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="adminBusy || adminRestoreBusy" @click="closeAdminDialog">
+            Close
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -228,6 +278,12 @@ const profileNewPassword = ref('')
 const profileDraftAvatarIconId = ref<string | null>(null)
 const showProfileIconLibrary = ref(false)
 const profileIconFileInput = ref<HTMLInputElement | null>(null)
+const adminDialogOpen = ref(false)
+const adminBusy = ref(false)
+const adminRestoreBusy = ref(false)
+const adminRestoreFileInput = ref<HTMLInputElement | null>(null)
+const adminRestoreFile = ref<File | null>(null)
+const adminRestoreFileName = ref('')
 
 type IconChoice = {
   id: string
@@ -296,6 +352,13 @@ const onProfileManageClick = async () => {
   await loadProfileIcons()
 }
 
+const onAdministrationClick = () => {
+  closeProfileMenu()
+  adminRestoreFile.value = null
+  adminRestoreFileName.value = ''
+  adminDialogOpen.value = true
+}
+
 const onProfileExportClick = () => {
   closeProfileMenu()
   openExportDialog()
@@ -309,6 +372,70 @@ const onProfileImportClick = () => {
 const onProfileLogoutClick = async () => {
   closeProfileMenu()
   await signOut()
+}
+
+const closeAdminDialog = () => {
+  if (adminBusy.value || adminRestoreBusy.value) {
+    return
+  }
+  adminDialogOpen.value = false
+}
+
+const triggerLocalBackupNow = async () => {
+  adminBusy.value = true
+  try {
+    await request.post('/backups/run-now')
+  } finally {
+    adminBusy.value = false
+  }
+}
+
+const downloadFullSiteBackup = async () => {
+  adminBusy.value = true
+  try {
+    const blob = await request.post<Blob>(
+      '/backups/site/export',
+      {},
+      { responseType: 'blob' },
+    )
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'site-backup.sql.gz'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  } finally {
+    adminBusy.value = false
+  }
+}
+
+const openAdminRestorePicker = () => {
+  adminRestoreFileInput.value?.click()
+}
+
+const onAdminRestoreFileSelected = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  adminRestoreFile.value = file || null
+  adminRestoreFileName.value = file?.name || ''
+}
+
+const restoreFullSiteBackup = async () => {
+  if (!adminRestoreFile.value) {
+    return
+  }
+  adminRestoreBusy.value = true
+  try {
+    const form = new FormData()
+    form.append('file', adminRestoreFile.value)
+    await request.post('/backups/site/restore', form)
+    adminDialogOpen.value = false
+    window.location.reload()
+  } finally {
+    adminRestoreBusy.value = false
+  }
 }
 
 const closeProfileDialog = () => {

@@ -3,8 +3,6 @@ set -eu
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 RETENTION="${BACKUP_RETENTION:-100}"
-BACKUP_UID="${BACKUP_UID:-1000}"
-BACKUP_GID="${BACKUP_GID:-1000}"
 BACKUP_HOUR_UTC="${BACKUP_HOUR_UTC:-02}"
 BACKUP_MINUTE_UTC="${BACKUP_MINUTE_UTC:-00}"
 TRIGGER_FILE="${BACKUP_TRIGGER_FILE:-${BACKUP_DIR}/.trigger-now}"
@@ -20,7 +18,6 @@ run_backup() {
 
   pg_dump --clean --if-exists --no-owner --no-privileges "${PGDATABASE}" | gzip -9 > "${tmpfile}"
   mv "${tmpfile}" "${filepath}"
-  chown "${BACKUP_UID}:${BACKUP_GID}" "${filepath}" || true
 
   # Retain only the newest N backups.
   list="$(ls -1t "${BACKUP_DIR}"/pgdump-*.sql.gz 2>/dev/null || true)"
@@ -50,5 +47,5 @@ while true; do
     echo "${now_day}" > "${STATE_FILE}"
   fi
 
-  sleep 30
+  sleep 10
 done

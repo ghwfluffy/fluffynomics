@@ -261,9 +261,16 @@ Defined in `python/mp/api/data_portability.py`.
 Defined in `python/mp/api/backups.py`.
 
 - `POST /backups/run-now`
-  - authenticated endpoint that schedules an immediate DB backup run
+  - admin-only endpoint that schedules an immediate local DB backup run
   - creates trigger file consumed by backup worker container
   - returns scheduling status
+- `POST /backups/site/export`
+  - admin-only endpoint that returns a full-site `pg_dump` as `.sql.gz`
+  - format matches automated backup worker dump format
+- `POST /backups/site/restore`
+  - admin-only endpoint accepting uploaded backup payload
+  - supports gzip SQL dumps (`.sql.gz`) and plain SQL dumps (`.sql`)
+  - restores full site contents into the configured Postgres DB
 
 ## Important Timestamp Semantics
 

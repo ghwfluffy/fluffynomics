@@ -5,6 +5,9 @@ WORKDIR /app
 # Install dependencies
 COPY ./python/requirements.txt /tmp/requirements.txt
 RUN \
+    apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client gzip && \
+    rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
     rm -f requirements.txt
 

@@ -5,6 +5,7 @@ export interface User {
   id: string
   username: string
   example_data: boolean
+  is_admin: boolean
   avatar_icon_id: string | null
   last_login_at: string | null
   password_changed_at: string | null

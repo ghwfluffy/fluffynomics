@@ -51,6 +51,7 @@ services:
 
   db-backup:
     image: postgres:16
+    user: "${BACKUP_UID:-1000}:${BACKUP_GID:-1000}"
     depends_on:
       - database
     environment:
@@ -61,8 +62,6 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       BACKUP_DIR: /backups
       BACKUP_RETENTION: "100"
-      BACKUP_UID: ${BACKUP_UID:-1000}
-      BACKUP_GID: ${BACKUP_GID:-1000}
       BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-02}
       BACKUP_MINUTE_UTC: ${BACKUP_MINUTE_UTC:-00}
       BACKUP_TRIGGER_FILE: /backups/.trigger-now

@@ -18,7 +18,8 @@
 - Retention controls:
   - `BACKUP_RETENTION` default `100` newest files retained.
 - Ownership controls:
-  - `BACKUP_UID`/`BACKUP_GID` environment values (default `1000:1000`) are chowned onto created backup files.
+  - backup worker container runs as `BACKUP_UID:BACKUP_GID` (default `1000:1000`)
+  - backup files are written directly with that ownership (no per-file `chown` step)
 - Immediate run trigger:
   - API endpoint `POST /backups/run-now` writes a trigger file consumed by backup worker.
 
@@ -164,6 +165,8 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `users.password_changed_at` (nullable timestamp)
 - `users.failed_password_attempts` (non-null integer, default `0`)
 - `users.password_lockout_until` (nullable timestamp for short lockout window)
+- `users.is_admin` (non-null boolean, default `false`)
+  - first registered user is assigned admin privileges
 
 ## Data Portability Replace Semantics
 

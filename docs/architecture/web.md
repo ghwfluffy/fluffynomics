@@ -85,6 +85,12 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
   - supports avatar selection (icon library / upload / clear)
   - shows account-created time, last-login time, last-password-change time
   - supports password change flow (`current password` + `new password`)
+- `Administration` (admin users only)
+  - opens backup admin modal
+  - supports:
+    - trigger local scheduled backup immediately
+    - download full-site backup (`.sql.gz`)
+    - upload and restore full-site backup (`.sql.gz`)
 - `Export Data`
   - opens modal with optional password
   - downloads a JSON package from `POST /data/export`

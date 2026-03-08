@@ -213,11 +213,13 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
         raise HTTPException(status_code=400, detail="Username already exists")
 
     now = datetime.now(tz=timezone.utc)
+    existing_user_count = db.query(User).count()
     user = User(
         username=payload.username,
         password_hash=_hash_password(payload.password),
         example_data=payload.add_example_data,
         password_changed_at=now,
+        is_admin=existing_user_count == 0,
         created_at=now,
         updated_at=now,
     )
