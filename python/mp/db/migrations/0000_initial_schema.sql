@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS icon_assets (
 CREATE TABLE IF NOT EXISTS organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL UNIQUE,
+    url TEXT,
     icon_id UUID REFERENCES icon_assets(id) ON DELETE SET NULL,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS stocks (
     name TEXT NOT NULL,
     ticker TEXT NOT NULL,
     exchange TEXT,
+    last_price_cents BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, ticker, exchange)
@@ -104,6 +106,7 @@ CREATE TABLE IF NOT EXISTS account_crypto_positions (
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     ticker VARCHAR(32) NOT NULL,
     quantity NUMERIC(38, 18) NOT NULL,
+    exchange_rate_cents BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (account_id, ticker)
 );
 

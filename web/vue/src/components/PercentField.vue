@@ -184,8 +184,13 @@ const onPaste = (event: ClipboardEvent) => {
   font-size: 0.94rem;
   color: #0f172a;
   background: transparent;
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
+}
+
+.percent-input:focus {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .percent-input-wrap:focus-within {

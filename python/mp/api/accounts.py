@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -105,6 +105,15 @@ def _validate_recurring_period(raw: str | None) -> None:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _validate_last_payment_date(value: date | None) -> None:
+    if value is None:
+        return
+    if value > date.today():
+        raise HTTPException(
+            status_code=400, detail="last_payment_date cannot be in the future"
+        )
+
+
 def _coerce_icon_type(icon_type: str | None) -> Literal["Letters", "Gravatar", "Icon"]:
     if icon_type == AccountIconType.LETTERS.value:
         return AccountIconType.LETTERS.value
@@ -148,11 +157,31 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
     stock_positions, crypto_positions, cash_bills = _hydrate_nested_positions(
         db, account
     )
+    stock_ids = [position.stock_id for position in stock_positions]
+    stocks_by_id: dict[UUID, Stock] = {}
+    if stock_ids:
+        for db_stock in db.query(Stock).filter(Stock.id.in_(stock_ids)).all():
+            stocks_by_id[db_stock.id] = db_stock
     derived_cash_balance = None
     if account.type == "cash":
         derived_cash_balance = sum(
             position.denomination_cents * position.quantity for position in cash_bills
         )
+    serialized_stock_positions: list[PositionStockSchema] = []
+    for position in stock_positions:
+        mapped_stock = stocks_by_id.get(position.stock_id)
+        serialized_stock_positions.append(
+            PositionStockSchema(
+                stock_id=position.stock_id,
+                ticker=mapped_stock.ticker if mapped_stock is not None else None,
+                exchange=mapped_stock.exchange if mapped_stock is not None else None,
+                last_price_cents=(
+                    mapped_stock.last_price_cents if mapped_stock is not None else None
+                ),
+                quantity=position.quantity,
+            )
+        )
+
     return AccountSchema(
         id=account.id,
         user_id=account.user_id,
@@ -183,12 +212,13 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         icon_id=account.icon_id,
         icon_type=_coerce_icon_type(account.icon_type),
         last_update=account.last_update,
-        stock_positions=[
-            PositionStockSchema(stock_id=position.stock_id, quantity=position.quantity)
-            for position in stock_positions
-        ],
+        stock_positions=serialized_stock_positions,
         crypto_positions=[
-            PositionCryptoSchema(ticker=position.ticker, quantity=position.quantity)
+            PositionCryptoSchema(
+                ticker=position.ticker,
+                quantity=position.quantity,
+                exchange_rate_cents=position.exchange_rate_cents,
+            )
             for position in crypto_positions
         ],
         cash_bills=[
@@ -204,6 +234,7 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
 
 def _replace_nested_positions(
     db: Session,
+    user_id: UUID,
     account_id: UUID,
     stock_positions: list | None,
     crypto_positions: list | None,
@@ -212,10 +243,41 @@ def _replace_nested_positions(
     if stock_positions is not None:
         db.query(AccountStockPosition).filter_by(account_id=account_id).delete()
         for item in stock_positions:
+            stock_id = item.stock_id
+            if stock_id is None:
+                ticker = (item.ticker or "").strip().upper()
+                if not ticker:
+                    continue
+                stock = (
+                    db.query(Stock)
+                    .filter(Stock.user_id == user_id, Stock.ticker == ticker)
+                    .first()
+                )
+                if stock is None:
+                    stock = Stock(
+                        user_id=user_id,
+                        name=ticker,
+                        ticker=ticker,
+                        exchange=item.exchange,
+                        last_price_cents=max(0, int(item.last_price_cents or 0)),
+                    )
+                    db.add(stock)
+                    db.flush()
+                elif item.last_price_cents is not None:
+                    stock.last_price_cents = max(0, int(item.last_price_cents))
+                stock_id = stock.id
+            elif item.last_price_cents is not None:
+                stock = (
+                    db.query(Stock)
+                    .filter(Stock.id == stock_id, Stock.user_id == user_id)
+                    .first()
+                )
+                if stock is not None:
+                    stock.last_price_cents = max(0, int(item.last_price_cents))
             db.add(
                 AccountStockPosition(
                     account_id=account_id,
-                    stock_id=item.stock_id,
+                    stock_id=stock_id,
                     quantity=item.quantity,
                 )
             )
@@ -228,6 +290,7 @@ def _replace_nested_positions(
                     account_id=account_id,
                     ticker=item.ticker.upper(),
                     quantity=item.quantity,
+                    exchange_rate_cents=item.exchange_rate_cents or 0,
                 )
             )
 
@@ -241,6 +304,64 @@ def _replace_nested_positions(
                     quantity=item.quantity,
                 )
             )
+
+
+def _propagate_crypto_rates_for_user(
+    db: Session, user_id: UUID, crypto_positions: list[PositionCryptoSchema]
+) -> None:
+    if not crypto_positions:
+        return
+    by_ticker: dict[str, int] = {}
+    for item in crypto_positions:
+        ticker = item.ticker.strip().upper()
+        if not ticker:
+            continue
+        by_ticker[ticker] = max(0, int(item.exchange_rate_cents or 0))
+
+    if not by_ticker:
+        return
+
+    account_ids_subquery = db.query(Account.id).filter(Account.user_id == user_id)
+    for ticker, rate in by_ticker.items():
+        (
+            db.query(AccountCryptoPosition)
+            .filter(
+                AccountCryptoPosition.account_id.in_(account_ids_subquery),
+                AccountCryptoPosition.ticker == ticker,
+            )
+            .update({"exchange_rate_cents": rate}, synchronize_session=False)
+        )
+
+
+def _propagate_stock_prices_for_user(
+    db: Session, user_id: UUID, stock_positions: list[PositionStockSchema]
+) -> None:
+    if not stock_positions:
+        return
+    by_ticker: dict[str, int] = {}
+    for item in stock_positions:
+        if item.last_price_cents is None:
+            continue
+        ticker = (item.ticker or "").strip().upper()
+        if not ticker and item.stock_id is not None:
+            stock = (
+                db.query(Stock)
+                .filter(Stock.id == item.stock_id, Stock.user_id == user_id)
+                .first()
+            )
+            ticker = stock.ticker if stock is not None else ""
+        if not ticker:
+            continue
+        by_ticker[ticker] = max(0, int(item.last_price_cents))
+    for ticker, price in by_ticker.items():
+        (
+            db.query(Stock)
+            .filter(Stock.user_id == user_id, Stock.ticker == ticker)
+            .update(
+                {"last_price_cents": price, "updated_at": datetime.utcnow()},
+                synchronize_session=False,
+            )
+        )
 
 
 @router.get("/accounts", response_model=list[AccountSchema])
@@ -284,6 +405,7 @@ def create_account(
     _validate_required_identity_fields(payload.name, payload.organization)
     _validate_icon_type(payload.icon_type)
     _validate_recurring_period(payload.fee_period)
+    _validate_last_payment_date(payload.last_payment_date)
     _validate_type_requirements(payload)
 
     max_rank = (
@@ -331,24 +453,30 @@ def create_account(
     db.flush()
 
     if payload.stock_positions:
-        stock_ids = [item.stock_id for item in payload.stock_positions]
-        owned_count = (
-            db.query(Stock)
-            .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
-            .count()
-        )
-        if owned_count != len(set(stock_ids)):
-            raise HTTPException(
-                status_code=400, detail="Stock position contains unknown stock"
+        stock_ids = [item.stock_id for item in payload.stock_positions if item.stock_id]
+        if stock_ids:
+            owned_count = (
+                db.query(Stock)
+                .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
+                .count()
             )
+            if owned_count != len(set(stock_ids)):
+                raise HTTPException(
+                    status_code=400, detail="Stock position contains unknown stock"
+                )
 
     _replace_nested_positions(
         db,
+        current_user.id,
         account.id,
         payload.stock_positions,
         payload.crypto_positions,
         payload.cash_bills,
     )
+    if payload.stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
+    if payload.crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
 
     db.commit()
     db.refresh(account)
@@ -400,6 +528,8 @@ def update_account(
         _validate_account_number(data["account_number"])
     if "fee_period" in data:
         _validate_recurring_period(data["fee_period"])
+    if "last_payment_date" in data:
+        _validate_last_payment_date(data["last_payment_date"])
     if "name" in data or "organization" in data:
         _validate_required_identity_fields(
             data.get("name", account.name),
@@ -440,13 +570,20 @@ def update_account(
         stock_positions=payload.stock_positions
         if payload.stock_positions is not None
         else [
-            PositionStockSchema(stock_id=position.stock_id, quantity=position.quantity)
+            PositionStockSchema(
+                stock_id=position.stock_id,
+                quantity=position.quantity,
+            )
             for position in existing_stock_positions
         ],
         crypto_positions=payload.crypto_positions
         if payload.crypto_positions is not None
         else [
-            PositionCryptoSchema(ticker=position.ticker, quantity=position.quantity)
+            PositionCryptoSchema(
+                ticker=position.ticker,
+                quantity=position.quantity,
+                exchange_rate_cents=position.exchange_rate_cents,
+            )
             for position in existing_crypto_positions
         ],
         cash_bills=payload.cash_bills
@@ -468,18 +605,20 @@ def update_account(
     merged_payload.icon_type = normalized_icon_type
     merged_payload.icon_id = normalized_icon_id
     _validate_type_requirements(merged_payload)
+    _validate_last_payment_date(merged_payload.last_payment_date)
 
     if payload.stock_positions is not None and payload.stock_positions:
-        stock_ids = [item.stock_id for item in payload.stock_positions]
-        owned_count = (
-            db.query(Stock)
-            .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
-            .count()
-        )
-        if owned_count != len(set(stock_ids)):
-            raise HTTPException(
-                status_code=400, detail="Stock position contains unknown stock"
+        stock_ids = [item.stock_id for item in payload.stock_positions if item.stock_id]
+        if stock_ids:
+            owned_count = (
+                db.query(Stock)
+                .filter(Stock.user_id == current_user.id, Stock.id.in_(stock_ids))
+                .count()
             )
+            if owned_count != len(set(stock_ids)):
+                raise HTTPException(
+                    status_code=400, detail="Stock position contains unknown stock"
+                )
 
     for field in [
         "account_number",
@@ -522,11 +661,16 @@ def update_account(
 
     _replace_nested_positions(
         db,
+        current_user.id,
         account_id,
         payload.stock_positions,
         payload.crypto_positions,
         payload.cash_bills,
     )
+    if payload.stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
+    if payload.crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
 
     db.commit()
     db.refresh(account)
@@ -588,28 +732,52 @@ def list_icons(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[IconListItemSchema]:
-    default_icon_ids = {
-        row[0]
-        for row in db.query(Organization.icon_id)
-        .filter(Organization.is_default.is_(True), Organization.icon_id.isnot(None))
-        .all()
-    }
-    generic_default_icon_ids = {
-        row[0]
-        for row in db.query(DefaultIcon.icon_id)
+    generic_rows = (
+        db.query(DefaultIcon.icon_id)
         .filter(DefaultIcon.icon_id.isnot(None))
+        .order_by(DefaultIcon.label.asc())
         .all()
-    }
-    all_default_icon_ids = default_icon_ids | generic_default_icon_ids
-    icons = (
-        db.query(IconAsset)
-        .filter(
-            (IconAsset.created_by_user_id == current_user.id)
-            | (IconAsset.id.in_(all_default_icon_ids))
-        )
+    )
+    generic_icon_ids = [row[0] for row in generic_rows]
+    generic_icon_id_set = set(generic_icon_ids)
+
+    org_rows = (
+        db.query(Organization.icon_id)
+        .filter(Organization.is_default.is_(True), Organization.icon_id.isnot(None))
+        .order_by(Organization.name.asc())
+        .all()
+    )
+    org_icon_ids = [row[0] for row in org_rows if row[0] not in generic_icon_id_set]
+    org_icon_id_set = set(org_icon_ids)
+
+    custom_rows = (
+        db.query(IconAsset.id)
+        .filter(IconAsset.created_by_user_id == current_user.id)
         .order_by(IconAsset.created_at.desc())
         .all()
     )
+    custom_icon_ids = [
+        row[0]
+        for row in custom_rows
+        if row[0] not in generic_icon_id_set and row[0] not in org_icon_id_set
+    ]
+
+    ordered_icon_ids: list[UUID] = []
+    seen: set[UUID] = set()
+    for icon_id in [*generic_icon_ids, *org_icon_ids, *custom_icon_ids]:
+        if icon_id in seen:
+            continue
+        seen.add(icon_id)
+        ordered_icon_ids.append(icon_id)
+
+    if not ordered_icon_ids:
+        return []
+
+    icons = db.query(IconAsset).filter(IconAsset.id.in_(ordered_icon_ids)).all()
+    by_id = {icon.id: icon for icon in icons}
+    all_default_icon_ids = generic_icon_id_set | org_icon_id_set
+    ordered_icons = [by_id[icon_id] for icon_id in ordered_icon_ids if icon_id in by_id]
+
     return [
         IconListItemSchema(
             id=icon.id,
@@ -617,7 +785,7 @@ def list_icons(
             is_default=icon.id in all_default_icon_ids,
             created_by_me=icon.created_by_user_id == current_user.id,
         )
-        for icon in icons
+        for icon in ordered_icons
     ]
 
 
@@ -699,17 +867,18 @@ def list_organizations(
             continue
         suggestions[row.name.lower()] = OrganizationSuggestionSchema(
             name=row.name,
+            url=row.url,
             icon_id=row.icon_id,
             is_default=row.is_default,
         )
 
     account_rows = (
-        db.query(Account.organization, Account.icon_id, Account.created_at)
+        db.query(Account.organization, Account.url, Account.icon_id, Account.created_at)
         .filter(Account.user_id == current_user.id, Account.organization.isnot(None))
         .order_by(Account.created_at.desc())
         .all()
     )
-    for organization, icon_id, _ in account_rows:
+    for organization, account_url, icon_id, _ in account_rows:
         if organization is None:
             continue
         name = organization.strip()
@@ -721,9 +890,12 @@ def list_organizations(
         if key in suggestions:
             if suggestions[key].icon_id is None and icon_id is not None:
                 suggestions[key].icon_id = icon_id
+            if not suggestions[key].url and account_url:
+                suggestions[key].url = account_url
             continue
         suggestions[key] = OrganizationSuggestionSchema(
             name=name,
+            url=account_url,
             icon_id=icon_id,
             is_default=False,
         )
@@ -755,15 +927,23 @@ def update_account_value(
     if "usd_balance_cents" in data:
         account.usd_balance_cents = data["usd_balance_cents"]
     if "last_payment_date" in data:
+        _validate_last_payment_date(data["last_payment_date"])
         account.last_payment_date = data["last_payment_date"]
+    if "expiration_date" in data:
+        account.expiration_date = data["expiration_date"]
 
     _replace_nested_positions(
         db,
+        current_user.id,
         account_id,
         payload.stock_positions,
         payload.crypto_positions,
         payload.cash_bills,
     )
+    if payload.stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
+    if payload.crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
     account.last_update = datetime.utcnow()
     db.commit()
     db.refresh(account)
@@ -812,6 +992,7 @@ def create_stock(
         name=payload.name,
         ticker=payload.ticker.upper(),
         exchange=payload.exchange,
+        last_price_cents=max(0, payload.last_price_cents),
     )
     db.add(stock)
     db.commit()
@@ -841,6 +1022,21 @@ def update_stock(
         stock.ticker = data["ticker"].upper()
     if "exchange" in data:
         stock.exchange = data["exchange"]
+    if "last_price_cents" in data and data["last_price_cents"] is not None:
+        new_price = max(0, int(data["last_price_cents"]))
+        target_ticker = (data.get("ticker") or stock.ticker).upper()
+        (
+            db.query(Stock)
+            .filter(Stock.user_id == current_user.id, Stock.ticker == target_ticker)
+            .update(
+                {
+                    "last_price_cents": new_price,
+                    "updated_at": datetime.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        stock.last_price_cents = new_price
     stock.updated_at = datetime.utcnow()
 
     db.commit()

@@ -41,6 +41,8 @@ Defined in `python/mp/api/accounts.py`.
   - updates balance/position values only
   - for `line_of_credit`/`credit_card`/`loan`, can also set `last_payment_date`
   - for `cash` accounts, accepts `cash_bills` quantities and balance is derived from denominations
+  - for crypto accounts, accepts multiple `crypto_positions` entries with `ticker`, `quantity`, and `exchange_rate_cents`
+  - when crypto `exchange_rate_cents` is provided, backend propagates that rate to all holdings with same ticker for that user
   - sets `accounts.last_update = now()`
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)
@@ -57,6 +59,7 @@ Defined in `python/mp/api/accounts.py`.
   - deterministic identicon-style icon generated on demand from organization seed
 - `GET /icons`
   - lists selectable icons for current user (default icons + icons uploaded by current user)
+  - ordering is stable and grouped as: generic defaults -> organization defaults -> user-uploaded
 - `GET /default-icons`
   - lists generic default icon presets (`key`, `label`, `icon_id`) not tied to organizations
 - `GET /icons/{icon_id}`
@@ -85,6 +88,10 @@ Defined in `python/mp/api/accounts.py`.
 - `POST /stocks`
 - `PUT /stocks/{stock_id}`
 - `DELETE /stocks/{stock_id}`
+
+Stock price propagation:
+- `stocks.last_price_cents` is user-scoped market price metadata.
+- Updating `last_price_cents` on one stock propagates to same-ticker stocks for that user.
 
 Stocks are user-scoped. DB uniqueness is per user (`user_id, ticker, exchange`).
 

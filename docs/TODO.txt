@@ -1,4 +1,16 @@
 [\] Design
+    [x] Accounts
+    [ ] Contracts
+    [ ] Recurring deposits
+    [ ] Expenses/Budget
+    [ ] Assets
+    [ ] Receivables
+    [ ] Credit score
+    [ ] Money visual / forecast
+[ ] Pull crypto/stock prices automatically
+    [ ] tastytrade integration
+    [ ] coinbase integration
+[ ] Balance over time
 [ ] letsencrypt TLS w/ ACME
 [ ] upcoming payment alerts (UI)
 [ ] upcoming payment alerts (SMS)

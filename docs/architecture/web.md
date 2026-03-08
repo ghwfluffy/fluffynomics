@@ -48,6 +48,8 @@ In `AccountsPage.vue`:
   - intended to refresh business values and drive `last_update`
   - for `cash` accounts, update modal edits bill quantities (`$1,$2,$5,$10,$20,$50,$100`) instead of static balance input
   - cash balance shown on tile is derived from bill quantities
+  - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate
+  - crypto tile balance is derived from sum(quantity * exchange_rate)
 - Delete flow uses custom confirm modal (no browser `alert/confirm`).
 - Account create/edit modal supports icon upload:
   - uploads to `POST /icons`

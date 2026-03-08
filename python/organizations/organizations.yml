@@ -1,69 +1,106 @@
 organizations:
 - name: Security Service
   icon: security_service.png
+  url: https://www.ssfcu.org
 - name: RBFCU
   icon: rbfcu.png
+  url: https://www.rbfcu.org
 - name: JPMorgan Chase
   icon: jpmorgan_chase.png
+  url: https://www.chase.com
 - name: Bank of America
   icon: bank_of_america.png
+  url: https://www.bankofamerica.com
 - name: Wells Fargo
   icon: wells_fargo.png
+  url: https://www.wellsfargo.com
 - name: Citibank
   icon: citibank.png
+  url: https://www.citi.com
 - name: Capital One
   icon: capital_one.png
+  url: https://www.capitalone.com
 - name: U.S. Bank
   icon: us_bank.png
+  url: https://www.usbank.com
 - name: Deutsche Bank
   icon: deutsche_bank.png
+  url: https://www.db.com
 - name: Acorns
   icon: acorns.png
+  url: https://www.acorns.com
 - name: Robinhood
   icon: robinhood.png
+  url: https://www.robinhood.com
 - name: Fidelity
   icon: fidelity.png
+  url: https://www.fidelity.com
 - name: Charles Schwab
   icon: charles_schwab.png
+  url: https://www.schwab.com
 - name: Vanguard
   icon: vanguard.png
+  url: https://www.vanguard.com
 - name: E*TRADE
   icon: etrade.png
+  url: https://us.etrade.com
+- name: tastytrade
+  icon: tastytrade.png
+  url: https://www.tastytrade.com
 - name: Webull
   icon: webull.png
+  url: https://www.webull.com
 - name: SoFi
   icon: sofi.png
+  url: https://www.sofi.com
 - name: Public.com
   icon: public_com.png
+  url: https://public.com
 - name: Coinbase
   icon: coinbase.png
+  url: https://www.coinbase.com
 - name: Kraken
   icon: kraken.png
+  url: https://www.kraken.com
 - name: Binance
   icon: binance.png
+  url: https://www.binance.com
 - name: Crypto.com
   icon: crypto_com.png
+  url: https://crypto.com
 - name: PayPal
   icon: paypal.png
+  url: https://www.paypal.com
 - name: Venmo
   icon: venmo.png
+  url: https://venmo.com
 - name: Cash App
   icon: cash_app.png
+  url: https://cash.app
 - name: Stripe
   icon: stripe.png
+  url: https://stripe.com
 - name: Square
   icon: square.png
+  url: https://squareup.com
 - name: Betterment
   icon: betterment.png
+  url: https://www.betterment.com
 - name: Wealthfront
   icon: wealthfront.png
+  url: https://www.wealthfront.com
 - name: Empower
   icon: empower.png
+  url: https://www.empower.com
 - name: American Express
   icon: american_express.png
+  url: https://www.americanexpress.com
 - name: Discover
   icon: discover.png
+  url: https://www.discover.com
 - name: Visa
   icon: visa.png
+  url: https://www.visa.com
 - name: Mastercard
   icon: mastercard.png
+  url: https://www.mastercard.com

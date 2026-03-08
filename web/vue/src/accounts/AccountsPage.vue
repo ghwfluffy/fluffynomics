@@ -31,7 +31,7 @@
       </div>
     </div>
 
-    <div v-if="createDialog" class="modal-backdrop" @click.self="closeCreateDialog">
+    <div v-if="createDialog" class="modal-backdrop">
       <section class="modal-card cds--tile">
         <h3>{{ modalTitle }} {{ selectedTypeLabel || 'Account' }}</h3>
         <form class="form-grid" @submit.prevent="submitCreateAccount">
@@ -144,7 +144,7 @@
       </section>
     </div>
 
-    <div v-if="deleteDialog" class="modal-backdrop" @click.self="closeDeleteDialog">
+    <div v-if="deleteDialog" class="modal-backdrop">
       <section class="confirm-card cds--tile">
         <h3>Delete Account</h3>
         <p>Are you sure you want to delete this account? This action cannot be undone.</p>
@@ -155,7 +155,7 @@
       </section>
     </div>
 
-    <div v-if="iconPickerDialog" class="modal-backdrop" @click.self="cancelIconPickerModal">
+    <div v-if="iconPickerDialog" class="modal-backdrop">
       <section class="icon-modal-card cds--tile">
         <h3>Choose Icon</h3>
         <div class="generated-icon-actions">
@@ -211,8 +211,11 @@
       </section>
     </div>
 
-    <div v-if="updateDialog" class="modal-backdrop" @click.self="closeUpdateDialog">
-      <section class="confirm-card cds--tile">
+    <div v-if="updateDialog" class="modal-backdrop">
+      <section
+        class="confirm-card cds--tile"
+        :class="{ 'confirm-card--wide': updateMode === 'crypto_positions' || updateMode === 'stock_positions' }"
+      >
         <h3>Update {{ updatingAccount?.name }}</h3>
         <p>{{ updateDescription }}</p>
 
@@ -231,10 +234,59 @@
             <BankField v-model="updateForm.cashBills[5000]" label="$50 bills" type="number" />
             <BankField v-model="updateForm.cashBills[10000]" label="$100 bills" type="number" />
           </div>
+          <div v-else-if="updateMode === 'crypto_positions'" class="crypto-positions-editor">
+            <div v-if="updatingAccount?.type === 'crypto_exchange'" class="crypto-usd-balance">
+              <DollarField v-model="updateForm.amountCents" label="USD Cash Balance" />
+            </div>
+            <div v-for="(position, index) in updateForm.cryptoPositions" :key="`cp-${index}`" class="crypto-position-row">
+              <BankField v-model="position.ticker" label="Ticker" />
+              <BankField v-model="position.quantity" label="Quantity" />
+              <DollarField v-model="position.exchange_rate_cents" label="Exchange Rate (USD)" />
+              <button
+                type="button"
+                class="cds--btn cds--btn--ghost crypto-remove-btn"
+                @click="removeCryptoPosition(index)"
+                :disabled="updateForm.cryptoPositions.length <= 1"
+              >
+                Remove
+              </button>
+            </div>
+            <button type="button" class="cds--btn cds--btn--secondary crypto-add-btn" @click="addCryptoPosition">
+              Add Ticker
+            </button>
+          </div>
+          <div v-else-if="updateMode === 'stock_positions'" class="crypto-positions-editor">
+            <DollarField
+              v-if="updatingAccount?.type === 'stocks_account'"
+              v-model="updateForm.amountCents"
+              label="USD Cash Balance"
+            />
+            <div v-for="(position, index) in updateForm.stockPositions" :key="`sp-${index}`" class="crypto-position-row">
+              <BankField v-model="position.ticker" label="Ticker" />
+              <BankField v-model="position.quantity" label="Quantity" />
+              <DollarField v-model="position.last_price_cents" label="Price Per Share (USD)" />
+              <button
+                type="button"
+                class="cds--btn cds--btn--ghost crypto-remove-btn"
+                @click="removeStockPosition(index)"
+              >
+                Remove
+              </button>
+            </div>
+            <button type="button" class="cds--btn cds--btn--secondary crypto-add-btn" @click="addStockPosition">
+              Add Ticker
+            </button>
+          </div>
           <BankField
             v-if="showLastPaymentDateField"
             v-model="updateForm.lastPaymentDate"
             label="Last Payment Date"
+            type="date"
+          />
+          <BankField
+            v-if="showRewardsExpirationField"
+            v-model="updateForm.expirationDate"
+            label="Expiration Date"
             type="date"
           />
           <template v-else-if="updateMode === 'quantity'">
@@ -359,11 +411,12 @@ interface AccountPayload {
   url?: string
   payment_day?: number
   last_payment_date?: string
+  expiration_date?: string
   last_update?: string
   balance_cents?: number
   usd_balance_cents?: number
-  stock_positions?: Array<{ stock_id: string; quantity: string }>
-  crypto_positions?: Array<{ ticker: string; quantity: string }>
+  stock_positions?: Array<{ stock_id?: string; ticker?: string; quantity: string; last_price_cents?: number }>
+  crypto_positions?: Array<{ ticker: string; quantity: string; exchange_rate_cents?: number }>
   cash_bills?: Array<{ denomination_cents: number; quantity: number }>
 }
 
@@ -397,13 +450,14 @@ interface CreateAccountPayload {
   payment_amount_cents?: number
   icon_id?: string
   icon_type: 'Letters' | 'Gravatar' | 'Icon'
-  stock_positions: Array<{ stock_id: string; quantity: string }>
-  crypto_positions: Array<{ ticker: string; quantity: string }>
+  stock_positions: Array<{ stock_id?: string; ticker?: string; exchange?: string; quantity: string; last_price_cents?: number }>
+  crypto_positions: Array<{ ticker: string; quantity: string; exchange_rate_cents?: number }>
   cash_bills: Array<{ denomination_cents: number; quantity: number }>
 }
 
 interface OrganizationSuggestion {
   name: string
+  url?: string
   icon_id?: string
   is_default: boolean
 }
@@ -441,6 +495,18 @@ const updateForm = ref({
   quantity: '0',
   ticker: '',
   lastPaymentDate: '',
+  expirationDate: '',
+  stockPositions: [{ ticker: '', quantity: '0', last_price_cents: 0 }] as Array<{
+    stock_id?: string
+    ticker: string
+    quantity: string
+    last_price_cents: number
+  }>,
+  cryptoPositions: [{ ticker: '', quantity: '0', exchange_rate_cents: 0 }] as Array<{
+    ticker: string
+    quantity: string
+    exchange_rate_cents: number
+  }>,
   cashBills: {
     100: 0,
     200: 0,
@@ -493,12 +559,16 @@ const sectionDefinitions: Array<Omit<Section, 'accounts'>> = [
 ]
 
 const compoundPeriods = ['daily', 'monthly']
-const retirementTypes = ['roth', 'simple', '401k']
+const retirementTypes = [
+  { value: 'roth', label: 'Roth' },
+  { value: 'simple', label: 'SIMPLE' },
+  { value: '401k', label: '401(k)' },
+]
 const compoundPeriodOptions = compoundPeriods.map((value) => ({ label: value, value }))
-const retirementTypeOptions = retirementTypes.map((value) => ({ label: value, value }))
+const retirementTypeOptions = retirementTypes
 
 const needsBalance = computed(() =>
-  ['checking', 'savings', 'line_of_credit', 'credit_card', 'retirement', 'loan', 'rewards_card'].includes(
+  ['checking', 'savings', 'line_of_credit', 'credit_card', 'retirement', 'loan', 'rewards_card', 'stocks_account'].includes(
     createForm.value.type,
   ),
 )
@@ -527,12 +597,18 @@ const sections = computed<Section[]>(() =>
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
 const submitLabel = computed(() => (editingAccountId.value ? 'Save Changes' : 'Create'))
-const updateMode = computed<'dollars' | 'quantity' | 'cash_bills'>(() => {
+const updateMode = computed<'dollars' | 'quantity' | 'cash_bills' | 'crypto_positions' | 'stock_positions'>(() => {
   const type = updatingAccount.value?.type || ''
   if (type === 'cash') {
     return 'cash_bills'
   }
-  return ['stocks_account', 'crypto_wallet'].includes(type) ? 'quantity' : 'dollars'
+  if (type === 'stocks_account') {
+    return 'stock_positions'
+  }
+  if (['crypto_wallet', 'crypto_exchange'].includes(type)) {
+    return 'crypto_positions'
+  }
+  return 'dollars'
 })
 const updateAmountLabel = computed(() =>
   updatingAccount.value?.type === 'crypto_exchange' ? 'USD Balance' : 'Balance',
@@ -547,8 +623,11 @@ const updateDescription = computed(() => {
   if (updateMode.value === 'cash_bills') {
     return 'Update bill quantities. Cash balance is calculated from bill counts.'
   }
-  if (updatingAccount.value.type === 'stocks_account') {
-    return 'Update the quantity for the first stock position on this account.'
+  if (updateMode.value === 'crypto_positions') {
+    return 'Update crypto tickers, quantities, and exchange rates.'
+  }
+  if (updateMode.value === 'stock_positions') {
+    return 'Update stock tickers, quantities, and share prices.'
   }
   return 'Update the quantity for the first crypto position on this account.'
 })
@@ -556,6 +635,9 @@ const showLastPaymentDateField = computed(
   () =>
     updateMode.value === 'dollars' &&
     ['line_of_credit', 'credit_card', 'loan'].includes(updatingAccount.value?.type || ''),
+)
+const showRewardsExpirationField = computed(
+  () => updateMode.value === 'dollars' && updatingAccount.value?.type === 'rewards_card',
 )
 
 const organizationOptions = computed(() => organizations.value.map((item) => item.name))
@@ -577,6 +659,16 @@ const organizationIconByName = computed(() => {
   return map
 })
 
+const organizationUrlByName = computed(() => {
+  const map = new Map<string, string>()
+  for (const item of organizations.value) {
+    if (item.url) {
+      map.set(item.name.toLowerCase(), item.url)
+    }
+  }
+  return map
+})
+
 const last4 = (value: string) => value.slice(-4)
 
 const cents = (value?: number) =>
@@ -587,13 +679,27 @@ const cents = (value?: number) =>
 
 const balanceLabel = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
-    return `${account.stock_positions?.length || 0} stock positions`
+    const total = (account.stock_positions || []).reduce((sum, position) => {
+      const qty = Number.parseFloat(position.quantity || '0')
+      const price = position.last_price_cents || 0
+      if (!Number.isFinite(qty)) {
+        return sum
+      }
+      return sum + Math.round(qty * price)
+    }, 0)
+    return `Balance ${cents(total + (account.balance_cents || 0))}`
   }
-  if (account.type === 'crypto_wallet') {
-    return `${account.crypto_positions?.length || 0} crypto positions`
-  }
-  if (account.type === 'crypto_exchange') {
-    return `USD ${cents(account.usd_balance_cents)}`
+  if (account.type === 'crypto_wallet' || account.type === 'crypto_exchange') {
+    const total = (account.crypto_positions || []).reduce((sum, position) => {
+      const qty = Number.parseFloat(position.quantity || '0')
+      const rateCents = position.exchange_rate_cents || 0
+      if (!Number.isFinite(qty)) {
+        return sum
+      }
+      return sum + Math.round(qty * rateCents)
+    }, 0)
+    const usdCash = account.type === 'crypto_exchange' ? account.usd_balance_cents || 0 : 0
+    return `Balance ${cents(total + usdCash)}`
   }
   if (account.type === 'cash') {
     const computed = (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
@@ -946,20 +1052,28 @@ const openUpdateDialog = (account: AccountPayload) => {
   activeTileMenuId.value = null
   updatingAccount.value = account
   if (account.type === 'stocks_account') {
-    const firstPosition = account.stock_positions?.[0]
-    if (!firstPosition) {
-      errorMessage.value = 'No stock position to update. Use Edit to add one first.'
-      snackbar.value = true
-      return
+    const positions =
+      account.stock_positions?.map((position) => ({
+        stock_id: position.stock_id,
+        ticker: position.ticker || '',
+        quantity: position.quantity || '0',
+        last_price_cents: position.last_price_cents || 0,
+      })) || []
+    updateForm.value.stockPositions = positions
+    updateForm.value.amountCents = account.balance_cents || 0
+  } else if (account.type === 'crypto_wallet' || account.type === 'crypto_exchange') {
+    const positions =
+      account.crypto_positions?.map((position) => ({
+        ticker: position.ticker || '',
+        quantity: position.quantity || '0',
+        exchange_rate_cents: position.exchange_rate_cents || 0,
+      })) || []
+    updateForm.value.cryptoPositions = positions.length
+      ? positions
+      : [{ ticker: '', quantity: '0', exchange_rate_cents: 0 }]
+    if (account.type === 'crypto_exchange') {
+      updateForm.value.amountCents = account.usd_balance_cents || 0
     }
-    updateForm.value.quantity = firstPosition.quantity || '0'
-    updateForm.value.ticker = ''
-  } else if (account.type === 'crypto_wallet') {
-    const firstPosition = account.crypto_positions?.[0]
-    updateForm.value.quantity = firstPosition?.quantity || '0'
-    updateForm.value.ticker = firstPosition?.ticker || ''
-  } else if (account.type === 'crypto_exchange') {
-    updateForm.value.amountCents = account.usd_balance_cents || 0
   } else if (account.type === 'cash') {
     const nextBills: Record<number, number> = { 100: 0, 200: 0, 500: 0, 1000: 0, 2000: 0, 5000: 0, 10000: 0 }
     for (const bill of account.cash_bills || []) {
@@ -972,6 +1086,7 @@ const openUpdateDialog = (account: AccountPayload) => {
     updateForm.value.amountCents = account.balance_cents || 0
   }
   updateForm.value.lastPaymentDate = account.last_payment_date?.slice(0, 10) || ''
+  updateForm.value.expirationDate = account.expiration_date?.slice(0, 10) || ''
   updateDialog.value = true
 }
 
@@ -982,6 +1097,25 @@ const closeUpdateDialog = () => {
 
 const isValidQuantity = (value: string) => /^-?\d+(\.\d+)?$/.test(value.trim())
 
+const addCryptoPosition = () => {
+  updateForm.value.cryptoPositions.push({ ticker: '', quantity: '0', exchange_rate_cents: 0 })
+}
+
+const removeCryptoPosition = (index: number) => {
+  if (updateForm.value.cryptoPositions.length <= 1) {
+    return
+  }
+  updateForm.value.cryptoPositions.splice(index, 1)
+}
+
+const addStockPosition = () => {
+  updateForm.value.stockPositions.push({ ticker: '', quantity: '0', last_price_cents: 0 })
+}
+
+const removeStockPosition = (index: number) => {
+  updateForm.value.stockPositions.splice(index, 1)
+}
+
 const submitUpdateValue = async () => {
   if (!updatingAccount.value) {
     return
@@ -990,6 +1124,14 @@ const submitUpdateValue = async () => {
   const payload: Record<string, unknown> = {}
 
   if (updateMode.value === 'dollars') {
+    if (showLastPaymentDateField.value && updateForm.value.lastPaymentDate) {
+      const todayIso = new Date().toISOString().slice(0, 10)
+      if (updateForm.value.lastPaymentDate > todayIso) {
+        errorMessage.value = 'Last payment date cannot be in the future'
+        snackbar.value = true
+        return
+      }
+    }
     if (account.type === 'crypto_exchange') {
       payload.usd_balance_cents = updateForm.value.amountCents
     } else {
@@ -998,47 +1140,67 @@ const submitUpdateValue = async () => {
     if (showLastPaymentDateField.value) {
       payload.last_payment_date = updateForm.value.lastPaymentDate || null
     }
+    if (showRewardsExpirationField.value) {
+      payload.expiration_date = updateForm.value.expirationDate || null
+    }
   } else if (updateMode.value === 'cash_bills') {
     payload.cash_bills = Object.entries(updateForm.value.cashBills).map(([denomination, quantity]) => ({
       denomination_cents: Number.parseInt(denomination, 10),
       quantity: Math.max(0, Math.floor(Number(quantity) || 0)),
     }))
-  } else if (account.type === 'stocks_account') {
-    if (!isValidQuantity(updateForm.value.quantity)) {
-      errorMessage.value = 'Quantity must be a valid number'
-      snackbar.value = true
-      return
-    }
-    const stockPositions = (account.stock_positions || []).map((position, index) =>
-      index === 0 ? { ...position, quantity: updateForm.value.quantity.trim() } : position,
-    )
-    payload.stock_positions = stockPositions
-  } else if (account.type === 'crypto_wallet') {
-    if (!isValidQuantity(updateForm.value.quantity)) {
-      errorMessage.value = 'Quantity must be a valid number'
-      snackbar.value = true
-      return
-    }
-    const ticker = updateForm.value.ticker.trim().toUpperCase()
-    if (!ticker) {
-      errorMessage.value = 'Ticker is required for crypto quantity updates'
-      snackbar.value = true
-      return
-    }
-    const cryptoPositions = [...(account.crypto_positions || [])]
-    if (cryptoPositions.length) {
-      cryptoPositions[0] = {
-        ...cryptoPositions[0],
-        ticker,
-        quantity: updateForm.value.quantity.trim(),
+  } else if (updateMode.value === 'stock_positions') {
+    const cleaned: Array<{ stock_id?: string; ticker: string; quantity: string; last_price_cents: number }> = []
+    for (const row of updateForm.value.stockPositions) {
+      const ticker = row.ticker.trim().toUpperCase()
+      const quantity = row.quantity.trim()
+      const price = Math.max(0, row.last_price_cents || 0)
+      if (!ticker && !quantity) {
+        continue
       }
-    } else {
-      cryptoPositions.push({
+      if (!ticker) {
+        errorMessage.value = 'Ticker is required for each stock position'
+        snackbar.value = true
+        return
+      }
+      if (!isValidQuantity(quantity)) {
+        errorMessage.value = 'Quantity must be a valid number'
+        snackbar.value = true
+        return
+      }
+      cleaned.push({
+        stock_id: row.stock_id,
         ticker,
-        quantity: updateForm.value.quantity.trim(),
+        quantity,
+        last_price_cents: price,
       })
     }
-    payload.crypto_positions = cryptoPositions
+    payload.stock_positions = cleaned
+    payload.balance_cents = updateForm.value.amountCents
+  } else if (updateMode.value === 'crypto_positions') {
+    const cleaned: Array<{ ticker: string; quantity: string; exchange_rate_cents: number }> = []
+    for (const row of updateForm.value.cryptoPositions) {
+      const ticker = row.ticker.trim().toUpperCase()
+      const quantity = row.quantity.trim()
+      const rate = Math.max(0, row.exchange_rate_cents || 0)
+      if (!ticker && !quantity) {
+        continue
+      }
+      if (!ticker) {
+        errorMessage.value = 'Ticker is required for each crypto position'
+        snackbar.value = true
+        return
+      }
+      if (!isValidQuantity(quantity)) {
+        errorMessage.value = 'Quantity must be a valid number'
+        snackbar.value = true
+        return
+      }
+      cleaned.push({ ticker, quantity, exchange_rate_cents: rate })
+    }
+    payload.crypto_positions = cleaned
+    if (account.type === 'crypto_exchange') {
+      payload.usd_balance_cents = updateForm.value.amountCents
+    }
   }
 
   await request.put(`/accounts/${account.id}/value`, payload)
@@ -1130,6 +1292,10 @@ watch(
       createForm.value.icon_id = iconId
       createForm.value.icon_type = 'Icon'
     }
+    const orgUrl = organizationUrlByName.value.get(key)
+    if (orgUrl) {
+      createForm.value.url = orgUrl
+    }
   },
 )
 
@@ -1215,6 +1381,10 @@ watch(
   padding: 1rem;
 }
 
+.confirm-card--wide {
+  width: min(1080px, 100%);
+}
+
 .confirm-card h3 {
   margin: 0 0 0.5rem;
 }
@@ -1258,6 +1428,32 @@ watch(
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.crypto-positions-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.crypto-usd-balance {
+  max-width: 360px;
+}
+
+.crypto-position-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(260px, 1.6fr) minmax(220px, 1.2fr) auto;
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+
+.crypto-remove-btn {
+  min-height: 2.5rem;
+  white-space: nowrap;
+}
+
+.crypto-add-btn {
+  justify-self: start;
 }
 
 .column-spacer {
@@ -1665,6 +1861,10 @@ watch(
 
   .icon-grid-scroll {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .crypto-position-row {
+    grid-template-columns: 1fr;
   }
 }
 

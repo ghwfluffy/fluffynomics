@@ -66,7 +66,6 @@ Stocks:
 - name
 - ticker
 - exchange (IE: NYSE)
-- 
 
 TODO:
 - Contracts
@@ -76,5 +75,4 @@ TODO:
 - Receivables
 - Credit score
 - Money visual / forecast
-
 - Bonds/CD

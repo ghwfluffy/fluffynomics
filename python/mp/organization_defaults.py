@@ -34,6 +34,7 @@ def _ensure_default_organizations(db: Session) -> None:
     for item in _load_config():
         name = (item.get("name") or "").strip()
         icon_file = (item.get("icon") or "").strip()
+        url = (item.get("url") or "").strip() or None
         if not name or not icon_file:
             continue
         configured_names.add(name)
@@ -51,9 +52,12 @@ def _ensure_default_organizations(db: Session) -> None:
 
         organization = db.query(Organization).filter_by(name=name).first()
         if organization is None:
-            organization = Organization(name=name, icon_id=icon.id, is_default=True)
+            organization = Organization(
+                name=name, url=url, icon_id=icon.id, is_default=True
+            )
             db.add(organization)
         else:
+            organization.url = url
             organization.icon_id = icon.id
             organization.is_default = True
 

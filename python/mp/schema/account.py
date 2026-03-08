@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 from sqlalchemy import (
     Boolean,
     LargeBinary,
@@ -84,6 +84,9 @@ class Stock(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     ticker: Mapped[str] = mapped_column(Text, nullable=False)
     exchange: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_price_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -115,6 +118,7 @@ class Organization(Base):
         PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     icon_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
     )
@@ -166,6 +170,9 @@ class AccountCryptoPosition(Base):
     )
     ticker: Mapped[str] = mapped_column(String(32), primary_key=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
+    exchange_rate_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
 
 
 class AccountCashDenomination(Base):
@@ -181,13 +188,27 @@ class AccountCashDenomination(Base):
 
 
 class PositionStockSchema(BaseModel):
-    stock_id: UUID
+    stock_id: Optional[UUID] = None
+    ticker: Optional[str] = None
+    exchange: Optional[str] = None
+    last_price_cents: Optional[int] = None
     quantity: Decimal
+
+    @field_serializer("quantity")
+    def serialize_quantity(self, value: Decimal) -> str:
+        rendered = format(value, "f").rstrip("0").rstrip(".")
+        return rendered or "0"
 
 
 class PositionCryptoSchema(BaseModel):
     ticker: str
     quantity: Decimal
+    exchange_rate_cents: int = 0
+
+    @field_serializer("quantity")
+    def serialize_quantity(self, value: Decimal) -> str:
+        rendered = format(value, "f").rstrip("0").rstrip(".")
+        return rendered or "0"
 
 
 class CashBillSchema(BaseModel):
@@ -263,6 +284,7 @@ class AccountValueUpdateSchema(BaseModel):
     balance_cents: Optional[int] = None
     usd_balance_cents: Optional[int] = None
     last_payment_date: Optional[date] = None
+    expiration_date: Optional[date] = None
     stock_positions: Optional[list[PositionStockSchema]] = None
     crypto_positions: Optional[list[PositionCryptoSchema]] = None
     cash_bills: Optional[list[CashBillSchema]] = None
@@ -286,6 +308,7 @@ class IconListItemSchema(BaseModel):
 
 class OrganizationSuggestionSchema(BaseModel):
     name: str
+    url: Optional[str] = None
     icon_id: Optional[UUID] = None
     is_default: bool = False
 
@@ -316,6 +339,7 @@ class StockBaseSchema(BaseModel):
     name: str
     ticker: str
     exchange: Optional[str] = None
+    last_price_cents: int = 0
 
 
 class StockCreateSchema(StockBaseSchema):
@@ -326,6 +350,7 @@ class StockUpdateSchema(BaseModel):
     name: Optional[str] = None
     ticker: Optional[str] = None
     exchange: Optional[str] = None
+    last_price_cents: Optional[int] = None
 
 
 class StockSchema(StockBaseSchema):
