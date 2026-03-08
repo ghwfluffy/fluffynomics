@@ -1078,6 +1078,23 @@ const submitUpdateDialog = async () => {
   await loadContracts()
 }
 
+const openFromCalendar = async (contractId: string, action: 'edit' | 'update') => {
+  let contract = contracts.value.find((item) => item.id === contractId)
+  if (!contract) {
+    await loadContracts()
+    contract = contracts.value.find((item) => item.id === contractId)
+  }
+  if (!contract) {
+    return false
+  }
+  if (action === 'edit') {
+    startEditContract(contract)
+  } else {
+    openUpdateDialog(contract)
+  }
+  return true
+}
+
 const closeDeleteContractDialog = () => {
   deleteContractDialog.value = false
   pendingDeleteContractId.value = null
@@ -1208,6 +1225,10 @@ onMounted(() => {
 })
 onUnmounted(() => {
   window.removeEventListener('click', onWindowClick)
+})
+
+defineExpose({
+  openFromCalendar,
 })
 
 watch(

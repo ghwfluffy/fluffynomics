@@ -629,6 +629,23 @@ const saveUpdate = async () => {
   await loadExpenses()
 }
 
+const openFromCalendar = async (expenseId: string, action: 'edit' | 'update') => {
+  let item = expenses.value.find((entry) => entry.id === expenseId)
+  if (!item) {
+    await loadExpenses()
+    item = expenses.value.find((entry) => entry.id === expenseId)
+  }
+  if (!item) {
+    return false
+  }
+  if (action === 'edit') {
+    openEdit(item)
+  } else {
+    openUpdate(item)
+  }
+  return true
+}
+
 const confirmDelete = async () => {
   if (!deleteId.value) {
     return
@@ -658,6 +675,10 @@ onMounted(loadAccounts)
 onMounted(loadIcons)
 onMounted(() => window.addEventListener('click', onWindowClick))
 onUnmounted(() => window.removeEventListener('click', onWindowClick))
+
+defineExpose({
+  openFromCalendar,
+})
 </script>
 
 <style scoped>

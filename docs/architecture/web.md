@@ -19,8 +19,14 @@ Dashboard top-level tabs are now:
 - `Accounts`
 - `Contracts`
 - `Expenses`
+- `Calendar`
 
 `Overview` is the default tab on dashboard load.
+
+Calendar tab behavior:
+- shows month view with previous/next month navigation.
+- renders upcoming fee, contract, and expense events on day cells.
+- clicking an event opens actions and supports `Edit` / `Update` using the same object flows as the source tab.
 
 ## Design System Direction
 

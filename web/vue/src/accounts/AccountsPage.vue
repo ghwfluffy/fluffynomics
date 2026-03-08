@@ -54,6 +54,19 @@
             Expenses
           </button>
         </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'calendar' }" role="presentation">
+          <button
+            id="tab-calendar"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'calendar'"
+            aria-controls="panel-calendar"
+            @click="activeTab = 'calendar'"
+          >
+            Calendar
+          </button>
+        </li>
       </ul>
     </div>
 
@@ -104,6 +117,50 @@
             <span v-if="widgetLoading">Updating…</span>
           </div>
         </article>
+      </div>
+    </section>
+
+    <section v-if="activeTab === 'calendar'" id="panel-calendar" class="cds--tile calendar-panel" role="tabpanel" aria-labelledby="tab-calendar">
+      <div class="calendar-toolbar">
+        <button class="cds--btn cds--btn--ghost" type="button" @click="goToPreviousCalendarMonth">Previous</button>
+        <h3>{{ calendarMonthLabel }}</h3>
+        <button class="cds--btn cds--btn--ghost" type="button" @click="goToNextCalendarMonth">Next</button>
+      </div>
+      <div class="calendar-grid">
+        <div v-for="weekday in calendarWeekdayLabels" :key="weekday" class="calendar-weekday">{{ weekday }}</div>
+        <div
+          v-for="cell in calendarCells"
+          :key="cell.key"
+          class="calendar-day-cell"
+          :class="{ 'calendar-day-cell--outside': !cell.inMonth }"
+        >
+          <div class="calendar-day-number">{{ cell.dayNumber }}</div>
+          <div class="calendar-day-events">
+            <button
+              v-for="event in cell.events.slice(0, 3)"
+              :key="event.key"
+              type="button"
+              class="calendar-event-chip"
+              :class="`calendar-event-chip--${event.kind}`"
+              @click="openCalendarEvent(event)"
+            >
+              {{ event.label }}
+            </button>
+            <div v-if="cell.events.length > 3" class="calendar-more-events">+{{ cell.events.length - 3 }} more</div>
+          </div>
+        </div>
+      </div>
+      <div class="calendar-upcoming">
+        <h4>Upcoming This Month</h4>
+        <div v-if="calendarUpcomingEvents.length === 0" class="calendar-upcoming-empty">No events in this month.</div>
+        <ul v-else class="calendar-upcoming-list">
+          <li v-for="event in calendarUpcomingEvents" :key="`up-${event.key}`">
+            <button type="button" class="calendar-upcoming-item" @click="openCalendarEvent(event)">
+              <span>{{ event.dateLabel }} • {{ event.title }}</span>
+              <span class="calendar-upcoming-type">{{ event.kindLabel }}</span>
+            </button>
+          </li>
+        </ul>
       </div>
     </section>
 
@@ -595,6 +652,7 @@
 
     <ContractsTab
       v-if="activeTab === 'contracts'"
+      ref="contractsTabRef"
       id="panel-contracts"
       role="tabpanel"
       aria-labelledby="tab-contracts"
@@ -605,16 +663,29 @@
 
     <ExpensesTab
       v-if="activeTab === 'expenses'"
+      ref="expensesTabRef"
       id="panel-expenses"
       role="tabpanel"
       aria-labelledby="tab-expenses"
       v-model:view-mode="dashboardViewMode"
     />
+
+    <div v-if="calendarEventDialogOpen && selectedCalendarEvent" class="modal-backdrop">
+      <section class="confirm-card cds--tile">
+        <h3>{{ selectedCalendarEvent.title }}</h3>
+        <p>{{ selectedCalendarEvent.dateLabel }} • {{ selectedCalendarEvent.kindLabel }}</p>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" @click="closeCalendarEventDialog">Close</button>
+          <button class="cds--btn cds--btn--secondary" type="button" @click="runCalendarEventAction('edit')">Edit</button>
+          <button class="cds--btn cds--btn--primary" type="button" @click="runCalendarEventAction('update')">Update</button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
@@ -664,10 +735,52 @@ interface AccountPayload {
   expiration_date?: string
   last_update?: string
   balance_cents?: number
+  fee_amount_cents?: number
+  fee_period?: string
   usd_balance_cents?: number
   stock_positions?: Array<{ stock_id?: string; ticker?: string; quantity: string; last_price_cents?: number }>
   crypto_positions?: Array<{ ticker: string; quantity: string; exchange_rate_cents?: number }>
   cash_bills?: Array<{ denomination_cents: number; quantity: number }>
+}
+
+interface ContractCalendarPayload {
+  id: string
+  name: string
+  type: 'income' | 'payment' | 'transfer'
+  amount_cents: number
+  payment_period?: string
+  payment_day?: number
+  expiration_date?: string
+}
+
+interface ExpenseCalendarPayload {
+  id: string
+  name: string
+  estimated_amount_cents: number
+  next_expensed_date?: string
+}
+
+type CalendarEventKind = 'fee' | 'contract' | 'expense'
+
+type CalendarEventAction = 'edit' | 'update'
+
+interface CalendarEventItem {
+  key: string
+  kind: CalendarEventKind
+  kindLabel: string
+  sourceId: string
+  title: string
+  label: string
+  dateIso: string
+  dateLabel: string
+}
+
+type ContractsTabExpose = {
+  openFromCalendar: (contractId: string, action: CalendarEventAction) => Promise<boolean>
+}
+
+type ExpensesTabExpose = {
+  openFromCalendar: (expenseId: string, action: CalendarEventAction) => Promise<boolean>
 }
 
 interface Section {
@@ -746,7 +859,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
-const activeTab = ref<'overview' | 'accounts' | 'contracts' | 'expenses'>('overview')
+const activeTab = ref<'overview' | 'accounts' | 'contracts' | 'expenses' | 'calendar'>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
@@ -802,6 +915,8 @@ const updateForm = ref({
 })
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
+const contractsTabRef = ref<ContractsTabExpose | null>(null)
+const expensesTabRef = ref<ExpensesTabExpose | null>(null)
 const iconPickerDialog = ref(false)
 const iconPickerDraftId = ref<string | undefined>(undefined)
 const iconPickerDraftType = ref<'Letters' | 'Gravatar' | 'Icon'>('Icon')
@@ -810,6 +925,12 @@ const iconContextMenu = ref<{ open: boolean; x: number; y: number; iconId?: stri
   x: 0,
   y: 0,
 })
+const now = new Date()
+const calendarMonthAnchor = ref<Date>(new Date(now.getFullYear(), now.getMonth(), 1))
+const calendarContracts = ref<ContractCalendarPayload[]>([])
+const calendarExpenses = ref<ExpenseCalendarPayload[]>([])
+const calendarEventDialogOpen = ref(false)
+const selectedCalendarEvent = ref<CalendarEventItem | null>(null)
 
 const accountTypes = [
   { label: 'Checking', value: 'checking' },
@@ -1485,6 +1606,283 @@ const parseDateOnly = (raw?: string) => {
   return parsed
 }
 
+const startOfDay = (value: Date) => {
+  const next = new Date(value)
+  next.setHours(0, 0, 0, 0)
+  return next
+}
+
+const startOfMonth = (value: Date) => new Date(value.getFullYear(), value.getMonth(), 1)
+
+const addDays = (value: Date, days: number) => {
+  const next = new Date(value)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+const parseRecurringPayload = (raw?: string) => {
+  const trimmed = (raw || '').trim()
+  if (!trimmed || !trimmed.startsWith('{')) {
+    return null
+  }
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+const monthLastDay = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
+
+const monthlyRecurringDate = (year: number, monthZeroBased: number, day: number) => {
+  const safeDay = Math.min(Math.max(day, 1), monthLastDay(year, monthZeroBased))
+  const value = new Date(year, monthZeroBased, safeDay)
+  value.setHours(0, 0, 0, 0)
+  return value
+}
+
+const recurringOnOrAfter = (
+  anchor: Date,
+  kind: string,
+  payload: Record<string, unknown> | null,
+  fallbackDay: number,
+) => {
+  const dayFromFallback = fallbackDay || 1
+  const day = Number(payload?.day ?? dayFromFallback)
+  if (kind === 'monthly_day') {
+    const thisMonth = monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth(), day)
+    return thisMonth >= anchor ? thisMonth : monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth() + 1, day)
+  }
+  if (kind === 'monthly_last_day') {
+    const thisMonth = monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth(), 31)
+    return thisMonth >= anchor ? thisMonth : monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth() + 1, 31)
+  }
+  if (kind === 'twice_monthly') {
+    const d1 = Number(payload?.day_1 ?? 1)
+    const d2 = Number(payload?.day_2 ?? 15)
+    const days = [d1, d2].sort((a, b) => a - b)
+    for (const d of days) {
+      const candidate = monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth(), d)
+      if (candidate >= anchor) {
+        return candidate
+      }
+    }
+    return monthlyRecurringDate(anchor.getFullYear(), anchor.getMonth() + 1, days[0])
+  }
+  if (kind === 'yearly_month_day') {
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    const thisYear = monthlyRecurringDate(anchor.getFullYear(), month, day)
+    return thisYear >= anchor ? thisYear : monthlyRecurringDate(anchor.getFullYear() + 1, month, day)
+  }
+  if (kind === 'daily_weekdays') {
+    const weekdays = Array.isArray(payload?.weekdays) && payload?.weekdays.length ? (payload.weekdays as number[]) : [0, 1, 2, 3, 4]
+    const allowed = new Set(weekdays)
+    const probe = new Date(anchor)
+    while (!allowed.has(probe.getDay() === 0 ? 6 : probe.getDay() - 1)) {
+      probe.setDate(probe.getDate() + 1)
+    }
+    probe.setHours(0, 0, 0, 0)
+    return probe
+  }
+  if (kind === 'weekly_weekday') {
+    const weekday = Math.max(0, Math.min(6, Number(payload?.weekday ?? 0)))
+    const jsWeekday = weekday === 6 ? 0 : weekday + 1
+    const delta = (jsWeekday - anchor.getDay() + 7) % 7
+    return addDays(anchor, delta)
+  }
+  if (kind === 'biweekly_weekday') {
+    const weekday = Math.max(0, Math.min(6, Number(payload?.weekday ?? 0)))
+    const jsWeekday = weekday === 6 ? 0 : weekday + 1
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    const base = new Date(startDate)
+    const baseDelta = (jsWeekday - base.getDay() + 7) % 7
+    base.setDate(base.getDate() + baseDelta)
+    if (anchor <= base) {
+      return startOfDay(base)
+    }
+    const daysSince = Math.floor((anchor.getTime() - base.getTime()) / (1000 * 60 * 60 * 24))
+    const periods = Math.ceil(daysSince / 14)
+    const result = new Date(base)
+    result.setDate(result.getDate() + periods * 14)
+    return startOfDay(result)
+  }
+  return null
+}
+
+const recurringNext = (
+  current: Date,
+  kind: string,
+  payload: Record<string, unknown> | null,
+  fallbackDay: number,
+) => recurringOnOrAfter(addDays(current, 1), kind, payload, fallbackDay)
+
+const recurringOccurrencesInMonth = (
+  monthStart: Date,
+  monthEnd: Date,
+  kind: string,
+  payload: Record<string, unknown> | null,
+  fallbackDay: number,
+) => {
+  const results: Date[] = []
+  let previousIso = ''
+  let next = recurringOnOrAfter(monthStart, kind, payload, fallbackDay)
+  let guard = 0
+  while (next && next <= monthEnd && guard < 120) {
+    const nextIso = formatCalendarDateIso(next)
+    if (nextIso === previousIso) {
+      break
+    }
+    results.push(next)
+    previousIso = nextIso
+    next = recurringNext(next, kind, payload, fallbackDay)
+    guard += 1
+  }
+  return results
+}
+
+const calendarMonthLabel = computed(() =>
+  calendarMonthAnchor.value.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+)
+
+const calendarWeekdayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+const formatCalendarDateIso = (value: Date) => {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const monthStart = computed(() => startOfMonth(calendarMonthAnchor.value))
+const monthEnd = computed(() => {
+  const value = new Date(calendarMonthAnchor.value.getFullYear(), calendarMonthAnchor.value.getMonth() + 1, 0)
+  value.setHours(0, 0, 0, 0)
+  return value
+})
+const calendarGridStart = computed(() => addDays(monthStart.value, -monthStart.value.getDay()))
+const calendarGridEnd = computed(() => addDays(calendarGridStart.value, 41))
+
+const calendarEvents = computed<CalendarEventItem[]>(() => {
+  const items: CalendarEventItem[] = []
+  for (const account of accounts.value) {
+    if ((account.fee_amount_cents || 0) <= 0 || !account.fee_period?.trim()) {
+      continue
+    }
+    const payload = parseRecurringPayload(account.fee_period)
+    const kind = String(payload?.kind || '')
+    if (!kind) {
+      continue
+    }
+    const dates = recurringOccurrencesInMonth(calendarGridStart.value, calendarGridEnd.value, kind, payload, 1)
+    for (const date of dates) {
+      const dateIso = formatCalendarDateIso(date)
+      items.push({
+        key: `fee-${account.id}-${dateIso}`,
+        kind: 'fee',
+        kindLabel: 'Fee',
+        sourceId: account.id,
+        title: `${account.name} fee`,
+        label: `${account.name} fee`,
+        dateIso,
+        dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      })
+    }
+  }
+
+  for (const contract of calendarContracts.value) {
+    const payload = parseRecurringPayload(contract.payment_period)
+    const kind = String(payload?.kind || (contract.payment_day ? 'monthly_day' : ''))
+    if (!kind) {
+      continue
+    }
+    const dates = recurringOccurrencesInMonth(
+      calendarGridStart.value,
+      calendarGridEnd.value,
+      kind,
+      payload,
+      contract.payment_day || 1,
+    )
+    for (const date of dates) {
+      const dateIso = formatCalendarDateIso(date)
+      if (contract.expiration_date && contract.expiration_date.slice(0, 10) < dateIso) {
+        continue
+      }
+      items.push({
+        key: `contract-${contract.id}-${dateIso}`,
+        kind: 'contract',
+        kindLabel: 'Contract',
+        sourceId: contract.id,
+        title: contract.name,
+        label: contract.name,
+        dateIso,
+        dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      })
+    }
+  }
+
+  for (const expense of calendarExpenses.value) {
+    const raw = expense.next_expensed_date?.slice(0, 10)
+    if (!raw || raw < formatCalendarDateIso(calendarGridStart.value) || raw > formatCalendarDateIso(calendarGridEnd.value)) {
+      continue
+    }
+    const parsed = new Date(`${raw}T00:00:00`)
+    if (Number.isNaN(parsed.getTime())) {
+      continue
+    }
+    items.push({
+      key: `expense-${expense.id}-${raw}`,
+      kind: 'expense',
+      kindLabel: 'Expense',
+      sourceId: expense.id,
+      title: expense.name,
+      label: expense.name,
+      dateIso: raw,
+      dateLabel: parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    })
+  }
+  const deduped = new Map<string, CalendarEventItem>()
+  for (const item of items) {
+    deduped.set(`${item.kind}:${item.sourceId}:${item.dateIso}`, item)
+  }
+  return Array.from(deduped.values()).sort((a, b) =>
+    a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso),
+  )
+})
+
+const calendarEventsByIso = computed(() => {
+  const map = new Map<string, CalendarEventItem[]>()
+  for (const event of calendarEvents.value) {
+    const existing = map.get(event.dateIso) || []
+    existing.push(event)
+    map.set(event.dateIso, existing)
+  }
+  return map
+})
+
+const calendarCells = computed(() => {
+  const month = monthStart.value
+  const firstCell = calendarGridStart.value
+  const cells: Array<{ key: string; dayNumber: number; inMonth: boolean; events: CalendarEventItem[] }> = []
+  for (let i = 0; i < 42; i += 1) {
+    const day = addDays(firstCell, i)
+    const dayIso = formatCalendarDateIso(day)
+    cells.push({
+      key: dayIso,
+      dayNumber: day.getDate(),
+      inMonth: day.getMonth() === month.getMonth() && day.getFullYear() === month.getFullYear(),
+      events: calendarEventsByIso.value.get(dayIso) || [],
+    })
+  }
+  return cells
+})
+
+const calendarUpcomingEvents = computed(() => {
+  const startIso = formatCalendarDateIso(monthStart.value)
+  const endIso = formatCalendarDateIso(monthEnd.value)
+  return calendarEvents.value.filter((event) => event.dateIso >= startIso && event.dateIso <= endIso)
+})
+
 const lastDayOfMonth = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
 
 const monthlyDate = (year: number, monthZeroBased: number, paymentDay: number) => {
@@ -1590,6 +1988,15 @@ const loadAccounts = async () => {
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
   accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
   await loadWidgets()
+}
+
+const loadCalendarSources = async () => {
+  const [contracts, expenses] = await Promise.all([
+    request.get<ContractCalendarPayload[]>('/contracts'),
+    request.get<ExpenseCalendarPayload[]>('/expenses'),
+  ])
+  calendarContracts.value = contracts
+  calendarExpenses.value = expenses
 }
 
 const loadOrganizations = async () => {
@@ -1867,6 +2274,56 @@ const closeHistoryDialog = () => {
   historyItems.value = []
 }
 
+const goToPreviousCalendarMonth = async () => {
+  calendarMonthAnchor.value = new Date(calendarMonthAnchor.value.getFullYear(), calendarMonthAnchor.value.getMonth() - 1, 1)
+  await loadCalendarSources()
+}
+
+const goToNextCalendarMonth = async () => {
+  calendarMonthAnchor.value = new Date(calendarMonthAnchor.value.getFullYear(), calendarMonthAnchor.value.getMonth() + 1, 1)
+  await loadCalendarSources()
+}
+
+const openCalendarEvent = (event: CalendarEventItem) => {
+  selectedCalendarEvent.value = event
+  calendarEventDialogOpen.value = true
+}
+
+const closeCalendarEventDialog = () => {
+  calendarEventDialogOpen.value = false
+  selectedCalendarEvent.value = null
+}
+
+const runCalendarEventAction = async (action: CalendarEventAction) => {
+  if (!selectedCalendarEvent.value) {
+    return
+  }
+  const event = selectedCalendarEvent.value
+  closeCalendarEventDialog()
+  if (event.kind === 'fee') {
+    const account = accounts.value.find((item) => item.id === event.sourceId)
+    if (!account) {
+      return
+    }
+    activeTab.value = 'accounts'
+    if (action === 'edit') {
+      startEditAccount(account)
+    } else {
+      openUpdateDialog(account)
+    }
+    return
+  }
+  if (event.kind === 'contract') {
+    activeTab.value = 'contracts'
+    await nextTick()
+    await contractsTabRef.value?.openFromCalendar(event.sourceId, action)
+    return
+  }
+  activeTab.value = 'expenses'
+  await nextTick()
+  await expensesTabRef.value?.openFromCalendar(event.sourceId, action)
+}
+
 const isValidQuantity = (value: string) => /^-?\d+(\.\d+)?$/.test(value.trim())
 
 const addCryptoPosition = () => {
@@ -2038,6 +2495,7 @@ const clearForecastDate = () => {
 onMounted(loadAccounts)
 onMounted(loadOrganizations)
 onMounted(loadIcons)
+onMounted(loadCalendarSources)
 onMounted(async () => {
   window.addEventListener('click', onWindowClick)
 })
@@ -2048,7 +2506,18 @@ onUnmounted(() => {
 watch(
   () => forecastDate.value,
   async () => {
+    const anchor = parseDateOnly(forecastDate.value) || new Date()
+    calendarMonthAnchor.value = startOfMonth(anchor)
     await loadAccounts()
+  },
+)
+
+watch(
+  () => activeTab.value,
+  async (next) => {
+    if (next === 'calendar') {
+      await loadCalendarSources()
+    }
   },
 )
 
@@ -2583,6 +3052,150 @@ watch(
   background: #f1f5f9;
 }
 
+.calendar-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.calendar-toolbar h3 {
+  margin: 0;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--cds-border-subtle-01);
+  border-bottom: 0;
+}
+
+.calendar-weekday {
+  padding: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cds-text-secondary);
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+  border-right: 1px solid var(--cds-border-subtle-01);
+}
+
+.calendar-weekday:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-day-cell {
+  min-height: 120px;
+  padding: 6px;
+  border-right: 1px solid var(--cds-border-subtle-01);
+  border-bottom: 1px solid var(--cds-border-subtle-01);
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  background: #f0f7ff;
+}
+
+.calendar-day-cell:nth-child(odd) {
+  background: #e4f0ff;
+}
+
+.calendar-day-cell:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-day-cell--outside {
+  background: #fffbea;
+}
+
+.calendar-day-cell--outside:nth-child(odd) {
+  background: #fff7d6;
+}
+
+.calendar-day-number {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.calendar-day-events {
+  display: grid;
+  gap: 5px;
+}
+
+.calendar-event-chip {
+  border: 0;
+  text-align: left;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 0.73rem;
+  cursor: pointer;
+}
+
+.calendar-event-chip--fee {
+  background: #fde68a;
+  color: #78350f;
+}
+
+.calendar-event-chip--contract {
+  background: #bfdbfe;
+  color: #1e3a8a;
+}
+
+.calendar-event-chip--expense {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.calendar-more-events {
+  font-size: 0.72rem;
+  color: var(--cds-text-secondary);
+}
+
+.calendar-upcoming {
+  border-top: 1px solid var(--cds-border-subtle-01);
+  padding-top: 10px;
+}
+
+.calendar-upcoming h4 {
+  margin: 0 0 8px;
+}
+
+.calendar-upcoming-empty {
+  color: var(--cds-text-secondary);
+}
+
+.calendar-upcoming-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.calendar-upcoming-item {
+  width: 100%;
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer);
+  border-radius: 6px;
+  padding: 7px 9px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.calendar-upcoming-item:hover {
+  background: var(--cds-layer-hover);
+}
+
+.calendar-upcoming-type {
+  color: var(--cds-text-secondary);
+  font-size: 0.82rem;
+}
+
 .section-wrap {
   margin-bottom: 1.25rem;
 }
@@ -2621,6 +3234,23 @@ watch(
 
   .crypto-position-row {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+
+  .calendar-weekday {
+    display: none;
+  }
+
+  .calendar-day-cell {
+    border-right: 0;
+    min-height: 88px;
+  }
+
+  .calendar-day-cell--outside {
+    display: none;
   }
 }
 

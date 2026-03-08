@@ -5,7 +5,6 @@ Prod deployment
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
-[ ] calendar view
 [ ] Mobile site
 [ ] Visualized net worth
 [ ] note reminders
