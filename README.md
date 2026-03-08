@@ -1,5 +1,7 @@
 # Fluffynomics - Wealth Tracker
 
+![Fluffynomics Banner](web/vue/public/banner.png)
+
 Fluffynomics brings your accounts and investments together so you can track your wealth and plan ahead.
 
 ## Why Fluffynomics?
