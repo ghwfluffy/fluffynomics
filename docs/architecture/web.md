@@ -78,9 +78,10 @@ Trend widget behavior:
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
 - Overview also includes derived rate widgets under the trend chart:
-  - projected net-worth flow from contracts + expenses (`per year/month/week/day/minute`, dollar-rounded),
-  - historical 12-month net-worth flow rates (`per year/month/week/day/minute`),
-  - historical acceleration estimate (`$/day²`) derived from change in daily slope over the historical window.
+  - projected net-worth flow from contracts + expenses (`per year/month/week/day`, dollar-rounded),
+  - historical 12-month net-worth flow rates (`per year/month/week/day`),
+  - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
+  - historical-widget labels should show the actual week window used for the calculation.
 
 ### Architecture Decision: Trend Merge Semantics
 
@@ -112,7 +113,7 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
     - update password (opens modal with password + verify fields)
     - lock/unlock account
     - mark/unmark admin (checkbox-driven)
-    - delete account
+    - delete account (in-app confirmation modal, not browser alert/confirm)
   - `Registration` tab contains registration code CRUD
 - `Administration` (admin users only)
   - opens admin modal for backup controls
@@ -193,7 +194,7 @@ Contracts intentionally mirror account tile UX:
 - link icon and update-age clock badge,
 - bottom-right three-dot menu for edit/delete.
 - `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
-- Update modal includes a `Mark Expired` action that sets expiration into the past immediately.
+- Update modal exposes an `Expired` checkbox; this is the supported manual-expiration control.
 - Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections.
 - active contracts are grouped by `type + category` (example: `Incoming Work`, `Payment Digital`).
 
@@ -258,6 +259,16 @@ Color mapping:
 ## Serving / Proxy
 
 - Built web app served by NGINX (`web/Dockerfile`, `web/nginx.conf`).
+
+## Agent Handoff Notes
+
+- Before closing work that touches backend/frontend behavior, run:
+  - `python/lint.sh`
+  - `web/build.sh`
+- Keep admin UX split:
+  - `Administration` is backups-only.
+  - `Manage Users` owns user operations and registration code CRUD.
+- Use in-app Carbon-styled modals for destructive confirmations; do not add browser `alert`/`confirm`.
 - API requests should go through `/api/*` via NGINX proxy.
 - Edge rate limiting is enforced in `web/nginx.conf`:
   - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),

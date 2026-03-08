@@ -282,11 +282,12 @@ Defined in `python/mp/api/data_portability.py`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
-- Current payload schema version: `4`.
+- Current payload schema version: `5`.
 - Security metadata rule:
   - brute-force lockout state (`failed_password_attempts`, `password_lockout_until`) is intentionally not exported/imported and remains local runtime state.
 - Digital-wallet link rule:
   - user wallet links (`paypal_account_id`, `google_pay_account_id`) and contract `linked_wallet` are exported/imported.
+  - legacy YAML import also maps wallet-like payment-account aliases (for example `PayPal`, `Google Pay.*`, `gpay`) into contract `linked_wallet` when possible.
 - Schema-change rule:
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and
