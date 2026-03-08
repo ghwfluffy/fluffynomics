@@ -146,6 +146,7 @@ Contract create/edit also mirrors account create/edit patterns:
 Expenses support CRUD in `ExpensesTab.vue` with:
 - name,
 - category,
+- linked account (required),
 - icon selection (`Letters|Gravatar|Icon`),
 - estimated amount,
 - general frequency,
@@ -154,6 +155,7 @@ Expenses support CRUD in `ExpensesTab.vue` with:
 - `Update` menu action edits only operational fields: `enabled`, `last expensed date`, `next expensed date`.
 
 The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.
+The create/edit expense modal must always expose linked-account selection so expense simulation can apply deltas to the intended account.
 
 ## Next-Payment Early-Pay Logic
 

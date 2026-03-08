@@ -168,7 +168,6 @@ Expense semantics:
 - Next-date behavior:
   - if `next_date_is_static=true`, `next_expensed_date` is required and stored directly.
   - otherwise backend derives `next_expensed_date` from `last_expensed_date + general_frequency`.
-- `expiration_date` defaults to `2099-01-01` when omitted.
 
 Automatic execution model:
 - Contract posting is idempotent using `contract_postings` unique `(contract_id, effective_date)`.

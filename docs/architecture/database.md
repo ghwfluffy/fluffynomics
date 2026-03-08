@@ -62,6 +62,10 @@ Account timestamp semantics are intentionally split:
   - on multiple same-day updates, the row is updated to latest net worth.
   - liability account types (`credit_card`, `line_of_credit`, `loan`) are signed negative in net-worth math.
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
+- SVG import rule for built-in defaults:
+  - many icon sets use `stroke=\"currentColor\"`; converting without setting color can produce fully transparent PNGs.
+  - when generating PNG defaults from SVG, set an explicit stroke/fill color before rasterization and verify output is non-empty.
+  - a quick sanity check is file size and `identify -verbose` histogram (not all-alpha).
 
 ### Contracts parity fields
 
