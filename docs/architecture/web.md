@@ -73,6 +73,10 @@ Trend widget behavior:
 - Endpoint returns daily snapshots; frontend rolls to month-level points for readability.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
+- Overview also includes derived rate widgets under the trend chart:
+  - projected net-worth flow from contracts + expenses (`per year/month/week/day/minute`, dollar-rounded),
+  - historical 12-month net-worth flow rates (`per year/month/week/day/minute`),
+  - historical acceleration estimate (`$/day²`) derived from change in daily slope over the historical window.
 
 ### Architecture Decision: Trend Merge Semantics
 

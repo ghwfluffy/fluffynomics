@@ -5,12 +5,11 @@ Prod deployment
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
+[ ] Import legacy format
+[ ] queued payments/transfers
 [ ] Mobile site
 [ ] Visualized net worth
 [ ] note reminders
-[ ] $/minute
-[ ] $/day^2
-[ ] queued payments/transfers
 [ ] Stock dividens
 [ ] Pull crypto/stock prices automatically
     [ ] tastytrade integration

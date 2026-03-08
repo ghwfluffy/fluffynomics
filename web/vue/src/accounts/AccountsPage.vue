@@ -118,6 +118,35 @@
           </div>
         </article>
       </div>
+      <div class="widget-derived-grid">
+        <article class="widget-slot widget-card">
+          <h3>Projected Net-Worth Flow</h3>
+          <p class="widget-subtext">Contracts + expenses forecast</p>
+          <ul class="widget-rate-list">
+            <li v-for="row in projectedRateRows" :key="`proj-${row.key}`">
+              <span>{{ row.label }}</span>
+              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
+            </li>
+          </ul>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Historical Net-Worth Flow</h3>
+          <p class="widget-subtext">{{ historicalWindowLabel }}</p>
+          <ul class="widget-rate-list">
+            <li v-for="row in historicalRateRows" :key="`hist-${row.key}`">
+              <span>{{ row.label }}</span>
+              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
+            </li>
+          </ul>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Historical Acceleration</h3>
+          <p class="widget-subtext">Change in $/month trend over {{ historicalWindowWeeks }} week{{ historicalWindowWeeks === 1 ? '' : 's' }}</p>
+          <div class="widget-kpi" :class="deltaClass(historicalAccelerationCentsPerMonth2)">
+            {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
+          </div>
+        </article>
+      </div>
     </section>
 
     <section v-if="activeTab === 'calendar'" id="panel-calendar" class="cds--tile calendar-panel" role="tabpanel" aria-labelledby="tab-calendar">
@@ -757,7 +786,15 @@ interface ExpenseCalendarPayload {
   id: string
   name: string
   estimated_amount_cents: number
+  enabled?: boolean
+  general_frequency?: string
   next_expensed_date?: string
+}
+
+type RateRow = {
+  key: string
+  label: string
+  valueCents: number
 }
 
 type CalendarEventKind = 'fee' | 'contract' | 'expense'
@@ -867,6 +904,10 @@ const widgetLoading = ref(false)
 const netWorthPast30Cents = ref(0)
 const netWorthNext30Cents = ref(0)
 const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
+const projectedNetWorthDailyRateCents = ref(0)
+const historicalNetWorthDailyRateCents = ref(0)
+const historicalAccelerationCentsPerMonth2 = ref(0)
+const historicalWindowWeeks = ref(0)
 let widgetRequestToken = 0
 const accountsTableFilter = ref('')
 const accountsSortKey = ref<'section' | 'name' | 'organization' | 'last4' | 'type' | 'balance' | 'last_update'>('section')
@@ -1434,6 +1475,25 @@ const signedCents = (value: number) => {
   return formatted
 }
 
+const formatDollarInteger = (valueCents: number) => {
+  const dollars = Math.round(valueCents / 100)
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(dollars)
+}
+
+const formatDollarRate = (valueCents: number) => {
+  const sign = valueCents > 0 ? '+' : valueCents < 0 ? '-' : ''
+  return `${sign}${formatDollarInteger(Math.abs(valueCents))}`
+}
+
+const formatDollarPerMonthSquared = (valueCents: number) => {
+  const sign = valueCents > 0 ? '+' : valueCents < 0 ? '-' : ''
+  return `${sign}${formatDollarInteger(Math.abs(valueCents))}/month²`
+}
+
 const deltaClass = (value: number) => {
   if (value > 0) {
     return 'delta-positive'
@@ -1527,10 +1587,12 @@ const loadWidgets = async () => {
   widgetLoading.value = true
   try {
     const anchor = parseDateOnly(forecastDate.value) || new Date()
-    const [past30, next30, netWorthHistory] = await Promise.all([
+    const [past30, next30, netWorthHistory, contracts, expenses] = await Promise.all([
       getNetWorthAsOf(shiftDays(anchor, -30)),
       getNetWorthAsOf(shiftDays(anchor, 30)),
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
+      request.get<ContractCalendarPayload[]>('/contracts'),
+      request.get<ExpenseCalendarPayload[]>('/expenses'),
     ])
     const forecastSeries =
       anchor.getTime() > Date.now()
@@ -1543,6 +1605,68 @@ const loadWidgets = async () => {
     }
     netWorthPast30Cents.value = past30
     netWorthNext30Cents.value = next30
+
+    const projectedAnnualCents =
+      contracts.reduce((sum, contract) => {
+        const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
+        if (contract.type === 'income') {
+          return sum + contract.amount_cents * annualOccurrences
+        }
+        if (contract.type === 'payment') {
+          return sum - contract.amount_cents * annualOccurrences
+        }
+        return sum
+      }, 0) -
+      expenses.reduce((sum, expense) => {
+        if (expense.enabled === false) {
+          return sum
+        }
+        const annualOccurrences = annualOccurrencesFromRecurring(expense.general_frequency)
+        return sum + expense.estimated_amount_cents * annualOccurrences
+      }, 0)
+    projectedNetWorthDailyRateCents.value = Math.round(projectedAnnualCents / 365)
+
+    const sortedHistory = [...netWorthHistory]
+      .map((item) => ({ value_cents: item.value_cents, at: new Date(`${item.snapshot_date}T00:00:00`) }))
+      .filter((item) => !Number.isNaN(item.at.getTime()))
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+    if (sortedHistory.length >= 2) {
+      const end = sortedHistory[sortedHistory.length - 1].at
+      const startCutoff = shiftDays(end, -365)
+      const windowed = sortedHistory.filter((item) => item.at >= startCutoff)
+      const first = windowed[0]
+      const last = windowed[windowed.length - 1]
+      const spanDays = Math.max(1, (last.at.getTime() - first.at.getTime()) / (1000 * 60 * 60 * 24))
+      historicalWindowWeeks.value = Math.min(52, Math.max(1, Math.floor(spanDays / 7)))
+      historicalNetWorthDailyRateCents.value = Math.round((last.value_cents - first.value_cents) / spanDays)
+
+      if (windowed.length >= 4) {
+        const midIndex = Math.floor(windowed.length / 2)
+        const firstHalf = windowed.slice(0, midIndex + 1)
+        const secondHalf = windowed.slice(midIndex)
+        const fhStart = firstHalf[0]
+        const fhEnd = firstHalf[firstHalf.length - 1]
+        const shStart = secondHalf[0]
+        const shEnd = secondHalf[secondHalf.length - 1]
+        const firstHalfDays = Math.max(1, (fhEnd.at.getTime() - fhStart.at.getTime()) / (1000 * 60 * 60 * 24))
+        const secondHalfDays = Math.max(1, (shEnd.at.getTime() - shStart.at.getTime()) / (1000 * 60 * 60 * 24))
+        const slope1 = (fhEnd.value_cents - fhStart.value_cents) / firstHalfDays
+        const slope2 = (shEnd.value_cents - shStart.value_cents) / secondHalfDays
+        const mid1 = (fhStart.at.getTime() + fhEnd.at.getTime()) / 2
+        const mid2 = (shStart.at.getTime() + shEnd.at.getTime()) / 2
+        const slopeSpanDays = Math.max(1, (mid2 - mid1) / (1000 * 60 * 60 * 24))
+        const accelerationPerDay2 = (slope2 - slope1) / slopeSpanDays
+        const daysPerMonth = 365 / 12
+        historicalAccelerationCentsPerMonth2.value = Math.round(accelerationPerDay2 * daysPerMonth * daysPerMonth)
+      } else {
+        historicalAccelerationCentsPerMonth2.value = 0
+      }
+    } else {
+      historicalNetWorthDailyRateCents.value = 0
+      historicalAccelerationCentsPerMonth2.value = 0
+      historicalWindowWeeks.value = 0
+    }
+
     const byMonth = new Map<string, { date: Date; value_cents: number }>()
     for (const point of netWorthHistory) {
       const date = new Date(`${point.snapshot_date}T00:00:00`)
@@ -1630,6 +1754,67 @@ const parseRecurringPayload = (raw?: string) => {
   } catch {
     return null
   }
+}
+
+const annualOccurrencesFromRecurring = (raw?: string, fallbackDay?: number) => {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) {
+    return fallbackDay ? 12 : 0
+  }
+  const legacy = trimmed.toLowerCase()
+  if (legacy === 'daily') {
+    return 365
+  }
+  if (legacy === 'weekly') {
+    return 52
+  }
+  if (legacy === 'biweekly') {
+    return 26
+  }
+  if (legacy === 'monthly') {
+    return 12
+  }
+  if (legacy === 'yearly') {
+    return 1
+  }
+  const payload = parseRecurringPayload(trimmed)
+  const kind = String(payload?.kind || '')
+  if (kind === 'monthly_day' || kind === 'monthly_last_day') {
+    return 12
+  }
+  if (kind === 'twice_monthly' || kind === 'semimonthly_days') {
+    return 24
+  }
+  if (kind === 'yearly_month_day') {
+    return 1
+  }
+  if (kind === 'weekly_weekday') {
+    return 52
+  }
+  if (kind === 'biweekly_weekday') {
+    return 26
+  }
+  if (kind === 'daily_weekdays') {
+    if (Array.isArray(payload?.weekdays) && payload.weekdays.length) {
+      return payload.weekdays.length * 52
+    }
+    return 5 * 52
+  }
+  return fallbackDay ? 12 : 0
+}
+
+const rateRowsFromDailyCents = (dailyCents: number): RateRow[] => {
+  const multipliers: Array<{ key: string; label: string; multiplier: number }> = [
+    { key: 'year', label: 'Per Year', multiplier: 365 },
+    { key: 'month', label: 'Per Month', multiplier: 365 / 12 },
+    { key: 'week', label: 'Per Week', multiplier: 7 },
+    { key: 'day', label: 'Per Day', multiplier: 1 },
+  ]
+  return multipliers.map((item) => ({
+    key: item.key,
+    label: item.label,
+    valueCents: Math.round(dailyCents * item.multiplier),
+  }))
 }
 
 const monthLastDay = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
@@ -1882,6 +2067,12 @@ const calendarUpcomingEvents = computed(() => {
   const endIso = formatCalendarDateIso(monthEnd.value)
   return calendarEvents.value.filter((event) => event.dateIso >= startIso && event.dateIso <= endIso)
 })
+
+const projectedRateRows = computed(() => rateRowsFromDailyCents(projectedNetWorthDailyRateCents.value))
+const historicalRateRows = computed(() => rateRowsFromDailyCents(historicalNetWorthDailyRateCents.value))
+const historicalWindowLabel = computed(
+  () => `Using ${historicalWindowWeeks.value} week${historicalWindowWeeks.value === 1 ? '' : 's'} of history`,
+)
 
 const lastDayOfMonth = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
 
@@ -2703,6 +2894,29 @@ watch(
   margin-top: 0.25rem;
   font-size: 0.8rem;
   color: #475569;
+}
+
+.widget-derived-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.widget-rate-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.widget-rate-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.84rem;
 }
 
 .modal-backdrop {
