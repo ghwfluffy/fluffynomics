@@ -34,6 +34,8 @@
   - `session_token` in JSON for API clients
 - User profile metadata exposed on auth user payload:
   - `avatar_icon_id`
+  - `paypal_account_id`
+  - `google_pay_account_id`
   - `last_login_at`
   - `password_changed_at`
 - Login updates `last_login_at`.
@@ -163,9 +165,12 @@ Defined in `python/mp/api/contracts.py`.
     - this means `payment` contracts increase liability balances (more owed), while `income` contracts decrease liability balances
 
 Validation + ownership rules:
-- `name`, `organization`, and `linked_account_id` are required.
+- `name` and `organization` are required.
+- exactly one linked target is required: `linked_account_id` or `linked_wallet`.
+- `linked_wallet` allowed values: `paypal|google_pay`.
 - `type` must be one of `income|payment|transfer`.
 - `source_account_id` is required only for `transfer`.
+- `transfer` cannot use `linked_wallet`; it must use concrete account IDs.
 - `payment_day` is required (`1..31`).
 - `account_number` is optional for contracts.
 - `linked_account_id` and `source_account_id` must belong to current user.
@@ -273,6 +278,8 @@ Defined in `python/mp/api/data_portability.py`.
 - Current payload schema version: `4`.
 - Security metadata rule:
   - brute-force lockout state (`failed_password_attempts`, `password_lockout_until`) is intentionally not exported/imported and remains local runtime state.
+- Digital-wallet link rule:
+  - user wallet links (`paypal_account_id`, `google_pay_account_id`) and contract `linked_wallet` are exported/imported.
 - Schema-change rule:
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and

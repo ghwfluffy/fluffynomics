@@ -133,10 +133,10 @@
       <div class="widget-trend">
         <article class="widget-slot widget-card widget-card--wide">
           <div class="widget-trend-head">
-            <h3>Current Net Worth: {{ cents(currentNetWorthCents) }}</h3>
-            <div class="widget-trend-status">
-              <span v-if="widgetLoading">Updating…</span>
-            </div>
+            <h3 class="widget-trend-title">
+              <span>Current Net Worth: {{ cents(currentNetWorthCents) }}</span>
+              <span v-if="widgetLoading" class="widget-trend-status">Updating…</span>
+            </h3>
           </div>
           <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
         </article>
@@ -770,6 +770,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import { currentUser } from '@/lib/auth'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
 import PercentField from '@/components/PercentField.vue'
@@ -835,6 +836,7 @@ interface ContractCalendarPayload {
   type: 'income' | 'payment' | 'transfer'
   amount_cents: number
   linked_account_id?: string
+  linked_wallet?: 'paypal' | 'google_pay'
   source_account_id?: string
   payment_period?: string
   payment_day?: number
@@ -1728,6 +1730,25 @@ const buildNext30Breakdown = (
   const contractsById = new Map(contracts.map((item) => [item.id, item]))
   const expensesById = new Map(expenses.map((item) => [item.id, item]))
   const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
+  const resolveContractLinkedType = (contract?: ContractCalendarPayload) => {
+    if (!contract) {
+      return undefined
+    }
+    if (contract.linked_account_id) {
+      return accountTypeById.get(contract.linked_account_id)
+    }
+    if (contract.linked_wallet === 'paypal') {
+      return currentUser.value?.paypal_account_id
+        ? accountTypeById.get(currentUser.value.paypal_account_id)
+        : undefined
+    }
+    if (contract.linked_wallet === 'google_pay') {
+      return currentUser.value?.google_pay_account_id
+        ? accountTypeById.get(currentUser.value.google_pay_account_id)
+        : undefined
+    }
+    return undefined
+  }
   const rows: Array<{ key: string; dateIso: string; label: string; netDeltaCents: number }> = []
 
   for (const posting of preview.postings || []) {
@@ -1741,12 +1762,12 @@ const buildNext30Breakdown = (
     if (contract?.type === 'transfer') {
       const amount = intOrZero(contract.amount_cents)
       const sourceType = contract.source_account_id ? accountTypeById.get(contract.source_account_id) : undefined
-      const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+      const linkedType = resolveContractLinkedType(contract)
       const sourceSign = isLiabilityAccountType(sourceType) ? -1 : 1
       const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
       netDelta = (-amount * sourceSign) + (amount * linkedSign)
-    } else if (contract?.linked_account_id) {
-      const linkedType = accountTypeById.get(contract.linked_account_id)
+    } else {
+      const linkedType = resolveContractLinkedType(contract)
       const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
       netDelta = intOrZero(posting.delta_cents) * linkedSign
     }
@@ -1838,18 +1859,34 @@ const loadWidgets = async () => {
     next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
 
     const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
+    const resolveContractLinkedType = (contract: ContractCalendarPayload) => {
+      if (contract.linked_account_id) {
+        return accountTypeById.get(contract.linked_account_id)
+      }
+      if (contract.linked_wallet === 'paypal') {
+        return currentUser.value?.paypal_account_id
+          ? accountTypeById.get(currentUser.value.paypal_account_id)
+          : undefined
+      }
+      if (contract.linked_wallet === 'google_pay') {
+        return currentUser.value?.google_pay_account_id
+          ? accountTypeById.get(currentUser.value.google_pay_account_id)
+          : undefined
+      }
+      return undefined
+    }
     const projectedAnnualCents =
       contracts.reduce((sum, contract) => {
         const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
         if (contract.type === 'transfer') {
           const amount = intOrZero(contract.amount_cents)
           const sourceType = contract.source_account_id ? accountTypeById.get(contract.source_account_id) : undefined
-          const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+          const linkedType = resolveContractLinkedType(contract)
           const sourceSign = isLiabilityAccountType(sourceType) ? -1 : 1
           const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
           return sum + ((-amount * sourceSign) + (amount * linkedSign)) * annualOccurrences
         }
-        const linkedType = contract.linked_account_id ? accountTypeById.get(contract.linked_account_id) : undefined
+        const linkedType = resolveContractLinkedType(contract)
         const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
         const rawDelta = contract.type === 'income' ? intOrZero(contract.amount_cents) : -intOrZero(contract.amount_cents)
         const accountDelta = isLiabilityAccountType(linkedType) ? -rawDelta : rawDelta
@@ -3271,15 +3308,15 @@ watch(
 }
 
 .widget-trend-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
+  margin-bottom: 2px;
 }
 
-.widget-trend-head h3 {
+.widget-trend-title {
   margin: 0;
-  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .widget-card--wide {
@@ -3292,12 +3329,10 @@ watch(
 }
 
 .widget-trend-status {
-  margin: 0;
-  min-height: 1.1em;
   font-size: 0.8rem;
   color: #475569;
-  text-align: right;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .widget-kpi-hover-wrap {

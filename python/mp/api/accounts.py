@@ -309,12 +309,25 @@ def _forecast_net_worth_points(
         contract.id: contract
         for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
     }
+    user = db.get(User, user_id)
     accounts = {
         account.id: (account.type, int(account.rewards_balance_cents or 0))
         for account in db.query(Account.id, Account.type, Account.rewards_balance_cents)
         .filter(Account.user_id == user_id)
         .all()
     }
+
+    def resolve_linked_account_id(contract: Contract) -> UUID | None:
+        if contract.linked_account_id is not None:
+            return contract.linked_account_id
+        if user is None:
+            return None
+        if contract.linked_wallet == "paypal":
+            return user.paypal_account_id
+        if contract.linked_wallet == "google_pay":
+            return user.google_pay_account_id
+        return None
+
     deltas_by_day: dict[date, int] = {}
     for posting in contract_simulation.postings:
         if posting.status == "skipped":
@@ -332,8 +345,8 @@ def _forecast_net_worth_points(
                 else None
             )
             linked_type = (
-                accounts.get(contract.linked_account_id)
-                if contract.linked_account_id is not None
+                accounts.get(resolve_linked_account_id(contract))
+                if resolve_linked_account_id(contract) is not None
                 else None
             )
             source_sign = (
@@ -345,8 +358,8 @@ def _forecast_net_worth_points(
             net_delta = (-amount * source_sign) + (amount * linked_sign)
         else:
             linked_type = (
-                accounts.get(contract.linked_account_id)
-                if contract.linked_account_id is not None
+                accounts.get(resolve_linked_account_id(contract))
+                if resolve_linked_account_id(contract) is not None
                 else None
             )
             linked_sign = (

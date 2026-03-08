@@ -149,6 +149,20 @@ def _is_password_locked(user: User, now: datetime) -> bool:
     return lockout_until is not None and lockout_until > now
 
 
+def _validate_owned_wallet_account(
+    db: Session, user_id: UUID, account_id: UUID | None, field: str
+) -> None:
+    if account_id is None:
+        return
+    exists = (
+        db.query(Account.id)
+        .filter(Account.id == account_id, Account.user_id == user_id)
+        .first()
+    )
+    if exists is None:
+        raise HTTPException(status_code=400, detail=f"{field} is not an owned account")
+
+
 def _seconds_until_unlock(user: User, now: datetime) -> int:
     lockout_until = user.password_lockout_until
     if lockout_until is None:
@@ -332,6 +346,20 @@ def update_profile(
                 status_code=400, detail="avatar_icon_id is not selectable"
             )
         current_user.avatar_icon_id = avatar_icon_id
+        changed = True
+
+    if "paypal_account_id" in data:
+        _validate_owned_wallet_account(
+            db, current_user.id, payload.paypal_account_id, "paypal_account_id"
+        )
+        current_user.paypal_account_id = payload.paypal_account_id
+        changed = True
+
+    if "google_pay_account_id" in data:
+        _validate_owned_wallet_account(
+            db, current_user.id, payload.google_pay_account_id, "google_pay_account_id"
+        )
+        current_user.google_pay_account_id = payload.google_pay_account_id
         changed = True
 
     if "new_password" in data:

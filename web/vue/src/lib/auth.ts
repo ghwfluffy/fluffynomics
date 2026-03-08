@@ -7,6 +7,8 @@ export interface User {
   example_data: boolean
   is_admin: boolean
   avatar_icon_id: string | null
+  paypal_account_id: string | null
+  google_pay_account_id: string | null
   last_login_at: string | null
   password_changed_at: string | null
   created_at: string
@@ -66,6 +68,8 @@ export async function logout(): Promise<void> {
 
 export async function updateProfile(payload: {
   avatar_icon_id?: string | null
+  paypal_account_id?: string | null
+  google_pay_account_id?: string | null
   current_password?: string
   new_password?: string
 }): Promise<User> {

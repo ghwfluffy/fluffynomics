@@ -135,48 +135,100 @@
     <div v-if="profileDialogOpen" class="modal-backdrop">
       <section class="modal-card modal-card--wide cds--tile">
         <h3>Profile</h3>
-        <div class="profile-meta-grid">
-          <div class="profile-avatar-section">
-            <div class="profile-avatar-large-wrap">
-              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" class="profile-avatar-large" alt="Profile avatar" />
-              <div v-else class="profile-avatar-large profile-avatar-large--fallback">{{ avatarInitials }}</div>
-            </div>
-            <div class="profile-avatar-actions">
-              <button class="cds--btn cds--btn--ghost" type="button" @click="toggleProfileIconLibrary">
-                {{ showProfileIconLibrary ? 'Hide Icon Library' : 'Choose Avatar' }}
-              </button>
-              <input
-                ref="profileIconFileInput"
-                class="import-file-input"
-                type="file"
-                accept="image/*"
-                @change="onProfileAvatarUpload"
-              />
-              <button class="cds--btn cds--btn--ghost" type="button" @click="openProfileAvatarUploadPicker">Upload Avatar</button>
-              <button class="cds--btn cds--btn--ghost" type="button" @click="clearProfileAvatar">Clear Avatar</button>
-            </div>
-            <div v-if="showProfileIconLibrary" class="profile-icon-grid">
+        <div class="cds--tabs" role="navigation" aria-label="Profile sections">
+          <ul class="cds--tabs__nav" role="tablist">
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'info' }" role="presentation">
               <button
-                v-for="icon in profileIconChoices"
-                :key="icon.id"
+                id="tab-profile-info"
+                class="cds--tabs__nav-link"
+                role="tab"
                 type="button"
-                class="profile-icon-choice"
-                :class="{ 'profile-icon-choice--selected': profileDraftAvatarIconId === icon.id }"
-                @click="profileDraftAvatarIconId = icon.id"
+                :aria-selected="profileTab === 'info'"
+                aria-controls="panel-profile-info"
+                @click="profileTab = 'info'"
               >
-                <img :src="iconUrl(icon.id)" class="profile-icon-choice-image" alt="Avatar choice" />
+                Info
               </button>
+            </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'password' }" role="presentation">
+              <button
+                id="tab-profile-password"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="profileTab === 'password'"
+                aria-controls="panel-profile-password"
+                @click="profileTab = 'password'"
+              >
+                Password
+              </button>
+            </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'wallets' }" role="presentation">
+              <button
+                id="tab-profile-wallets"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="profileTab === 'wallets'"
+                aria-controls="panel-profile-wallets"
+                @click="profileTab = 'wallets'"
+              >
+                Digital Wallets
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div v-if="profileTab === 'info'" id="panel-profile-info" role="tabpanel" aria-labelledby="tab-profile-info">
+          <div class="profile-meta-grid">
+            <div class="profile-avatar-section">
+              <div class="profile-avatar-large-wrap">
+                <img v-if="profileAvatarUrl" :src="profileAvatarUrl" class="profile-avatar-large" alt="Profile avatar" />
+                <div v-else class="profile-avatar-large profile-avatar-large--fallback">{{ avatarInitials }}</div>
+              </div>
+              <div class="profile-avatar-actions">
+                <button class="cds--btn cds--btn--ghost" type="button" @click="toggleProfileIconLibrary">
+                  {{ showProfileIconLibrary ? 'Hide Icon Library' : 'Choose Avatar' }}
+                </button>
+                <input
+                  ref="profileIconFileInput"
+                  class="import-file-input"
+                  type="file"
+                  accept="image/*"
+                  @change="onProfileAvatarUpload"
+                />
+                <button class="cds--btn cds--btn--ghost" type="button" @click="openProfileAvatarUploadPicker">Upload Avatar</button>
+                <button class="cds--btn cds--btn--ghost" type="button" @click="clearProfileAvatar">Clear Avatar</button>
+              </div>
+              <div v-if="showProfileIconLibrary" class="profile-icon-grid">
+                <button
+                  v-for="icon in profileIconChoices"
+                  :key="icon.id"
+                  type="button"
+                  class="profile-icon-choice"
+                  :class="{ 'profile-icon-choice--selected': profileDraftAvatarIconId === icon.id }"
+                  @click="profileDraftAvatarIconId = icon.id"
+                >
+                  <img :src="iconUrl(icon.id)" class="profile-icon-choice-image" alt="Avatar choice" />
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="profile-stats">
-            <p><strong>Username:</strong> {{ currentUser?.username }}</p>
-            <p><strong>Account Created:</strong> {{ formatDateTime(currentUser?.created_at) }}</p>
-            <p><strong>Last Login:</strong> {{ formatDateTime(currentUser?.last_login_at) }}</p>
-            <p><strong>Last Password Change:</strong> {{ formatDateTime(currentUser?.password_changed_at) }}</p>
+            <div class="profile-stats">
+              <p><strong>Username:</strong> {{ currentUser?.username }}</p>
+              <p><strong>Account Created:</strong> {{ formatDateTime(currentUser?.created_at) }}</p>
+              <p><strong>Last Login:</strong> {{ formatDateTime(currentUser?.last_login_at) }}</p>
+              <p><strong>Last Password Change:</strong> {{ formatDateTime(currentUser?.password_changed_at) }}</p>
+            </div>
           </div>
         </div>
 
-        <div class="password-section">
+        <div
+          v-if="profileTab === 'password'"
+          id="panel-profile-password"
+          class="password-section"
+          role="tabpanel"
+          aria-labelledby="tab-profile-password"
+        >
           <h4>Change Password</h4>
           <div class="modal-form-grid">
             <label class="bank-label" for="profile-current-password">Current Password</label>
@@ -196,6 +248,26 @@
               autocomplete="new-password"
             />
           </div>
+        </div>
+
+        <div
+          v-if="profileTab === 'wallets'"
+          id="panel-profile-wallets"
+          class="modal-form-grid"
+          role="tabpanel"
+          aria-labelledby="tab-profile-wallets"
+        >
+          <p>Choose which real account backs each digital wallet alias for contracts and legacy imports.</p>
+          <UnifiedDropdown
+            v-model="profilePaypalAccountId"
+            label="PayPal Linked Account"
+            :options="walletAccountDropdownOptions"
+          />
+          <UnifiedDropdown
+            v-model="profileGooglePayAccountId"
+            label="Google Pay Linked Account"
+            :options="walletAccountDropdownOptions"
+          />
         </div>
 
         <div class="modal-actions">
@@ -374,6 +446,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, logout, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
 const router = useRouter()
 const exportDialogOpen = ref(false)
@@ -390,9 +463,12 @@ const profileMenuRef = ref<HTMLElement | null>(null)
 const profileMenuOpen = ref(false)
 const profileDialogOpen = ref(false)
 const profileBusy = ref(false)
+const profileTab = ref<'info' | 'password' | 'wallets'>('info')
 const profileCurrentPassword = ref('')
 const profileNewPassword = ref('')
 const profileDraftAvatarIconId = ref<string | null>(null)
+const profilePaypalAccountId = ref('')
+const profileGooglePayAccountId = ref('')
 const showProfileIconLibrary = ref(false)
 const profileIconFileInput = ref<HTMLInputElement | null>(null)
 const adminDialogOpen = ref(false)
@@ -424,7 +500,14 @@ type RegistrationCodeEdit = {
   expiresAtLocal: string
 }
 
+type WalletAccountSummary = {
+  id: string
+  name: string
+  type: string
+}
+
 const profileIconChoices = ref<IconChoice[]>([])
+const profileWalletAccounts = ref<WalletAccountSummary[]>([])
 const adminTab = ref<AdminTab>('backups')
 const registrationBusy = ref(false)
 const registrationCodes = ref<RegistrationCodeItem[]>([])
@@ -484,12 +567,15 @@ const closeProfileMenu = () => {
 
 const onProfileManageClick = async () => {
   closeProfileMenu()
+  profileTab.value = 'info'
   profileCurrentPassword.value = ''
   profileNewPassword.value = ''
   profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
+  profilePaypalAccountId.value = currentUser.value?.paypal_account_id || ''
+  profileGooglePayAccountId.value = currentUser.value?.google_pay_account_id || ''
   showProfileIconLibrary.value = false
   profileDialogOpen.value = true
-  await loadProfileIcons()
+  await Promise.all([loadProfileIcons(), loadProfileWalletAccounts()])
 }
 
 const onAdministrationClick = () => {
@@ -701,6 +787,18 @@ const loadProfileIcons = async () => {
   profileIconChoices.value = icons
 }
 
+const loadProfileWalletAccounts = async () => {
+  profileWalletAccounts.value = await request.get<WalletAccountSummary[]>('/accounts')
+}
+
+const walletAccountDropdownOptions = computed(() => [
+  { label: 'Not linked', value: '' },
+  ...profileWalletAccounts.value.map((account) => ({
+    label: `${account.name} (${account.type.replaceAll('_', ' ')})`,
+    value: account.id,
+  })),
+])
+
 const toggleProfileIconLibrary = async () => {
   showProfileIconLibrary.value = !showProfileIconLibrary.value
   if (showProfileIconLibrary.value && profileIconChoices.value.length === 0) {
@@ -735,9 +833,21 @@ const clearProfileAvatar = () => {
 const saveProfile = async () => {
   profileBusy.value = true
   try {
-    const payload: { avatar_icon_id?: string | null; current_password?: string; new_password?: string } = {}
+    const payload: {
+      avatar_icon_id?: string | null
+      paypal_account_id?: string | null
+      google_pay_account_id?: string | null
+      current_password?: string
+      new_password?: string
+    } = {}
     if ((currentUser.value?.avatar_icon_id || null) !== profileDraftAvatarIconId.value) {
       payload.avatar_icon_id = profileDraftAvatarIconId.value
+    }
+    if ((currentUser.value?.paypal_account_id || '') !== profilePaypalAccountId.value) {
+      payload.paypal_account_id = profilePaypalAccountId.value || null
+    }
+    if ((currentUser.value?.google_pay_account_id || '') !== profileGooglePayAccountId.value) {
+      payload.google_pay_account_id = profileGooglePayAccountId.value || null
     }
     if (profileNewPassword.value.trim()) {
       payload.current_password = profileCurrentPassword.value

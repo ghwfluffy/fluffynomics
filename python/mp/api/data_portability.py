@@ -38,7 +38,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 4
+PAYLOAD_SCHEMA_VERSION = 5
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -336,6 +336,17 @@ def _legacy_org_alias_match(name: str | None, org: str | None) -> bool:
     if canonical_org == "citibank" and "citicard" in canonical_name:
         return True
     return False
+
+
+def _legacy_wallet_alias(raw: str | None) -> str | None:
+    canonical = _canonical_org_name(raw)
+    if not canonical:
+        return None
+    if "paypal" in canonical:
+        return "paypal"
+    if "googlepay" in canonical or canonical.startswith("gpay"):
+        return "google_pay"
+    return None
 
 
 def _legacy_org_match_score(name: str | None, org: str | None) -> tuple[int, int, int]:
@@ -1298,7 +1309,12 @@ def _convert_legacy_payload_to_latest(
         amount_cents = _dollars_to_cents(item.get("amount"))
         contract_type = "income" if amount_cents > 0 else "payment"
         payment_account_name = str(item.get("paymentAccount") or "").strip().lower()
-        linked_account_id = account_id_by_name.get(payment_account_name)
+        linked_wallet = _legacy_wallet_alias(payment_account_name)
+        linked_account_id = (
+            None
+            if linked_wallet is not None
+            else account_id_by_name.get(payment_account_name)
+        )
         last_payment_date = _legacy_extract_date(
             item,
             "lastPayment",
@@ -1384,6 +1400,7 @@ def _convert_legacy_payload_to_latest(
                 else "Letters",
                 "rank": float(index),
                 "linked_account_id": linked_account_id,
+                "linked_wallet": linked_wallet,
                 "source_account_id": None,
                 "last_payment_date": last_payment_date.isoformat()
                 if last_payment_date
@@ -1427,6 +1444,7 @@ def _convert_legacy_payload_to_latest(
                 "icon_type": "Letters",
                 "rank": float(1000 + index),
                 "linked_account_id": linked_account_id,
+                "linked_wallet": None,
                 "source_account_id": None,
                 "last_payment_date": None,
                 "payment_period": json.dumps({"kind": "monthly_last_day"}),
@@ -1506,6 +1524,8 @@ def _convert_legacy_payload_to_latest(
         "exported_at": now_iso,
         "user_profile": {
             "avatar_icon_id": None,
+            "paypal_account_id": None,
+            "google_pay_account_id": None,
             "last_login_at": None,
             "password_changed_at": None,
             "created_at": user.created_at.isoformat() if user.created_at else now_iso,
@@ -1649,6 +1669,12 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             "avatar_icon_id": str(user.avatar_icon_id)
             if user.avatar_icon_id is not None
             else None,
+            "paypal_account_id": str(user.paypal_account_id)
+            if user.paypal_account_id is not None
+            else None,
+            "google_pay_account_id": str(user.google_pay_account_id)
+            if user.google_pay_account_id is not None
+            else None,
             "last_login_at": _serialize_datetime(user.last_login_at),
             "password_changed_at": _serialize_datetime(user.password_changed_at),
             "created_at": _serialize_datetime(user.created_at),
@@ -1732,6 +1758,7 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                     if contract.linked_account_id is not None
                     else None
                 ),
+                "linked_wallet": contract.linked_wallet,
                 "source_account_id": (
                     str(contract.source_account_id)
                     if contract.source_account_id is not None
@@ -1864,11 +1891,33 @@ def _upgrade_payload_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v4_to_v5(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 5
+    profile = _required_dict(upgraded.get("user_profile"), "user_profile")
+    if "paypal_account_id" not in profile:
+        profile["paypal_account_id"] = None
+    if "google_pay_account_id" not in profile:
+        profile["google_pay_account_id"] = None
+    upgraded["user_profile"] = profile
+    contracts = _required_list(upgraded.get("contracts", []), "contracts")
+    upgraded_contracts: list[dict[str, Any]] = []
+    for raw in contracts:
+        item = _required_dict(raw, "contracts[]")
+        normalized = dict(item)
+        if "linked_wallet" not in normalized:
+            normalized["linked_wallet"] = None
+        upgraded_contracts.append(normalized)
+    upgraded["contracts"] = upgraded_contracts
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
     2: _upgrade_payload_v2_to_v3,
     3: _upgrade_payload_v3_to_v4,
+    4: _upgrade_payload_v4_to_v5,
 }
 
 
@@ -2085,6 +2134,13 @@ def _replace_user_data(
     raw_avatar_icon_id = _parse_optional_uuid(
         user_profile.get("avatar_icon_id"), "user_profile.avatar_icon_id"
     )
+    raw_paypal_account_id = _parse_optional_uuid(
+        user_profile.get("paypal_account_id"), "user_profile.paypal_account_id"
+    )
+    raw_google_pay_account_id = _parse_optional_uuid(
+        user_profile.get("google_pay_account_id"),
+        "user_profile.google_pay_account_id",
+    )
     user.avatar_icon_id = resolve_import_icon_id(raw_avatar_icon_id)
     user.last_login_at = _parse_optional_datetime(
         user_profile.get("last_login_at"), "user_profile.last_login_at"
@@ -2104,6 +2160,8 @@ def _replace_user_data(
     user.updated_at = _parse_optional_datetime(
         user_profile.get("updated_at"), "user_profile.updated_at"
     ) or datetime.now(tz=timezone.utc)
+    user.paypal_account_id = None
+    user.google_pay_account_id = None
     db.add(user)
 
     stock_id_map: dict[UUID, UUID] = {}
@@ -2248,6 +2306,18 @@ def _replace_user_data(
         imported_accounts += 1
     db.flush()
 
+    user.paypal_account_id = (
+        account_id_map.get(raw_paypal_account_id)
+        if raw_paypal_account_id is not None
+        else None
+    )
+    user.google_pay_account_id = (
+        account_id_map.get(raw_google_pay_account_id)
+        if raw_google_pay_account_id is not None
+        else None
+    )
+    db.add(user)
+
     for raw in accounts:
         item = _required_dict(raw, "accounts[]")
         old_account_id = _parse_uuid(item.get("id"), "accounts[].id")
@@ -2323,6 +2393,12 @@ def _replace_user_data(
         linked_old = _parse_optional_uuid(
             item.get("linked_account_id"), "contracts[].linked_account_id"
         )
+        linked_wallet = item.get("linked_wallet")
+        if linked_wallet is not None and linked_wallet not in {"paypal", "google_pay"}:
+            raise HTTPException(
+                status_code=400,
+                detail="contracts[].linked_wallet must be paypal or google_pay",
+            )
         source_old = _parse_optional_uuid(
             item.get("source_account_id"), "contracts[].source_account_id"
         )
@@ -2358,6 +2434,7 @@ def _replace_user_data(
             linked_account_id=account_id_map.get(linked_old)
             if linked_old is not None
             else None,
+            linked_wallet=linked_wallet,
             source_account_id=account_id_map.get(source_old)
             if source_old is not None
             else None,

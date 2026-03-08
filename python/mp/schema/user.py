@@ -23,6 +23,16 @@ class User(Base):
     avatar_icon_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
     )
+    paypal_account_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    google_pay_account_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -52,6 +62,8 @@ class UserSchema(BaseModel):
     example_data: bool
     is_admin: bool
     avatar_icon_id: Optional[UUID] = None
+    paypal_account_id: Optional[UUID] = None
+    google_pay_account_id: Optional[UUID] = None
     last_login_at: Optional[datetime] = None
     password_changed_at: Optional[datetime] = None
     created_at: datetime
@@ -80,5 +92,7 @@ class LoginResponseSchema(BaseModel):
 
 class ProfileUpdateSchema(BaseModel):
     avatar_icon_id: Optional[UUID] = None
+    paypal_account_id: Optional[UUID] = None
+    google_pay_account_id: Optional[UUID] = None
     current_password: str | None = None
     new_password: str | None = None

@@ -101,8 +101,16 @@ def _validate_contract_payload(
         raise HTTPException(status_code=400, detail="name is required")
     if payload.organization is None or not payload.organization.strip():
         raise HTTPException(status_code=400, detail="organization is required")
-    if linked_account is None:
-        raise HTTPException(status_code=400, detail="linked_account_id is required")
+    if linked_account is None and payload.linked_wallet is None:
+        raise HTTPException(
+            status_code=400,
+            detail="either linked_account_id or linked_wallet is required",
+        )
+    if linked_account is not None and payload.linked_wallet is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="linked_account_id and linked_wallet are mutually exclusive",
+        )
     if payload.amount_cents < 0:
         raise HTTPException(status_code=400, detail="amount_cents must be >= 0")
     _validate_last_payment_date(payload.last_payment_date)
@@ -120,6 +128,15 @@ def _validate_contract_payload(
             status_code=400, detail="billing_day must be in range 1..31"
         )
     if payload.type == "transfer":
+        if payload.linked_wallet is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="transfer contracts cannot use linked_wallet",
+            )
+        if linked_account is None:
+            raise HTTPException(
+                status_code=400, detail="linked_account_id is required for transfers"
+            )
         if source_account is None:
             raise HTTPException(
                 status_code=400, detail="source_account_id is required for transfers"
@@ -248,6 +265,7 @@ def create_contract(
         icon_type=icon_type,
         rank=payload.rank if payload.rank is not None else (max_rank or 0) + 1,
         linked_account_id=payload.linked_account_id,
+        linked_wallet=payload.linked_wallet,
         source_account_id=payload.source_account_id
         if payload.type == "transfer"
         else None,
@@ -295,8 +313,12 @@ def update_contract(
     if "icon_type" in data:
         _validate_icon_type(data["icon_type"])
     linked_account_id = data.get("linked_account_id", contract.linked_account_id)
-    if linked_account_id is None:
-        raise HTTPException(status_code=400, detail="linked_account_id is required")
+    linked_wallet = data.get("linked_wallet", contract.linked_wallet)
+    if linked_account_id is None and linked_wallet is None:
+        raise HTTPException(
+            status_code=400,
+            detail="either linked_account_id or linked_wallet is required",
+        )
 
     merged = ContractCreateSchema(
         name=data.get("name", contract.name),
@@ -308,6 +330,7 @@ def update_contract(
         icon_type=data.get("icon_type", contract.icon_type),
         rank=data.get("rank", contract.rank),
         linked_account_id=linked_account_id,
+        linked_wallet=linked_wallet,
         source_account_id=data.get("source_account_id", contract.source_account_id),
         last_payment_date=data.get("last_payment_date", contract.last_payment_date),
         payment_period=data.get("payment_period", contract.payment_period),
@@ -341,6 +364,7 @@ def update_contract(
     contract.icon_type = normalized_icon_type
     contract.rank = merged.rank if merged.rank is not None else contract.rank
     contract.linked_account_id = merged.linked_account_id
+    contract.linked_wallet = merged.linked_wallet
     contract.source_account_id = (
         merged.source_account_id if merged.type == "transfer" else None
     )

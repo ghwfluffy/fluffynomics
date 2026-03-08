@@ -17,6 +17,7 @@ from mp.schema.account import (
     Stock,
 )
 from mp.schema.contract import Contract, ContractPosting
+from mp.schema.user import User
 
 
 LEGACY_RECURRENCE = {
@@ -197,6 +198,7 @@ def run_contract_simulation(
         .filter(Contract.user_id == user_id, Contract.automatic.is_(True))
         .all()
     )
+    user = db.get(User, user_id)
     accounts = {
         a.id: a for a in db.query(Account).filter(Account.user_id == user_id).all()
     }
@@ -206,7 +208,14 @@ def run_contract_simulation(
     now = datetime.utcnow()
 
     for contract in contracts:
-        if contract.linked_account_id is None:
+        linked_account_id = contract.linked_account_id
+        if linked_account_id is None and user is not None:
+            if contract.linked_wallet == "paypal":
+                linked_account_id = user.paypal_account_id
+            elif contract.linked_wallet == "google_pay":
+                linked_account_id = user.google_pay_account_id
+
+        if linked_account_id is None:
             postings.append(
                 SimulatedPosting(
                     contract_id=contract.id,
@@ -217,7 +226,7 @@ def run_contract_simulation(
                 )
             )
             continue
-        linked = accounts.get(contract.linked_account_id)
+        linked = accounts.get(linked_account_id)
         source = (
             accounts.get(contract.source_account_id)
             if contract.source_account_id

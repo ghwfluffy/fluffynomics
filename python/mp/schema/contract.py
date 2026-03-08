@@ -52,6 +52,7 @@ class Contract(Base):
         ForeignKey("accounts.id", ondelete="SET NULL"),
         nullable=True,
     )
+    linked_wallet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     payment_period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -105,6 +106,7 @@ class ContractBaseSchema(BaseModel):
     icon_type: Literal["Letters", "Gravatar", "Icon"] = "Icon"
     rank: Optional[float] = None
     linked_account_id: Optional[UUID] = None
+    linked_wallet: Optional[Literal["paypal", "google_pay"]] = None
     source_account_id: Optional[UUID] = None
     last_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
@@ -118,7 +120,7 @@ class ContractBaseSchema(BaseModel):
 
 
 class ContractCreateSchema(ContractBaseSchema):
-    linked_account_id: UUID
+    linked_account_id: Optional[UUID] = None
 
 
 class ContractUpdateSchema(BaseModel):
@@ -131,6 +133,7 @@ class ContractUpdateSchema(BaseModel):
     icon_type: Optional[Literal["Letters", "Gravatar", "Icon"]] = None
     rank: Optional[float] = None
     linked_account_id: Optional[UUID] = None
+    linked_wallet: Optional[Literal["paypal", "google_pay"]] = None
     source_account_id: Optional[UUID] = None
     last_payment_date: Optional[date] = None
     payment_period: Optional[str] = None

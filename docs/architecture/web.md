@@ -97,9 +97,10 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
 `AppShell.vue` header uses a profile trigger (avatar + username) with a dropdown menu that provides:
 - `Profile`
   - opens profile-management modal
-  - supports avatar selection (icon library / upload / clear)
-  - shows account-created time, last-login time, last-password-change time
-  - supports password change flow (`current password` + `new password`)
+  - uses Carbon tabs:
+    - `Info`: avatar selection (icon library / upload / clear) + account-created/last-login/last-password-change info
+    - `Password`: password change flow (`current password` + `new password`)
+    - `Digital Wallets`: maps `PayPal` / `Google Pay` aliases to concrete accounts
 - `Administration` (admin users only)
   - opens admin modal with tabs:
     - `Backups`
@@ -190,6 +191,7 @@ Contract create/edit also mirrors account create/edit patterns:
 - organization fuzzy dropdown from `/organizations`,
 - icon selection/upload from `/icons` and generated icon variants,
 - immutable type selected before modal opens.
+- linked target selector supports wallet aliases (`PayPal Wallet`, `Google Pay Wallet`) in addition to account IDs.
 - `Payment Day` field is hidden and omitted from payload for week-based recurring periods (`weekly_weekday`, `biweekly_weekday`, `every_n_weeks_weekday`).
 
 ## Expenses UX

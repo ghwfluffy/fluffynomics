@@ -92,6 +92,7 @@ Contracts now carry tile-parity fields to match account dashboard interactions:
 - `icon_type` (`Letters|Gravatar|Icon`),
 - `rank` (`DOUBLE PRECISION` float for in-section ordering).
 - `expiration_date` (`DATE`, default `2099-01-01`) for lifecycle grouping (active vs expired).
+- `linked_wallet` (`TEXT`, nullable, check `paypal|google_pay`) for wallet-alias indirection.
 
 Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
 Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
@@ -163,6 +164,8 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 ### User profile fields
 
 - `users.avatar_icon_id` (nullable FK -> `icon_assets.id`, `ON DELETE SET NULL`)
+- `users.paypal_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)
+- `users.google_pay_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)
 - `users.last_login_at` (nullable timestamp)
 - `users.password_changed_at` (nullable timestamp)
 - `users.failed_password_attempts` (non-null integer, default `0`)

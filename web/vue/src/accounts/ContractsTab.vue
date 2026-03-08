@@ -69,7 +69,7 @@
             {{ contract.type === 'income' ? 'Amount' : 'Payment' }} {{ cents(contract.amount_cents) }}
           </div>
           <div class="tile-sub">{{ contractTypeLabel(contract.type) }} • {{ contract.automatic ? 'Automatic' : 'Manual' }}</div>
-          <div class="tile-type">{{ accountNameById(contract.linked_account_id) }}</div>
+          <div class="tile-type">{{ contractLinkedTargetLabel(contract) }}</div>
           <div class="tile-actions">
             <button class="tile-menu-trigger" type="button" aria-label="Contract menu" @click.stop="toggleTileMenu(contract.id)">
               <span class="tile-menu-dots" aria-hidden="true"></span>
@@ -188,9 +188,9 @@
             <label for="contract-auto">Automatic</label>
           </div>
           <DollarField v-model="contractForm.amount_cents" label="Amount" />
-          <UnifiedDropdown v-model="contractForm.linked_account_id" label="Linked Account" :options="accountDropdownOptions" />
+          <UnifiedDropdown v-model="linkedTargetSelector" label="Linked Account" :options="accountDropdownOptions" />
           <div v-if="contractForm.type === 'transfer'">
-            <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" :options="accountDropdownOptions" />
+            <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" :options="sourceAccountDropdownOptions" />
           </div>
           <RecurringPeriodField v-model="contractForm.payment_period" label="Payment Period" />
           <BankField v-if="showPaymentDayField" v-model="contractForm.payment_day" label="Payment Day" type="number" required />
@@ -307,7 +307,8 @@ interface ContractPayload {
   organization?: string
   icon_id?: string
   icon_type?: 'Letters' | 'Gravatar' | 'Icon'
-  linked_account_id: string
+  linked_account_id?: string
+  linked_wallet?: 'paypal' | 'google_pay'
   source_account_id?: string
   last_payment_date?: string
   payment_period?: string
@@ -366,6 +367,7 @@ const makeContractForm = (): ContractForm => ({
   icon_id: undefined,
   icon_type: 'Icon',
   linked_account_id: '',
+  linked_wallet: undefined,
   source_account_id: undefined,
   last_payment_date: '',
   payment_period: '',
@@ -419,6 +421,17 @@ const contractTypeOptions = [
 ]
 
 const accountDropdownOptions = computed(() =>
+  [
+    { label: 'PayPal Wallet', value: 'wallet:paypal' },
+    { label: 'Google Pay Wallet', value: 'wallet:google_pay' },
+    ...props.accounts.map((account) => ({
+      label: `${account.name} (${account.type.replaceAll('_', ' ')})`,
+      value: account.id,
+    })),
+  ],
+)
+
+const sourceAccountDropdownOptions = computed(() =>
   props.accounts.map((account) => ({
     label: `${account.name} (${account.type.replaceAll('_', ' ')})`,
     value: account.id,
@@ -652,7 +665,15 @@ const contractTypeGroupLabel = (type: string) =>
   ({ income: 'Incoming', payment: 'Payment', transfer: 'Transfer' }[type] || type)
 const contractGroupLabel = (contract: ContractPayload) =>
   isExpired(contract) ? 'Expired' : `${contractTypeGroupLabel(contract.type)} ${contract.category || 'Financial'}`
-const accountNameById = (accountId?: string) => props.accounts.find((account) => account.id === accountId)?.name || 'Unknown account'
+const contractLinkedTargetLabel = (contract: ContractPayload) => {
+  if (contract.linked_wallet === 'paypal') {
+    return 'PayPal Wallet'
+  }
+  if (contract.linked_wallet === 'google_pay') {
+    return 'Google Pay Wallet'
+  }
+  return props.accounts.find((account) => account.id === contract.linked_account_id)?.name || 'Unknown account'
+}
 
 const ordinal = (value: number) => {
   const mod100 = value % 100
@@ -728,6 +749,24 @@ const periodRequiresPaymentDay = (rawPeriod?: string) => {
 }
 
 const showPaymentDayField = computed(() => periodRequiresPaymentDay(contractForm.value.payment_period))
+
+const linkedTargetSelector = computed({
+  get: () => {
+    if (contractForm.value.linked_wallet) {
+      return `wallet:${contractForm.value.linked_wallet}`
+    }
+    return contractForm.value.linked_account_id || ''
+  },
+  set: (value: string) => {
+    if (value.startsWith('wallet:')) {
+      contractForm.value.linked_wallet = value.slice('wallet:'.length) as 'paypal' | 'google_pay'
+      contractForm.value.linked_account_id = ''
+      return
+    }
+    contractForm.value.linked_wallet = undefined
+    contractForm.value.linked_account_id = value
+  },
+})
 
 const occurrenceOnOrAfter = (
   anchor: Date,
@@ -1024,6 +1063,7 @@ const onContractTypePicked = (value: string) => {
   contractForm.value = makeContractForm()
   contractForm.value.type = value as ContractForm['type']
   contractForm.value.linked_account_id = props.accounts[0]?.id || ''
+  contractForm.value.linked_wallet = undefined
   editingContractId.value = null
   contractDialog.value = true
 }
@@ -1056,7 +1096,12 @@ const validateContractForm = () => {
     snackbar.value = true
     return false
   }
-  if (!contractForm.value.linked_account_id) {
+  if (contractForm.value.linked_wallet && contractForm.value.type === 'transfer') {
+    errorMessage.value = 'Transfers must use a real linked account'
+    snackbar.value = true
+    return false
+  }
+  if (!contractForm.value.linked_account_id && !contractForm.value.linked_wallet) {
     errorMessage.value = 'Linked account is required'
     snackbar.value = true
     return false
@@ -1083,6 +1128,8 @@ const submitContract = async () => {
   }
   const payload = {
     ...contractForm.value,
+    linked_account_id: contractForm.value.linked_wallet ? null : contractForm.value.linked_account_id || null,
+    linked_wallet: contractForm.value.linked_wallet || null,
     account_number: contractForm.value.account_number?.trim(),
     organization: contractForm.value.organization?.trim(),
     last_payment_date: contractForm.value.last_payment_date || null,
