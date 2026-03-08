@@ -57,6 +57,10 @@ Account timestamp semantics are intentionally split:
   - update flows propagate same ticker rate across all of a user's crypto holdings.
 - `stocks.last_price_cents` stores user-scoped price metadata for stock tickers.
 - `account_value_history` stores value snapshots (`value_cents`, `recorded_at`) for account history graphs.
+- `net_worth_daily_snapshot` stores one net-worth snapshot per user per day.
+  - unique key: `(user_id, snapshot_date)`
+  - on multiple same-day updates, the row is updated to latest net worth.
+  - liability account types (`credit_card`, `line_of_credit`, `loan`) are signed negative in net-worth math.
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
 
 ### Contracts parity fields
@@ -96,6 +100,7 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `account_crypto_positions`
 - `account_cash_denominations`
 - `account_value_history`
+- `net_worth_daily_snapshot`
 - `app_config`
 - `pending_payments`
 - `contracts`

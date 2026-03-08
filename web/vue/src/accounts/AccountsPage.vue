@@ -1,21 +1,20 @@
 <template>
   <div class="dashboard">
-    <section class="cds--tile widgets">
-      <h2>Insights Widgets</h2>
-      <p>Placeholder area for trend charts, cashflow graphs, and forecasting widgets.</p>
-      <div class="forecast-row">
-        <BankField v-model="forecastDate" label="Set Forecast Date" type="date" />
-        <button class="cds--btn cds--btn--ghost" type="button" @click="clearForecastDate">Use Today</button>
-      </div>
-      <div class="widget-grid">
-        <div class="widget-slot">Net Worth Trend</div>
-        <div class="widget-slot">Budget vs Actual</div>
-        <div class="widget-slot">Debt Burn Down</div>
-      </div>
-    </section>
-
     <div class="cds--tabs" role="navigation" aria-label="Dashboard Sections">
       <ul class="cds--tabs__nav" role="tablist">
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'overview' }" role="presentation">
+          <button
+            id="tab-overview"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'overview'"
+            aria-controls="panel-overview"
+            @click="activeTab = 'overview'"
+          >
+            Overview
+          </button>
+        </li>
         <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'accounts' }" role="presentation">
           <button
             id="tab-accounts"
@@ -44,6 +43,56 @@
         </li>
       </ul>
     </div>
+
+    <section v-if="activeTab === 'overview'" id="panel-overview" class="cds--tile widgets" role="tabpanel" aria-labelledby="tab-overview">
+      <div class="widget-toolbar">
+        <div class="forecast-popover-wrap">
+          <button
+            class="cds--btn cds--btn--ghost widget-forecast-toggle"
+            type="button"
+            @click.stop="showForecastControls = !showForecastControls"
+          >
+            Set Forecast Date
+          </button>
+          <div v-if="showForecastControls" class="forecast-popover" @click.stop>
+            <div class="forecast-row">
+              <BankField v-model="forecastDate" label="Forecast Date" type="date" />
+              <button class="cds--btn cds--btn--ghost" type="button" @click="clearForecastDate">Use Today</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="widget-grid">
+        <article class="widget-slot widget-card">
+          <div class="widget-card-head">
+            <h3>Portfolio Mix</h3>
+            <span class="widget-card-hint">Hover slices for type and percent</span>
+          </div>
+          <div class="widget-donut-row">
+            <VChart class="widget-donut-echart" :option="mixChartOption" autoresize />
+          </div>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Net Change (Last 30 Days)</h3>
+          <div class="widget-kpi" :class="deltaClass(netChangePast30)">{{ signedCents(netChangePast30) }}</div>
+          <p class="widget-subtext">Compared to 30 days before {{ widgetAnchorLabel }}</p>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Net Change (Next 30 Days)</h3>
+          <div class="widget-kpi" :class="deltaClass(netChangeNext30)">{{ signedCents(netChangeNext30) }}</div>
+          <p class="widget-subtext">Forecast from {{ widgetAnchorLabel }} using automatic contracts</p>
+        </article>
+      </div>
+      <div class="widget-trend">
+        <article class="widget-slot widget-card widget-card--wide">
+          <h3>Current Net Worth: {{ cents(currentNetWorthCents) }}</h3>
+          <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
+          <div class="widget-trend-status">
+            <span v-if="widgetLoading">Updating…</span>
+          </div>
+        </article>
+      </div>
+    </section>
 
     <div v-if="activeTab === 'accounts'" id="panel-accounts" role="tabpanel" aria-labelledby="tab-accounts">
       <div class="top-controls">
@@ -555,6 +604,15 @@ import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
 import ContractsTab from '@/accounts/ContractsTab.vue'
+import VChart, { THEME_KEY } from 'vue-echarts'
+import { use } from 'echarts/core'
+import { LineChart, PieChart } from 'echarts/charts'
+import { CanvasRenderer } from 'echarts/renderers'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { provide } from 'vue'
+
+use([PieChart, LineChart, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+provide(THEME_KEY, 'light')
 
 type AccountType =
   | 'checking'
@@ -644,6 +702,16 @@ interface AccountHistoryPoint {
   recorded_at: string
 }
 
+interface NetWorthHistoryPoint {
+  value_cents: number
+  snapshot_date: string
+}
+
+interface NetWorthForecastPoint {
+  value_cents: number
+  snapshot_date: string
+}
+
 const makeCreateForm = (): CreateAccountPayload => ({
   account_number: '',
   name: '',
@@ -656,9 +724,15 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
-const activeTab = ref<'accounts' | 'contracts'>('accounts')
+const activeTab = ref<'overview' | 'accounts' | 'contracts'>('overview')
 const forecastDate = ref<string>('')
+const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
+const widgetLoading = ref(false)
+const netWorthPast30Cents = ref(0)
+const netWorthNext30Cents = ref(0)
+const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
+let widgetRequestToken = 0
 const accountsTableFilter = ref('')
 const accountsSortKey = ref<'section' | 'name' | 'organization' | 'last4' | 'type' | 'balance' | 'last_update'>('section')
 const accountsSortDir = ref<'asc' | 'desc'>('asc')
@@ -899,6 +973,145 @@ const onAccountsColumnFilterUpdate = (payload: { key: string; selected: string[]
 const sectionTitleByType = (type: AccountType) =>
   sectionDefinitions.find((section) => section.types.includes(type))?.title || 'Other'
 
+const accountTypeLabel = (type: AccountType) =>
+  ({
+    checking: 'Checking',
+    savings: 'Savings',
+    cash: 'Cash',
+    line_of_credit: 'Line of Credit',
+    credit_card: 'Credit Card',
+    stocks_account: 'Stocks Account',
+    crypto_exchange: 'Crypto Exchange',
+    crypto_wallet: 'Crypto Wallet',
+    retirement: 'Retirement',
+    loan: 'Loan',
+    rewards_card: 'Rewards Card',
+  })[type]
+
+const currentNetWorthCents = computed(() => accounts.value.reduce((sum, account) => sum + tableBalanceCents(account), 0))
+const netChangePast30 = computed(() => currentNetWorthCents.value - netWorthPast30Cents.value)
+const netChangeNext30 = computed(() => netWorthNext30Cents.value - currentNetWorthCents.value)
+
+const widgetAnchorDate = computed(() => parseDateOnly(forecastDate.value) || new Date())
+const widgetAnchorLabel = computed(() =>
+  widgetAnchorDate.value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+)
+
+const mixPalette = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#17becf', '#e377c2', '#bcbd22', '#8c564b', '#7f7f7f', '#3366cc']
+
+const mixSlices = computed(() => {
+  const totals = new Map<string, number>()
+  for (const account of accounts.value) {
+    const key = accountTypeLabel(account.type)
+    const value = Math.abs(tableBalanceCents(account))
+    totals.set(key, (totals.get(key) || 0) + value)
+  }
+  const nonZeroEntries = Array.from(totals.entries()).filter(([, value]) => value > 0)
+  const total = nonZeroEntries.reduce((sum, [, value]) => sum + value, 0) || 1
+  return nonZeroEntries
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value], index) => ({
+      key: label,
+      label,
+      value_cents: value,
+      percent: Math.round((value / total) * 100),
+      color: mixPalette[index % mixPalette.length],
+    }))
+})
+
+const mixChartOption = computed(() => ({
+  color: mixSlices.value.map((item) => item.color),
+  tooltip: {
+    trigger: 'item',
+    formatter: (params: { name: string; value: number; percent: number }) =>
+      `${params.name}<br/>Value: ${cents(params.value)} (${params.percent}%)`,
+  },
+  legend: { show: false },
+  series: [
+    {
+      type: 'pie',
+      radius: ['52%', '74%'],
+      center: ['50%', '50%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      itemStyle: {
+        borderColor: '#ffffff',
+        borderWidth: 2,
+      },
+      data: mixSlices.value.map((slice) => ({
+        name: slice.label,
+        value: slice.value_cents,
+      })),
+    },
+  ],
+}))
+
+const trendScale = computed(() => {
+  if (!trendSnapshots.value.length) {
+    return { min: 0, max: 1 }
+  }
+  const maxRaw = Math.max(0, ...trendSnapshots.value.map((item) => item.value_cents))
+  const paddedMax = Math.max(1, maxRaw * 1.02)
+  const step = Math.max(1, Math.ceil(paddedMax / 4 / 10000) * 10000)
+  return { min: 0, max: step * 4 }
+})
+
+const trendChartOption = computed(() => {
+  const { min, max } = trendScale.value
+  const yMin = min / 100
+  const yMax = max / 100
+  return {
+    grid: { left: 78, right: 20, top: 14, bottom: 36 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: Array<{ axisValue: string; data: number }>) => {
+        const first = params?.[0]
+        if (!first) {
+          return ''
+        }
+        return `${first.axisValue}<br/>Net Worth: ${cents(Math.round(first.data * 100))}`
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: trendSnapshots.value.map((item) => item.label),
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#94a3b8' } },
+      axisLabel: { color: '#64748b', fontSize: 10 },
+    },
+    yAxis: {
+      type: 'value',
+      min: yMin,
+      max: yMax,
+      splitNumber: 4,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: '#94a3b8' } },
+      splitLine: { lineStyle: { color: '#e2e8f0' } },
+      axisLabel: {
+        color: '#64748b',
+        fontSize: 9,
+        formatter: (value: number) => cents(Math.round(value * 100)),
+      },
+    },
+    series: [
+      {
+        type: 'line',
+        data: trendSnapshots.value.map((item) => item.value_cents / 100),
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 6,
+        lineStyle: { width: 2.25, color: '#0f62fe' },
+        itemStyle: {
+          color: (params: { dataIndex: number }) =>
+            trendSnapshots.value[params.dataIndex]?.forecast ? '#f59e0b' : '#0f62fe',
+        },
+        emphasis: { focus: 'series' },
+      },
+    ],
+  }
+})
+
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
 const submitLabel = computed(() => (editingAccountId.value ? 'Save Changes' : 'Create'))
@@ -1067,6 +1280,27 @@ const cents = (value?: number) =>
     currency: 'USD',
   }).format((value || 0) / 100)
 
+const signedCents = (value: number) => {
+  const formatted = cents(Math.abs(value))
+  if (value > 0) {
+    return `+${formatted}`
+  }
+  if (value < 0) {
+    return `-${formatted}`
+  }
+  return formatted
+}
+
+const deltaClass = (value: number) => {
+  if (value > 0) {
+    return 'delta-positive'
+  }
+  if (value < 0) {
+    return 'delta-negative'
+  }
+  return 'delta-neutral'
+}
+
 const balanceLabel = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
     const total = (account.stock_positions || []).reduce((sum, position) => {
@@ -1125,6 +1359,93 @@ const tableBalanceCents = (account: AccountPayload) => {
     return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
   }
   return account.balance_cents || 0
+}
+
+const localIsoDate = (value: Date) => {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const shiftDays = (base: Date, days: number) => {
+  const moved = new Date(base)
+  moved.setDate(moved.getDate() + days)
+  return moved
+}
+
+const getNetWorthAsOf = async (asOf: Date) => {
+  const snapshot = await request.get<AccountPayload[]>('/accounts', { params: { as_of_date: localIsoDate(asOf) } })
+  return snapshot.reduce((sum, account) => sum + tableBalanceCents(account), 0)
+}
+
+const loadWidgets = async () => {
+  const runToken = ++widgetRequestToken
+  widgetLoading.value = true
+  try {
+    const anchor = parseDateOnly(forecastDate.value) || new Date()
+    const [past30, next30, netWorthHistory] = await Promise.all([
+      getNetWorthAsOf(shiftDays(anchor, -30)),
+      getNetWorthAsOf(shiftDays(anchor, 30)),
+      request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
+    ])
+    const forecastSeries =
+      anchor.getTime() > Date.now()
+        ? await request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
+            params: { through_date: localIsoDate(anchor) },
+          })
+        : []
+    if (runToken !== widgetRequestToken) {
+      return
+    }
+    netWorthPast30Cents.value = past30
+    netWorthNext30Cents.value = next30
+    const byMonth = new Map<string, { date: Date; value_cents: number }>()
+    for (const point of netWorthHistory) {
+      const date = new Date(`${point.snapshot_date}T00:00:00`)
+      if (Number.isNaN(date.getTime())) {
+        continue
+      }
+      const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+      byMonth.set(monthKey, { date, value_cents: point.value_cents })
+    }
+    const historical = Array.from(byMonth.values())
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+      .map((entry) => ({
+        key: localIsoDate(entry.date),
+        label: entry.date.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+        value_cents: entry.value_cents,
+        forecast: false,
+      }))
+
+    if (forecastSeries.length) {
+      const byDay = new Map<string, { key: string; label: string; value_cents: number; forecast: boolean }>()
+      for (const point of historical) {
+        byDay.set(point.key, point)
+      }
+      for (const point of forecastSeries) {
+        const parsed = new Date(`${point.snapshot_date}T00:00:00`)
+        if (Number.isNaN(parsed.getTime())) {
+          continue
+        }
+        const key = localIsoDate(parsed)
+        const isFuture = parsed.getTime() > Date.now()
+        byDay.set(key, {
+          key,
+          label: parsed.toLocaleString('en-US', { month: 'short', day: 'numeric' }),
+          value_cents: point.value_cents,
+          forecast: isFuture,
+        })
+      }
+      trendSnapshots.value = Array.from(byDay.values()).sort((a, b) => new Date(a.key).getTime() - new Date(b.key).getTime())
+      return
+    }
+    trendSnapshots.value = historical
+  } finally {
+    if (runToken === widgetRequestToken) {
+      widgetLoading.value = false
+    }
+  }
 }
 
 const balanceTone = (sectionKey: string) =>
@@ -1246,6 +1567,7 @@ const lastUpdateTone = (account: AccountPayload) => {
 const loadAccounts = async () => {
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
   accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
+  await loadWidgets()
 }
 
 const loadOrganizations = async () => {
@@ -1679,11 +2001,16 @@ const onWindowClick = (event: MouseEvent) => {
     }
     closeIconContextMenu()
   }
+  if (showForecastControls.value) {
+    const forecastPopover = document.querySelector('.forecast-popover-wrap')
+    if (!forecastPopover?.contains(target)) {
+      showForecastControls.value = false
+    }
+  }
 }
 
-const clearForecastDate = async () => {
+const clearForecastDate = () => {
   forecastDate.value = ''
-  await loadAccounts()
 }
 
 onMounted(loadAccounts)
@@ -1748,13 +2075,31 @@ watch(
   margin-bottom: 1.25rem;
 }
 
-.widgets h2 {
-  margin: 0 0 0.4rem;
+.widget-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.45rem;
 }
 
-.widgets p {
-  margin: 0 0 0.8rem;
-  color: var(--cds-text-secondary);
+.forecast-popover-wrap {
+  position: relative;
+}
+
+.forecast-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 30;
+  min-width: 330px;
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.16);
+  padding: 0.75rem;
+}
+
+.widget-forecast-toggle {
+  min-height: 2rem;
+  padding-inline: 0.6rem;
 }
 
 .top-controls {
@@ -1777,8 +2122,7 @@ watch(
   display: flex;
   align-items: end;
   gap: 0.6rem;
-  margin-bottom: 0.9rem;
-  max-width: 460px;
+  max-width: 420px;
 }
 
 .widget-grid {
@@ -1788,14 +2132,86 @@ watch(
 }
 
 .widget-slot {
-  border: 1px dashed var(--cds-border-subtle-01);
-  min-height: 96px;
+  border: 1px solid var(--cds-border-subtle-01);
+  background: #fff;
+}
+
+.widget-card {
+  padding: 0.9rem;
+}
+
+.widget-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.widget-card-head {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.widget-card-head h3 {
+  margin: 0;
+}
+
+.widget-card-hint {
+  font-size: 0.72rem;
   color: var(--cds-text-secondary);
-  background: var(--cds-layer-hover);
+  white-space: nowrap;
+}
+
+.widget-subtext {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--cds-text-secondary);
+}
+
+.widget-kpi {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.delta-positive {
+  color: #047857;
+}
+
+.delta-negative {
+  color: #b91c1c;
+}
+
+.delta-neutral {
+  color: #334155;
+}
+
+.widget-donut-row {
+  min-height: 146px;
+}
+
+.widget-donut-echart {
+  width: 100%;
+  height: 146px;
+}
+
+.widget-trend {
+  margin-top: 12px;
+}
+
+.widget-card--wide {
+  padding-bottom: 0.55rem;
+}
+
+.widget-trend-echart {
+  width: 100%;
+  height: 190px;
+}
+
+.widget-trend-status {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+  color: #475569;
 }
 
 .modal-backdrop {
@@ -2169,6 +2585,14 @@ watch(
     grid-template-columns: 1fr;
   }
 
+  .widget-card-head {
+    flex-wrap: wrap;
+  }
+
+  .widget-card-hint {
+    white-space: normal;
+  }
+
   .icon-grid-scroll {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -2179,6 +2603,17 @@ watch(
 }
 
 @media (max-width: 640px) {
+  .forecast-popover {
+    min-width: min(330px, calc(100vw - 2.5rem));
+    right: 0;
+  }
+
+  .forecast-row {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: none;
+  }
+
   .icon-grid-scroll {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }

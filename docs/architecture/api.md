@@ -37,6 +37,16 @@ Defined in `python/mp/api/accounts.py`.
 - `GET /accounts/{account_id}`
 - `GET /accounts/{account_id}/history`
   - returns historical value points (`value_cents`, `recorded_at`) ordered by time
+- `GET /accounts/net-worth/history`
+  - returns daily user net-worth snapshots (`snapshot_date`, `value_cents`)
+  - primary source is `net_worth_daily_snapshot`
+  - falls back to replaying `account_value_history` only when snapshots are empty
+  - liability account types (`credit_card`, `line_of_credit`, `loan`) are treated as negative contributions
+  - used for dashboard trend charts to expand as far back as recorded history exists
+- `GET /accounts/net-worth/forecast?through_date=YYYY-MM-DD`
+  - returns forecast net-worth datapoints between today and `through_date`
+  - includes intermediate contract-effective dates (not only final target date)
+  - liability account types are signed negative in the net-worth projection
 - `POST /accounts`
 - `PUT /accounts/{account_id}`
 - `PUT /accounts/{account_id}/value`
@@ -48,6 +58,7 @@ Defined in `python/mp/api/accounts.py`.
   - when crypto `exchange_rate_cents` is provided, backend propagates that rate to all holdings with same ticker for that user
   - sets `accounts.last_update = now()`
   - records an `account_value_history` point after each successful update
+  - upserts one daily net-worth snapshot for the user (same day updates overwrite that day’s snapshot)
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)
   - used by tile left/right reorder controls

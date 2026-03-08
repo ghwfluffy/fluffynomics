@@ -57,6 +57,11 @@ const signOut = async () => {
   justify-content: space-between;
   border-bottom: 1px solid var(--cds-border-subtle-01);
   background: var(--cds-layer);
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
 }
 
 .shell-brand {
@@ -84,6 +89,8 @@ const signOut = async () => {
 
 .shell-main {
   padding-top: 0.75rem;
+  margin-left: 0 !important;
+  width: 100%;
 }
 
 .toast-wrap {

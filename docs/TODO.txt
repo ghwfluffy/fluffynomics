@@ -8,8 +8,8 @@
         [x] Grouping
     [x] Automatic asset updates from contracts
     [ ] Expenses/Budget
-[ ] Table view
-[ ] dashboard widgets
+[x] Table view
+[x] dashboard widgets
 Security
 [ ] Encrypt account info at rest with PBE
 [ ] Database backups
@@ -20,6 +20,7 @@ Prod deployment
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
+[ ] Stock dividens
 [ ] Pull crypto/stock prices automatically
     [ ] tastytrade integration
     [ ] coinbase integration

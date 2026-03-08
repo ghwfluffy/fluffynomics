@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,8 @@ from mp.schema.account import (
     AccountIconType,
     AccountValueHistory,
     AccountValueHistorySchema,
+    NetWorthHistoryPointSchema,
+    NetWorthForecastPointSchema,
     AccountCryptoPosition,
     DefaultIcon,
     DefaultIconSchema,
@@ -31,6 +34,7 @@ from mp.schema.account import (
     IconAsset,
     IconListItemSchema,
     IconUploadResponseSchema,
+    NetWorthDailySnapshot,
     Organization,
     OrganizationSuggestionSchema,
     PositionCryptoSchema,
@@ -40,6 +44,7 @@ from mp.schema.account import (
     StockSchema,
     StockUpdateSchema,
 )
+from mp.schema.contract import Contract
 from mp.schema.user import User
 
 router = APIRouter()
@@ -197,6 +202,12 @@ def _compute_account_value_cents(db: Session, account: Account) -> int:
     return int(account.balance_cents or 0)
 
 
+def _net_worth_sign_for_account_type(account_type: str) -> int:
+    if account_type in {"credit_card", "line_of_credit", "loan"}:
+        return -1
+    return 1
+
+
 def _record_account_value_history(db: Session, account: Account) -> None:
     db.add(
         AccountValueHistory(
@@ -205,6 +216,143 @@ def _record_account_value_history(db: Session, account: Account) -> None:
             value_cents=_compute_account_value_cents(db, account),
         )
     )
+    _upsert_daily_net_worth_snapshot(db, account.user_id)
+
+
+def _compute_user_net_worth_cents(db: Session, user_id: UUID) -> int:
+    user_accounts = db.query(Account).filter(Account.user_id == user_id).all()
+    return int(
+        sum(
+            _compute_account_value_cents(db, item)
+            * _net_worth_sign_for_account_type(item.type)
+            for item in user_accounts
+        )
+    )
+
+
+def _upsert_daily_net_worth_snapshot(db: Session, user_id: UUID) -> None:
+    today = datetime.utcnow().date()
+    value_cents = _compute_user_net_worth_cents(db, user_id)
+    stmt = pg_insert(NetWorthDailySnapshot).values(
+        user_id=user_id,
+        snapshot_date=today,
+        value_cents=value_cents,
+        updated_at=datetime.utcnow(),
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_net_worth_daily_snapshot_user_day",
+        set_={"value_cents": value_cents, "updated_at": datetime.utcnow()},
+    )
+    db.execute(stmt)
+
+
+def _build_net_worth_points_from_events(
+    db: Session, user_id: UUID
+) -> list[NetWorthHistoryPointSchema]:
+    rows = (
+        db.query(AccountValueHistory)
+        .filter(AccountValueHistory.user_id == user_id)
+        .order_by(AccountValueHistory.recorded_at.asc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    type_by_account_id = {
+        account.id: account.type
+        for account in db.query(Account.id, Account.type)
+        .filter(Account.user_id == user_id)
+        .all()
+    }
+    running_total = 0
+    last_by_account: dict[UUID, int] = {}
+    by_day: dict[date, int] = {}
+    for row in rows:
+        sign = _net_worth_sign_for_account_type(
+            type_by_account_id.get(row.account_id, "")
+        )
+        previous = last_by_account.get(row.account_id, 0)
+        current = int(row.value_cents or 0)
+        running_total += (current - previous) * sign
+        last_by_account[row.account_id] = current
+        by_day[row.recorded_at.date()] = running_total
+    return [
+        NetWorthHistoryPointSchema(snapshot_date=day, value_cents=value)
+        for day, value in sorted(by_day.items(), key=lambda item: item[0])
+    ]
+
+
+def _forecast_net_worth_points(
+    db: Session, user_id: UUID, through_date: date
+) -> list[NetWorthForecastPointSchema]:
+    today = date.today()
+    current = _compute_user_net_worth_cents(db, user_id)
+    if through_date <= today:
+        return [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
+
+    simulation = run_contract_simulation(db, user_id, through_date, apply=False)
+    contracts = {
+        contract.id: contract
+        for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
+    }
+    accounts = {
+        account.id: account.type
+        for account in db.query(Account.id, Account.type)
+        .filter(Account.user_id == user_id)
+        .all()
+    }
+    deltas_by_day: dict[date, int] = {}
+    for posting in simulation.postings:
+        if posting.status == "skipped":
+            continue
+        if posting.effective_date <= today:
+            continue
+        contract = contracts.get(posting.contract_id)
+        if contract is None:
+            continue
+        if contract.type == "transfer":
+            amount = int(contract.amount_cents or 0)
+            source_type = (
+                accounts.get(contract.source_account_id)
+                if contract.source_account_id is not None
+                else None
+            )
+            linked_type = accounts.get(contract.linked_account_id)
+            source_sign = (
+                _net_worth_sign_for_account_type(source_type) if source_type else 1
+            )
+            linked_sign = (
+                _net_worth_sign_for_account_type(linked_type) if linked_type else 1
+            )
+            net_delta = (-amount * source_sign) + (amount * linked_sign)
+        else:
+            linked_type = accounts.get(contract.linked_account_id)
+            linked_sign = (
+                _net_worth_sign_for_account_type(linked_type) if linked_type else 1
+            )
+            net_delta = int(posting.delta_cents) * linked_sign
+        deltas_by_day[posting.effective_date] = (
+            deltas_by_day.get(posting.effective_date, 0) + net_delta
+        )
+
+    points = [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
+    running = current
+    for snapshot_day in sorted(deltas_by_day):
+        running += int(deltas_by_day[snapshot_day])
+        points.append(
+            NetWorthForecastPointSchema(
+                snapshot_date=snapshot_day,
+                value_cents=running,
+            )
+        )
+    if points[-1].snapshot_date < through_date:
+        points.append(
+            NetWorthForecastPointSchema(
+                snapshot_date=through_date,
+                value_cents=running,
+            )
+        )
+    return points
 
 
 def _serialize_account(db: Session, account: Account) -> AccountSchema:
@@ -476,6 +624,41 @@ def get_account(
                     delta
                 )
     return serialized
+
+
+@router.get(
+    "/accounts/net-worth/history", response_model=list[NetWorthHistoryPointSchema]
+)
+def get_net_worth_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[NetWorthHistoryPointSchema]:
+    rows = (
+        db.query(NetWorthDailySnapshot)
+        .filter(NetWorthDailySnapshot.user_id == current_user.id)
+        .order_by(NetWorthDailySnapshot.snapshot_date.asc())
+        .all()
+    )
+    if rows:
+        return [
+            NetWorthHistoryPointSchema(
+                value_cents=int(row.value_cents or 0),
+                snapshot_date=row.snapshot_date,
+            )
+            for row in rows
+        ]
+    return _build_net_worth_points_from_events(db, current_user.id)
+
+
+@router.get(
+    "/accounts/net-worth/forecast", response_model=list[NetWorthForecastPointSchema]
+)
+def get_net_worth_forecast(
+    through_date: date = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[NetWorthForecastPointSchema]:
+    return _forecast_net_worth_points(db, current_user.id, through_date)
 
 
 @router.get(
