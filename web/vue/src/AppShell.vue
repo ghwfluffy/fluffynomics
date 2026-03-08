@@ -14,11 +14,15 @@
             aria-haspopup="menu"
             @click="toggleProfileMenu"
           >
-            <span class="profile-avatar">{{ avatarInitials }}</span>
+            <img v-if="currentUser?.avatar_icon_id" :src="iconUrl(currentUser.avatar_icon_id)" class="profile-avatar" alt="Profile avatar" />
+            <span v-else class="profile-avatar">{{ avatarInitials }}</span>
             <span class="shell-user">{{ currentUser?.username }}</span>
             <span class="profile-caret" aria-hidden="true">▾</span>
           </button>
           <div v-if="profileMenuOpen" class="profile-menu cds--tile" role="menu">
+            <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileManageClick">
+              Profile
+            </button>
             <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileExportClick">
               Export Data
             </button>
@@ -118,13 +122,90 @@
         </div>
       </section>
     </div>
+
+    <div v-if="profileDialogOpen" class="modal-backdrop">
+      <section class="modal-card modal-card--wide cds--tile">
+        <h3>Profile</h3>
+        <div class="profile-meta-grid">
+          <div class="profile-avatar-section">
+            <div class="profile-avatar-large-wrap">
+              <img v-if="profileAvatarUrl" :src="profileAvatarUrl" class="profile-avatar-large" alt="Profile avatar" />
+              <div v-else class="profile-avatar-large profile-avatar-large--fallback">{{ avatarInitials }}</div>
+            </div>
+            <div class="profile-avatar-actions">
+              <button class="cds--btn cds--btn--ghost" type="button" @click="toggleProfileIconLibrary">
+                {{ showProfileIconLibrary ? 'Hide Icon Library' : 'Choose Avatar' }}
+              </button>
+              <input
+                ref="profileIconFileInput"
+                class="import-file-input"
+                type="file"
+                accept="image/*"
+                @change="onProfileAvatarUpload"
+              />
+              <button class="cds--btn cds--btn--ghost" type="button" @click="openProfileAvatarUploadPicker">Upload Avatar</button>
+              <button class="cds--btn cds--btn--ghost" type="button" @click="clearProfileAvatar">Clear Avatar</button>
+            </div>
+            <div v-if="showProfileIconLibrary" class="profile-icon-grid">
+              <button
+                v-for="icon in profileIconChoices"
+                :key="icon.id"
+                type="button"
+                class="profile-icon-choice"
+                :class="{ 'profile-icon-choice--selected': profileDraftAvatarIconId === icon.id }"
+                @click="profileDraftAvatarIconId = icon.id"
+              >
+                <img :src="iconUrl(icon.id)" class="profile-icon-choice-image" alt="Avatar choice" />
+              </button>
+            </div>
+          </div>
+          <div class="profile-stats">
+            <p><strong>Username:</strong> {{ currentUser?.username }}</p>
+            <p><strong>Account Created:</strong> {{ formatDateTime(currentUser?.created_at) }}</p>
+            <p><strong>Last Login:</strong> {{ formatDateTime(currentUser?.last_login_at) }}</p>
+            <p><strong>Last Password Change:</strong> {{ formatDateTime(currentUser?.password_changed_at) }}</p>
+          </div>
+        </div>
+
+        <div class="password-section">
+          <h4>Change Password</h4>
+          <div class="modal-form-grid">
+            <label class="bank-label" for="profile-current-password">Current Password</label>
+            <input
+              id="profile-current-password"
+              v-model="profileCurrentPassword"
+              class="cds--text-input"
+              type="password"
+              autocomplete="current-password"
+            />
+            <label class="bank-label" for="profile-new-password">New Password</label>
+            <input
+              id="profile-new-password"
+              v-model="profileNewPassword"
+              class="cds--text-input"
+              type="password"
+              autocomplete="new-password"
+            />
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" :disabled="profileBusy" @click="closeProfileDialog">
+            Cancel
+          </button>
+          <button class="cds--btn cds--btn--primary" type="button" :disabled="profileBusy" @click="saveProfile">
+            {{ profileBusy ? 'Saving...' : 'Save Profile' }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { currentUser, logout } from '@/lib/auth'
+import { currentUser, logout, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
 
 const router = useRouter()
@@ -140,6 +221,20 @@ const importPackageObject = ref<Record<string, unknown> | null>(null)
 const importFileInput = ref<HTMLInputElement | null>(null)
 const profileMenuRef = ref<HTMLElement | null>(null)
 const profileMenuOpen = ref(false)
+const profileDialogOpen = ref(false)
+const profileBusy = ref(false)
+const profileCurrentPassword = ref('')
+const profileNewPassword = ref('')
+const profileDraftAvatarIconId = ref<string | null>(null)
+const showProfileIconLibrary = ref(false)
+const profileIconFileInput = ref<HTMLInputElement | null>(null)
+
+type IconChoice = {
+  id: string
+  is_default: boolean
+}
+
+const profileIconChoices = ref<IconChoice[]>([])
 
 const avatarInitials = computed(() => {
   const username = (currentUser.value?.username || '').trim()
@@ -156,6 +251,28 @@ const avatarInitials = computed(() => {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 })
 
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+
+const iconUrl = (iconId: string) => `${apiBase}/icons/${iconId}`
+
+const profileAvatarUrl = computed(() => {
+  const iconId = profileDialogOpen.value
+    ? profileDraftAvatarIconId.value
+    : (currentUser.value?.avatar_icon_id || null)
+  return iconId ? iconUrl(iconId) : ''
+})
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) {
+    return 'Never'
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return parsed.toLocaleString()
+}
+
 const signOut = async () => {
   await logout()
   await router.push('/')
@@ -167,6 +284,16 @@ const toggleProfileMenu = () => {
 
 const closeProfileMenu = () => {
   profileMenuOpen.value = false
+}
+
+const onProfileManageClick = async () => {
+  closeProfileMenu()
+  profileCurrentPassword.value = ''
+  profileNewPassword.value = ''
+  profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
+  showProfileIconLibrary.value = false
+  profileDialogOpen.value = true
+  await loadProfileIcons()
 }
 
 const onProfileExportClick = () => {
@@ -182,6 +309,73 @@ const onProfileImportClick = () => {
 const onProfileLogoutClick = async () => {
   closeProfileMenu()
   await signOut()
+}
+
+const closeProfileDialog = () => {
+  if (profileBusy.value) {
+    return
+  }
+  profileDialogOpen.value = false
+}
+
+const loadProfileIcons = async () => {
+  const icons = await request.get<IconChoice[]>('/icons')
+  profileIconChoices.value = icons
+}
+
+const toggleProfileIconLibrary = async () => {
+  showProfileIconLibrary.value = !showProfileIconLibrary.value
+  if (showProfileIconLibrary.value && profileIconChoices.value.length === 0) {
+    await loadProfileIcons()
+  }
+}
+
+const openProfileAvatarUploadPicker = () => {
+  profileIconFileInput.value?.click()
+}
+
+const onProfileAvatarUpload = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) {
+    return
+  }
+  const form = new FormData()
+  form.append('file', file)
+  const uploaded = await request.post<{ id: string; hash: string }>('/icons', form)
+  profileDraftAvatarIconId.value = uploaded.id
+  if (showProfileIconLibrary.value) {
+    await loadProfileIcons()
+  }
+  input.value = ''
+}
+
+const clearProfileAvatar = () => {
+  profileDraftAvatarIconId.value = null
+}
+
+const saveProfile = async () => {
+  profileBusy.value = true
+  try {
+    const payload: { avatar_icon_id?: string | null; current_password?: string; new_password?: string } = {}
+    if ((currentUser.value?.avatar_icon_id || null) !== profileDraftAvatarIconId.value) {
+      payload.avatar_icon_id = profileDraftAvatarIconId.value
+    }
+    if (profileNewPassword.value.trim()) {
+      payload.current_password = profileCurrentPassword.value
+      payload.new_password = profileNewPassword.value
+    }
+    if (Object.keys(payload).length === 0) {
+      profileDialogOpen.value = false
+      return
+    }
+    await updateProfile(payload)
+    profileCurrentPassword.value = ''
+    profileNewPassword.value = ''
+    profileDialogOpen.value = false
+  } finally {
+    profileBusy.value = false
+  }
 }
 
 const onWindowPointerDown = (event: Event) => {
@@ -385,6 +579,7 @@ const runImport = async () => {
   justify-content: center;
   font-size: 0.72rem;
   font-weight: 700;
+  object-fit: cover;
 }
 
 .shell-user {
@@ -467,6 +662,10 @@ const runImport = async () => {
   gap: 16px;
 }
 
+.modal-card--wide {
+  width: min(760px, 100%);
+}
+
 .modal-card h3 {
   margin: 0;
 }
@@ -501,5 +700,96 @@ const runImport = async () => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.profile-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.profile-avatar-section {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-avatar-large-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-avatar-large {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-avatar-large--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cds-support-info);
+  color: #fff;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.profile-avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-icon-grid {
+  max-height: 150px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--cds-border-subtle-01);
+}
+
+.profile-icon-choice {
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer);
+  border-radius: 6px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.profile-icon-choice--selected {
+  border-color: var(--cds-link-primary);
+}
+
+.profile-icon-choice-image {
+  width: 30px;
+  height: 30px;
+  object-fit: cover;
+}
+
+.profile-stats p {
+  margin: 0 0 8px;
+}
+
+.password-section {
+  border-top: 1px solid var(--cds-border-subtle-01);
+  padding-top: 12px;
+}
+
+.password-section h4 {
+  margin: 0 0 10px;
+}
+
+@media (max-width: 760px) {
+  .profile-meta-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

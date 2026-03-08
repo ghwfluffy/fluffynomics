@@ -16,6 +16,7 @@
 ## Auth + Session Model
 
 - Registration/login/logout/me are in `python/mp/api/auth.py`.
+- Profile updates are in `python/mp/api/auth.py` via `PUT /auth/profile`.
 - Session model is encrypted+signed token (Fernet) containing:
   - `user_id`
   - `expires_at`
@@ -25,6 +26,14 @@
 - Login returns both:
   - cookie (set-cookie)
   - `session_token` in JSON for API clients
+- User profile metadata exposed on auth user payload:
+  - `avatar_icon_id`
+  - `last_login_at`
+  - `password_changed_at`
+- Login updates `last_login_at`.
+- Profile endpoint supports:
+  - avatar selection/clearing (`avatar_icon_id`, using icon library/default ownership rules)
+  - password change (`current_password`, `new_password`)
 - Session signing key:
   - from `SESSION_KEY` env var (preferred)
   - generated at startup if missing
@@ -202,6 +211,7 @@ Defined in `python/mp/api/data_portability.py`.
 
 - `POST /data/export`
   - builds a versioned JSON package of current user data:
+    - user profile metadata (avatar + profile timestamps; excludes credentials)
     - icons referenced by user records
     - stocks
     - accounts (+ stock/crypto/cash sub-records)
@@ -232,6 +242,7 @@ Defined in `python/mp/api/data_portability.py`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
+- Current payload schema version: `2` (adds `user_profile` and explicit `contract_postings` compatibility default).
 - Schema-change rule:
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and

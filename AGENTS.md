@@ -19,6 +19,12 @@ This file is the entry point for future dev agents working in this repo.
 - For media-like assets (icons/logos), prefer hash-deduplicated storage with reusable references rather than duplicating blobs per account.
 - For default organization icons, prefer brand-appropriate color versions (avoid defaulting to black variants unless color is genuinely unavailable or inappropriate).
 
+## Validation Rule (Required Before Done)
+
+- If Python files changed, run `cd python && ./lint.sh`.
+- If frontend files changed, run `cd web && ./build.sh`.
+- Do not consider the task complete until relevant validation command(s) pass.
+
 ## Documentation Rule (Important)
 
 - When you add or change behavior that future agents will need to follow consistently, document it in:

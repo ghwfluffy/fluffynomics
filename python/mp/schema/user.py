@@ -1,8 +1,9 @@
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import DateTime, Text, text
+from sqlalchemy import DateTime, ForeignKey, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -19,6 +20,15 @@ class User(Base):
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     example_data: Mapped[bool] = mapped_column(default=False, nullable=False)
+    avatar_icon_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
+    )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -31,6 +41,9 @@ class UserSchema(BaseModel):
     id: UUID
     username: str
     example_data: bool
+    avatar_icon_id: Optional[UUID] = None
+    last_login_at: Optional[datetime] = None
+    password_changed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,3 +65,9 @@ class LoginSchema(BaseModel):
 class LoginResponseSchema(BaseModel):
     user: UserSchema
     session_token: str
+
+
+class ProfileUpdateSchema(BaseModel):
+    avatar_icon_id: Optional[UUID] = None
+    current_password: str | None = None
+    new_password: str | None = None

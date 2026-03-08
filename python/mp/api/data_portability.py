@@ -32,7 +32,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 1
+PAYLOAD_SCHEMA_VERSION = 2
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -117,7 +117,9 @@ def _parse_uuid(value: Any, field: str) -> UUID:
     try:
         return UUID(value)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid UUID for {field}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Invalid UUID for {field}"
+        ) from exc
 
 
 def _parse_optional_uuid(value: Any, field: str) -> UUID | None:
@@ -134,7 +136,9 @@ def _parse_int(value: Any, field: str, default: int = 0) -> int:
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be an integer") from exc
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be an integer"
+        ) from exc
 
 
 def _parse_float(value: Any, field: str, default: float = 0.0) -> float:
@@ -143,7 +147,9 @@ def _parse_float(value: Any, field: str, default: float = 0.0) -> float:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be a number") from exc
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be a number"
+        ) from exc
 
 
 def _parse_decimal(value: Any, field: str) -> Decimal:
@@ -151,7 +157,9 @@ def _parse_decimal(value: Any, field: str) -> Decimal:
         try:
             return Decimal(str(value))
         except InvalidOperation as exc:
-            raise HTTPException(status_code=400, detail=f"{field} must be decimal-like") from exc
+            raise HTTPException(
+                status_code=400, detail=f"{field} must be decimal-like"
+            ) from exc
     raise HTTPException(status_code=400, detail=f"{field} must be decimal-like")
 
 
@@ -159,11 +167,15 @@ def _parse_optional_date(value: Any, field: str) -> date | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise HTTPException(status_code=400, detail=f"{field} must be an ISO date string")
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be an ISO date string"
+        )
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"{field} must be an ISO date string") from exc
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be an ISO date string"
+        ) from exc
 
 
 def _parse_optional_datetime(value: Any, field: str) -> datetime | None:
@@ -197,6 +209,9 @@ def _required_list(raw: Any, field: str) -> list[Any]:
 
 
 def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
     stocks = (
         db.query(Stock)
         .filter(Stock.user_id == user_id)
@@ -212,13 +227,17 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
     contracts = (
         db.query(Contract)
         .filter(Contract.user_id == user_id)
-        .order_by(Contract.category.asc(), Contract.rank.desc(), Contract.created_at.asc())
+        .order_by(
+            Contract.category.asc(), Contract.rank.desc(), Contract.created_at.asc()
+        )
         .all()
     )
     contract_postings = (
         db.query(ContractPosting)
         .filter(ContractPosting.user_id == user_id)
-        .order_by(ContractPosting.effective_date.asc(), ContractPosting.created_at.asc())
+        .order_by(
+            ContractPosting.effective_date.asc(), ContractPosting.created_at.asc()
+        )
         .all()
     )
     expenses = (
@@ -264,21 +283,21 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
     )
 
     stock_positions_by_account: dict[UUID, list[dict[str, Any]]] = {}
-    for position in stock_positions:
-        stock_positions_by_account.setdefault(position.account_id, []).append(
+    for stock_position in stock_positions:
+        stock_positions_by_account.setdefault(stock_position.account_id, []).append(
             {
-                "stock_id": str(position.stock_id),
-                "quantity": _serialize_decimal(position.quantity),
+                "stock_id": str(stock_position.stock_id),
+                "quantity": _serialize_decimal(stock_position.quantity),
             }
         )
 
     crypto_positions_by_account: dict[UUID, list[dict[str, Any]]] = {}
-    for position in crypto_positions:
-        crypto_positions_by_account.setdefault(position.account_id, []).append(
+    for crypto_position in crypto_positions:
+        crypto_positions_by_account.setdefault(crypto_position.account_id, []).append(
             {
-                "ticker": position.ticker,
-                "quantity": _serialize_decimal(position.quantity),
-                "exchange_rate_cents": int(position.exchange_rate_cents),
+                "ticker": crypto_position.ticker,
+                "quantity": _serialize_decimal(crypto_position.quantity),
+                "exchange_rate_cents": int(crypto_position.exchange_rate_cents),
             }
         )
 
@@ -292,9 +311,17 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
         )
 
     referenced_icon_ids: set[UUID] = set()
-    for row in [*accounts, *contracts, *expenses]:
-        if row.icon_type == "Icon" and row.icon_id is not None:
-            referenced_icon_ids.add(row.icon_id)
+    if user.avatar_icon_id is not None:
+        referenced_icon_ids.add(user.avatar_icon_id)
+    for account in accounts:
+        if account.icon_type == "Icon" and account.icon_id is not None:
+            referenced_icon_ids.add(account.icon_id)
+    for contract in contracts:
+        if contract.icon_type == "Icon" and contract.icon_id is not None:
+            referenced_icon_ids.add(contract.icon_id)
+    for expense in expenses:
+        if expense.icon_type == "Icon" and expense.icon_id is not None:
+            referenced_icon_ids.add(expense.icon_id)
     icons = (
         db.query(IconAsset).filter(IconAsset.id.in_(list(referenced_icon_ids))).all()
         if referenced_icon_ids
@@ -304,6 +331,15 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
     return {
         "schema_version": PAYLOAD_SCHEMA_VERSION,
         "exported_at": datetime.now(tz=timezone.utc).isoformat(),
+        "user_profile": {
+            "avatar_icon_id": str(user.avatar_icon_id)
+            if user.avatar_icon_id is not None
+            else None,
+            "last_login_at": _serialize_datetime(user.last_login_at),
+            "password_changed_at": _serialize_datetime(user.password_changed_at),
+            "created_at": _serialize_datetime(user.created_at),
+            "updated_at": _serialize_datetime(user.updated_at),
+        },
         "icons": [
             {
                 "id": str(icon.id),
@@ -348,7 +384,9 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "usd_balance_cents": account.usd_balance_cents,
                 "retirement_account_type": account.retirement_account_type,
                 "payment_amount_cents": account.payment_amount_cents,
-                "icon_id": str(account.icon_id) if account.icon_id is not None else None,
+                "icon_id": str(account.icon_id)
+                if account.icon_id is not None
+                else None,
                 "icon_type": account.icon_type,
                 "rank": float(account.rank),
                 "last_update": _serialize_datetime(account.last_update),
@@ -367,7 +405,9 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "automatic": bool(contract.automatic),
                 "amount_cents": int(contract.amount_cents),
                 "organization": contract.organization,
-                "icon_id": str(contract.icon_id) if contract.icon_id is not None else None,
+                "icon_id": str(contract.icon_id)
+                if contract.icon_id is not None
+                else None,
                 "icon_type": contract.icon_type,
                 "rank": float(contract.rank),
                 "linked_account_id": (
@@ -410,7 +450,9 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "id": str(expense.id),
                 "name": expense.name,
                 "category": expense.category,
-                "icon_id": str(expense.icon_id) if expense.icon_id is not None else None,
+                "icon_id": str(expense.icon_id)
+                if expense.icon_id is not None
+                else None,
                 "icon_type": expense.icon_type,
                 "estimated_amount_cents": int(expense.estimated_amount_cents or 0),
                 "linked_account_id": (
@@ -457,8 +499,25 @@ def _upgrade_payload_v0_to_v1(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v1_to_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 2
+    if "user_profile" not in upgraded:
+        upgraded["user_profile"] = {
+            "avatar_icon_id": None,
+            "last_login_at": None,
+            "password_changed_at": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    if "contract_postings" not in upgraded:
+        upgraded["contract_postings"] = []
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
+    1: _upgrade_payload_v1_to_v2,
 }
 
 
@@ -489,7 +548,9 @@ def _migrate_payload_to_latest(raw_payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _envelope_for_export(payload: dict[str, Any], password: str | None) -> dict[str, Any]:
+def _envelope_for_export(
+    payload: dict[str, Any], password: str | None
+) -> dict[str, Any]:
     envelope: dict[str, Any] = {
         "format": PACKAGE_FORMAT,
         "package_version": PACKAGE_VERSION,
@@ -547,41 +608,59 @@ def _extract_payload_from_envelope(
         raise HTTPException(status_code=400, detail="kdf.iterations must be > 0")
     salt_b64 = kdf.get("salt_b64")
     if not isinstance(salt_b64, str):
-        raise HTTPException(status_code=400, detail="kdf.salt_b64 must be a base64 string")
+        raise HTTPException(
+            status_code=400, detail="kdf.salt_b64 must be a base64 string"
+        )
     try:
         salt = base64.b64decode(salt_b64, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise HTTPException(status_code=400, detail="kdf.salt_b64 is invalid base64") from exc
+        raise HTTPException(
+            status_code=400, detail="kdf.salt_b64 is invalid base64"
+        ) from exc
     if len(salt) < KDF_SALT_BYTES:
         raise HTTPException(status_code=400, detail="kdf.salt_b64 is too short")
 
     payload_b64 = envelope.get("payload_b64")
     if not isinstance(payload_b64, str):
-        raise HTTPException(status_code=400, detail="payload_b64 must be a base64 string")
+        raise HTTPException(
+            status_code=400, detail="payload_b64 must be a base64 string"
+        )
     try:
         encrypted_payload = base64.b64decode(payload_b64, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise HTTPException(status_code=400, detail="payload_b64 is invalid base64") from exc
+        raise HTTPException(
+            status_code=400, detail="payload_b64 is invalid base64"
+        ) from exc
     key = _derive_fernet_key(password, salt, iterations)
     try:
         raw = Fernet(key).decrypt(encrypted_payload)
     except InvalidToken as exc:
-        raise HTTPException(status_code=400, detail="Invalid password or package payload") from exc
+        raise HTTPException(
+            status_code=400, detail="Invalid password or package payload"
+        ) from exc
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(status_code=400, detail="Decrypted payload is invalid JSON") from exc
+        raise HTTPException(
+            status_code=400, detail="Decrypted payload is invalid JSON"
+        ) from exc
     return _required_dict(payload, "payload")
 
 
 def _replace_user_data(
     db: Session, user_id: UUID, payload: dict[str, Any]
 ) -> ImportResponseSchema:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user_profile = _required_dict(payload.get("user_profile"), "user_profile")
     icons = _required_list(payload.get("icons"), "icons")
     stocks = _required_list(payload.get("stocks"), "stocks")
     accounts = _required_list(payload.get("accounts"), "accounts")
     contracts = _required_list(payload.get("contracts"), "contracts")
-    contract_postings = _required_list(payload.get("contract_postings", []), "contract_postings")
+    contract_postings = _required_list(
+        payload.get("contract_postings", []), "contract_postings"
+    )
     expenses = _required_list(payload.get("expenses"), "expenses")
     history_points = _required_list(
         payload.get("account_value_history"), "account_value_history"
@@ -590,15 +669,21 @@ def _replace_user_data(
         payload.get("net_worth_daily_snapshot"), "net_worth_daily_snapshot"
     )
 
-    db.query(Expense).filter(Expense.user_id == user_id).delete(synchronize_session=False)
-    db.query(Contract).filter(Contract.user_id == user_id).delete(synchronize_session=False)
+    db.query(Expense).filter(Expense.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(Contract).filter(Contract.user_id == user_id).delete(
+        synchronize_session=False
+    )
     db.query(AccountValueHistory).filter(AccountValueHistory.user_id == user_id).delete(
         synchronize_session=False
     )
     db.query(NetWorthDailySnapshot).filter(
         NetWorthDailySnapshot.user_id == user_id
     ).delete(synchronize_session=False)
-    db.query(Account).filter(Account.user_id == user_id).delete(synchronize_session=False)
+    db.query(Account).filter(Account.user_id == user_id).delete(
+        synchronize_session=False
+    )
     db.query(Stock).filter(Stock.user_id == user_id).delete(synchronize_session=False)
     db.flush()
 
@@ -610,13 +695,19 @@ def _replace_user_data(
         hash_value = item.get("hash")
         png_data_b64 = item.get("png_data_b64")
         if not isinstance(hash_value, str) or len(hash_value) != 64:
-            raise HTTPException(status_code=400, detail="icons[].hash must be sha256 hex")
+            raise HTTPException(
+                status_code=400, detail="icons[].hash must be sha256 hex"
+            )
         if not isinstance(png_data_b64, str):
-            raise HTTPException(status_code=400, detail="icons[].png_data_b64 must be string")
+            raise HTTPException(
+                status_code=400, detail="icons[].png_data_b64 must be string"
+            )
         try:
             png_data = base64.b64decode(png_data_b64, validate=True)
         except (ValueError, binascii.Error) as exc:
-            raise HTTPException(status_code=400, detail="icons[].png_data_b64 is invalid") from exc
+            raise HTTPException(
+                status_code=400, detail="icons[].png_data_b64 is invalid"
+            ) from exc
         existing = db.query(IconAsset).filter(IconAsset.hash == hash_value).first()
         if existing is None:
             existing = IconAsset(
@@ -629,6 +720,29 @@ def _replace_user_data(
         icon_id_map[old_id] = existing.id
         imported_icons += 1
 
+    raw_avatar_icon_id = _parse_optional_uuid(
+        user_profile.get("avatar_icon_id"), "user_profile.avatar_icon_id"
+    )
+    user.avatar_icon_id = (
+        icon_id_map.get(raw_avatar_icon_id) if raw_avatar_icon_id is not None else None
+    )
+    user.last_login_at = _parse_optional_datetime(
+        user_profile.get("last_login_at"), "user_profile.last_login_at"
+    )
+    user.password_changed_at = _parse_optional_datetime(
+        user_profile.get("password_changed_at"), "user_profile.password_changed_at"
+    )
+    user.created_at = (
+        _parse_optional_datetime(
+            user_profile.get("created_at"), "user_profile.created_at"
+        )
+        or user.created_at
+    )
+    user.updated_at = _parse_optional_datetime(
+        user_profile.get("updated_at"), "user_profile.updated_at"
+    ) or datetime.now(tz=timezone.utc)
+    db.add(user)
+
     stock_id_map: dict[UUID, UUID] = {}
     imported_stocks = 0
     for raw in stocks:
@@ -639,11 +753,19 @@ def _replace_user_data(
             user_id=user_id,
             name=str(item.get("name") or "").strip(),
             ticker=str(item.get("ticker") or "").strip(),
-            exchange=str(item.get("exchange")).strip() if item.get("exchange") is not None else None,
-            last_price_cents=_parse_int(item.get("last_price_cents"), "stocks[].last_price_cents"),
-            created_at=_parse_optional_datetime(item.get("created_at"), "stocks[].created_at")
+            exchange=str(item.get("exchange")).strip()
+            if item.get("exchange") is not None
+            else None,
+            last_price_cents=_parse_int(
+                item.get("last_price_cents"), "stocks[].last_price_cents"
+            ),
+            created_at=_parse_optional_datetime(
+                item.get("created_at"), "stocks[].created_at"
+            )
             or datetime.now(tz=timezone.utc),
-            updated_at=_parse_optional_datetime(item.get("updated_at"), "stocks[].updated_at")
+            updated_at=_parse_optional_datetime(
+                item.get("updated_at"), "stocks[].updated_at"
+            )
             or datetime.now(tz=timezone.utc),
         )
         if not stock.name:
@@ -662,7 +784,9 @@ def _replace_user_data(
         old_id = _parse_uuid(item.get("id"), "accounts[].id")
         icon_type = _coerce_icon_type(item.get("icon_type"))
         raw_icon_id = _parse_optional_uuid(item.get("icon_id"), "accounts[].icon_id")
-        resolved_icon_id = icon_id_map.get(raw_icon_id) if raw_icon_id is not None else None
+        resolved_icon_id = (
+            icon_id_map.get(raw_icon_id) if raw_icon_id is not None else None
+        )
         account = Account(
             id=uuid4(),
             user_id=user_id,
@@ -673,8 +797,12 @@ def _replace_user_data(
             if item.get("organization") is not None
             else None,
             url=str(item.get("url")).strip() if item.get("url") is not None else None,
-            notes=str(item.get("notes")).strip() if item.get("notes") is not None else None,
-            balance_cents=_parse_int(item.get("balance_cents"), "accounts[].balance_cents", default=0)
+            notes=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+            balance_cents=_parse_int(
+                item.get("balance_cents"), "accounts[].balance_cents", default=0
+            )
             if item.get("balance_cents") is not None
             else None,
             fee_amount_cents=_parse_int(
@@ -726,12 +854,18 @@ def _replace_user_data(
             icon_id=resolved_icon_id if icon_type == "Icon" else None,
             icon_type=icon_type,
             rank=_parse_float(item.get("rank"), "accounts[].rank", default=0.0),
-            last_update=_parse_optional_datetime(item.get("last_update"), "accounts[].last_update"),
-            created_at=_parse_optional_datetime(item.get("created_at"), "accounts[].created_at")
+            last_update=_parse_optional_datetime(
+                item.get("last_update"), "accounts[].last_update"
+            ),
+            created_at=_parse_optional_datetime(
+                item.get("created_at"), "accounts[].created_at"
+            )
             or datetime.now(tz=timezone.utc),
         )
         if not account.account_number:
-            raise HTTPException(status_code=400, detail="accounts[].account_number is required")
+            raise HTTPException(
+                status_code=400, detail="accounts[].account_number is required"
+            )
         if not account.name:
             raise HTTPException(status_code=400, detail="accounts[].name is required")
         if not account.type:
@@ -745,9 +879,13 @@ def _replace_user_data(
         item = _required_dict(raw, "accounts[]")
         old_account_id = _parse_uuid(item.get("id"), "accounts[].id")
         new_account_id = account_id_map[old_account_id]
-        for raw_pos in _required_list(item.get("stock_positions", []), "accounts[].stock_positions"):
+        for raw_pos in _required_list(
+            item.get("stock_positions", []), "accounts[].stock_positions"
+        ):
             pos = _required_dict(raw_pos, "accounts[].stock_positions[]")
-            old_stock_id = _parse_uuid(pos.get("stock_id"), "accounts[].stock_positions[].stock_id")
+            old_stock_id = _parse_uuid(
+                pos.get("stock_id"), "accounts[].stock_positions[].stock_id"
+            )
             new_stock_id = stock_id_map.get(old_stock_id)
             if new_stock_id is None:
                 raise HTTPException(
@@ -786,7 +924,9 @@ def _replace_user_data(
                     ),
                 )
             )
-        for raw_bill in _required_list(item.get("cash_bills", []), "accounts[].cash_bills"):
+        for raw_bill in _required_list(
+            item.get("cash_bills", []), "accounts[].cash_bills"
+        ):
             bill = _required_dict(raw_bill, "accounts[].cash_bills[]")
             db.add(
                 AccountCashDenomination(
@@ -807,8 +947,12 @@ def _replace_user_data(
     for raw in contracts:
         item = _required_dict(raw, "contracts[]")
         old_contract_id = _parse_uuid(item.get("id"), "contracts[].id")
-        linked_old = _parse_optional_uuid(item.get("linked_account_id"), "contracts[].linked_account_id")
-        source_old = _parse_optional_uuid(item.get("source_account_id"), "contracts[].source_account_id")
+        linked_old = _parse_optional_uuid(
+            item.get("linked_account_id"), "contracts[].linked_account_id"
+        )
+        source_old = _parse_optional_uuid(
+            item.get("source_account_id"), "contracts[].source_account_id"
+        )
         raw_icon_id = _parse_optional_uuid(item.get("icon_id"), "contracts[].icon_id")
         icon_type = _coerce_icon_type(item.get("icon_type"))
         contract = Contract(
@@ -817,15 +961,23 @@ def _replace_user_data(
             name=str(item.get("name") or "").strip(),
             type=str(item.get("type") or "").strip(),
             automatic=bool(item.get("automatic", True)),
-            amount_cents=_parse_int(item.get("amount_cents"), "contracts[].amount_cents"),
+            amount_cents=_parse_int(
+                item.get("amount_cents"), "contracts[].amount_cents"
+            ),
             organization=str(item.get("organization")).strip()
             if item.get("organization") is not None
             else None,
-            icon_id=icon_id_map.get(raw_icon_id) if icon_type == "Icon" and raw_icon_id is not None else None,
+            icon_id=icon_id_map.get(raw_icon_id)
+            if icon_type == "Icon" and raw_icon_id is not None
+            else None,
             icon_type=icon_type,
             rank=_parse_float(item.get("rank"), "contracts[].rank", default=0.0),
-            linked_account_id=account_id_map.get(linked_old) if linked_old is not None else None,
-            source_account_id=account_id_map.get(source_old) if source_old is not None else None,
+            linked_account_id=account_id_map.get(linked_old)
+            if linked_old is not None
+            else None,
+            source_account_id=account_id_map.get(source_old)
+            if source_old is not None
+            else None,
             last_payment_date=_parse_optional_date(
                 item.get("last_payment_date"), "contracts[].last_payment_date"
             ),
@@ -839,7 +991,9 @@ def _replace_user_data(
                 item.get("expiration_date"), "contracts[].expiration_date"
             )
             or DEFAULT_CONTRACT_EXPIRATION,
-            notes=str(item.get("notes")).strip() if item.get("notes") is not None else None,
+            notes=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
             category=str(item.get("category")).strip()
             if item.get("category") is not None
             else None,
@@ -850,9 +1004,13 @@ def _replace_user_data(
             billing_day=_parse_int(item.get("billing_day"), "contracts[].billing_day")
             if item.get("billing_day") is not None
             else None,
-            created_at=_parse_optional_datetime(item.get("created_at"), "contracts[].created_at")
+            created_at=_parse_optional_datetime(
+                item.get("created_at"), "contracts[].created_at"
+            )
             or datetime.now(tz=timezone.utc),
-            updated_at=_parse_optional_datetime(item.get("updated_at"), "contracts[].updated_at")
+            updated_at=_parse_optional_datetime(
+                item.get("updated_at"), "contracts[].updated_at"
+            )
             or datetime.now(tz=timezone.utc),
         )
         if not contract.name:
@@ -906,7 +1064,9 @@ def _replace_user_data(
     imported_expenses = 0
     for raw in expenses:
         item = _required_dict(raw, "expenses[]")
-        linked_old = _parse_optional_uuid(item.get("linked_account_id"), "expenses[].linked_account_id")
+        linked_old = _parse_optional_uuid(
+            item.get("linked_account_id"), "expenses[].linked_account_id"
+        )
         raw_icon_id = _parse_optional_uuid(item.get("icon_id"), "expenses[].icon_id")
         icon_type = _coerce_icon_type(item.get("icon_type"))
         expense = Expense(
@@ -914,12 +1074,16 @@ def _replace_user_data(
             user_id=user_id,
             name=str(item.get("name") or "").strip(),
             category=str(item.get("category") or "").strip(),
-            icon_id=icon_id_map.get(raw_icon_id) if icon_type == "Icon" and raw_icon_id is not None else None,
+            icon_id=icon_id_map.get(raw_icon_id)
+            if icon_type == "Icon" and raw_icon_id is not None
+            else None,
             icon_type=icon_type,
             estimated_amount_cents=_parse_int(
                 item.get("estimated_amount_cents"), "expenses[].estimated_amount_cents"
             ),
-            linked_account_id=account_id_map.get(linked_old) if linked_old is not None else None,
+            linked_account_id=account_id_map.get(linked_old)
+            if linked_old is not None
+            else None,
             enabled=bool(item.get("enabled", True)),
             general_frequency=str(item.get("general_frequency")).strip()
             if item.get("general_frequency") is not None
@@ -931,22 +1095,30 @@ def _replace_user_data(
                 item.get("next_expensed_date"), "expenses[].next_expensed_date"
             ),
             next_date_is_static=bool(item.get("next_date_is_static", False)),
-            created_at=_parse_optional_datetime(item.get("created_at"), "expenses[].created_at")
+            created_at=_parse_optional_datetime(
+                item.get("created_at"), "expenses[].created_at"
+            )
             or datetime.now(tz=timezone.utc),
-            updated_at=_parse_optional_datetime(item.get("updated_at"), "expenses[].updated_at")
+            updated_at=_parse_optional_datetime(
+                item.get("updated_at"), "expenses[].updated_at"
+            )
             or datetime.now(tz=timezone.utc),
         )
         if not expense.name:
             raise HTTPException(status_code=400, detail="expenses[].name is required")
         if not expense.category:
-            raise HTTPException(status_code=400, detail="expenses[].category is required")
+            raise HTTPException(
+                status_code=400, detail="expenses[].category is required"
+            )
         db.add(expense)
         imported_expenses += 1
 
     imported_history_points = 0
     for raw in history_points:
         item = _required_dict(raw, "account_value_history[]")
-        old_account_id = _parse_uuid(item.get("account_id"), "account_value_history[].account_id")
+        old_account_id = _parse_uuid(
+            item.get("account_id"), "account_value_history[].account_id"
+        )
         mapped_account_id = account_id_map.get(old_account_id)
         if mapped_account_id is None:
             raise HTTPException(

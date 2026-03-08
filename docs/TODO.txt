@@ -1,5 +1,5 @@
 Security
-[ ] pw change
+[x] pw change
 [ ] verify authorization checks
 [ ] Encrypt account info at rest with PBE
 [ ] Automated database backups

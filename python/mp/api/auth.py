@@ -13,9 +13,13 @@ from sqlalchemy.orm import Session
 
 from mp.db import get_db
 from mp.sample_data import ensure_example_data_for_user
+from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
+from mp.schema.contract import Contract
+from mp.schema.expense import Expense
 from mp.schema.user import (
     LoginResponseSchema,
     LoginSchema,
+    ProfileUpdateSchema,
     User,
     UserCreateSchema,
     UserSchema,
@@ -92,6 +96,51 @@ def _create_session_cookie(user_id: UUID, session_seconds: int) -> str:
     return _get_fernet().encrypt(payload.encode("utf-8")).decode("utf-8")
 
 
+def _is_icon_selectable_for_user(db: Session, user_id: UUID, icon_id: UUID) -> bool:
+    is_default_org_icon = (
+        db.query(Organization.id)
+        .filter(Organization.icon_id == icon_id, Organization.is_default.is_(True))
+        .first()
+        is not None
+    )
+    if is_default_org_icon:
+        return True
+    is_default_generic_icon = (
+        db.query(DefaultIcon.id).filter(DefaultIcon.icon_id == icon_id).first()
+        is not None
+    )
+    if is_default_generic_icon:
+        return True
+    owned = (
+        db.query(IconAsset)
+        .filter(IconAsset.id == icon_id, IconAsset.created_by_user_id == user_id)
+        .first()
+    )
+    if owned is not None:
+        return True
+    is_referenced_by_user = (
+        (
+            db.query(Account.id)
+            .filter(Account.user_id == user_id, Account.icon_id == icon_id)
+            .first()
+            is not None
+        )
+        or (
+            db.query(Contract.id)
+            .filter(Contract.user_id == user_id, Contract.icon_id == icon_id)
+            .first()
+            is not None
+        )
+        or (
+            db.query(Expense.id)
+            .filter(Expense.user_id == user_id, Expense.icon_id == icon_id)
+            .first()
+            is not None
+        )
+    )
+    return is_referenced_by_user
+
+
 def _parse_session_token(raw_token: str | None) -> UUID:
     if not raw_token:
         raise HTTPException(
@@ -136,10 +185,14 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
     if existing is not None:
         raise HTTPException(status_code=400, detail="Username already exists")
 
+    now = datetime.now(tz=timezone.utc)
     user = User(
         username=payload.username,
         password_hash=_hash_password(payload.password),
         example_data=payload.add_example_data,
+        password_changed_at=now,
+        created_at=now,
+        updated_at=now,
     )
     db.add(user)
     db.flush()
@@ -157,6 +210,11 @@ def login(
     user = db.query(User).filter_by(username=payload.username).first()
     if user is None or not _verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    user.last_login_at = datetime.now(tz=timezone.utc)
+    user.updated_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(user)
 
     session_seconds = payload.session_seconds or DEFAULT_SESSION_SECONDS
     session_seconds = max(1, min(session_seconds, MAX_SESSION_SECONDS))
@@ -183,4 +241,52 @@ def logout(response: Response) -> None:
 
 @router.get("/me", response_model=UserSchema)
 def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.put("/profile", response_model=UserSchema)
+def update_profile(
+    payload: ProfileUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    now = datetime.now(tz=timezone.utc)
+    changed = False
+    data = payload.model_dump(exclude_unset=True)
+
+    if "avatar_icon_id" in data:
+        avatar_icon_id = payload.avatar_icon_id
+        if avatar_icon_id is not None and not _is_icon_selectable_for_user(
+            db, current_user.id, avatar_icon_id
+        ):
+            raise HTTPException(
+                status_code=400, detail="avatar_icon_id is not selectable"
+            )
+        current_user.avatar_icon_id = avatar_icon_id
+        changed = True
+
+    if "new_password" in data:
+        if payload.new_password is None or not payload.new_password.strip():
+            raise HTTPException(status_code=400, detail="new_password cannot be empty")
+        if not payload.current_password:
+            raise HTTPException(
+                status_code=400,
+                detail="current_password is required when changing password",
+            )
+        if not _verify_password(payload.current_password, current_user.password_hash):
+            raise HTTPException(status_code=400, detail="current_password is invalid")
+        current_user.password_hash = _hash_password(payload.new_password)
+        current_user.password_changed_at = now
+        changed = True
+    elif "current_password" in data:
+        raise HTTPException(
+            status_code=400,
+            detail="new_password is required when current_password is provided",
+        )
+
+    if changed:
+        current_user.updated_at = now
+        db.add(current_user)
+        db.commit()
+        db.refresh(current_user)
     return current_user

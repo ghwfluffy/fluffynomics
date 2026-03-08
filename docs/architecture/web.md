@@ -80,6 +80,11 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
 ## Data Portability UX
 
 `AppShell.vue` header uses a profile trigger (avatar + username) with a dropdown menu that provides:
+- `Profile`
+  - opens profile-management modal
+  - supports avatar selection (icon library / upload / clear)
+  - shows account-created time, last-login time, last-password-change time
+  - supports password change flow (`current password` + `new password`)
 - `Export Data`
   - opens modal with optional password
   - downloads a JSON package from `POST /data/export`

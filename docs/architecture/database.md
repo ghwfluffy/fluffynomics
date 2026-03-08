@@ -141,6 +141,12 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
   - `expenses.linked_account_id -> accounts.id` uses `ON DELETE SET NULL`.
 - Tightly-coupled child data may still cascade (for example account positions/history tied directly to account lifecycle).
 
+### User profile fields
+
+- `users.avatar_icon_id` (nullable FK -> `icon_assets.id`, `ON DELETE SET NULL`)
+- `users.last_login_at` (nullable timestamp)
+- `users.password_changed_at` (nullable timestamp)
+
 ## Data Portability Replace Semantics
 
 Import/restore (`POST /data/import`) is intentionally modeled as:

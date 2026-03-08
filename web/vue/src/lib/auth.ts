@@ -4,6 +4,10 @@ import { request } from '@/lib/api'
 export interface User {
   id: string
   username: string
+  example_data: boolean
+  avatar_icon_id: string | null
+  last_login_at: string | null
+  password_changed_at: string | null
   created_at: string
   updated_at: string
 }
@@ -55,4 +59,14 @@ export async function logout(): Promise<void> {
   await request.post('/auth/logout')
   currentUser.value = null
   sessionToken.value = null
+}
+
+export async function updateProfile(payload: {
+  avatar_icon_id?: string | null
+  current_password?: string
+  new_password?: string
+}): Promise<User> {
+  const user = await request.put<User>('/auth/profile', payload)
+  currentUser.value = user
+  return user
 }
