@@ -224,6 +224,28 @@ def run_contract_simulation(
                 )
             )
             continue
+        if bool(linked.closed):
+            postings.append(
+                SimulatedPosting(
+                    contract_id=contract.id,
+                    effective_date=as_of_date,
+                    delta_cents=0,
+                    status="skipped",
+                    reason="linked account is closed",
+                )
+            )
+            continue
+        if source is not None and bool(source.closed):
+            postings.append(
+                SimulatedPosting(
+                    contract_id=contract.id,
+                    effective_date=as_of_date,
+                    delta_cents=0,
+                    status="skipped",
+                    reason="source account is closed",
+                )
+            )
+            continue
         due_dates = list(_iter_due_dates(contract, as_of_date))
         for due_date in due_dates:
             delta = _delta_for_contract(contract)

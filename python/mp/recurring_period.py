@@ -9,10 +9,13 @@ RecurringKind = Literal[
     "monthly_day",
     "monthly_last_day",
     "twice_monthly",
+    "every_n_months_day",
     "yearly_month_day",
+    "every_n_years_month_day",
     "daily_weekdays",
     "weekly_weekday",
     "biweekly_weekday",
+    "every_n_weeks_weekday",
 ]
 
 WEEKDAY_LABELS = [
@@ -33,6 +36,9 @@ class RecurringPeriod(BaseModel):
     day_1: int | None = None
     day_2: int | None = None
     month: int | None = None
+    interval_months: int | None = None
+    interval_years: int | None = None
+    interval_weeks: int | None = None
     weekdays: list[int] | None = None
     weekday: int | None = None
     start_date: date | None = None
@@ -55,6 +61,13 @@ class RecurringPeriod(BaseModel):
                 raise ValueError(
                     "twice_monthly requires distinct day_1/day_2 in range 1..31"
                 )
+        elif self.kind == "every_n_months_day":
+            if self.day is None or not 1 <= self.day <= 31:
+                raise ValueError("every_n_months_day requires day in range 1..31")
+            if self.interval_months is None or self.interval_months < 1:
+                raise ValueError("every_n_months_day requires interval_months >= 1")
+            if self.start_date is None:
+                raise ValueError("every_n_months_day requires start_date")
         elif self.kind == "yearly_month_day":
             if (
                 self.month is None
@@ -63,6 +76,20 @@ class RecurringPeriod(BaseModel):
                 or not 1 <= self.day <= 31
             ):
                 raise ValueError("yearly_month_day requires month 1..12 and day 1..31")
+        elif self.kind == "every_n_years_month_day":
+            if (
+                self.month is None
+                or self.day is None
+                or not 1 <= self.month <= 12
+                or not 1 <= self.day <= 31
+            ):
+                raise ValueError(
+                    "every_n_years_month_day requires month 1..12 and day 1..31"
+                )
+            if self.interval_years is None or self.interval_years < 1:
+                raise ValueError("every_n_years_month_day requires interval_years >= 1")
+            if self.start_date is None:
+                raise ValueError("every_n_years_month_day requires start_date")
         elif self.kind == "daily_weekdays":
             if self.weekdays is None or not self.weekdays:
                 raise ValueError("daily_weekdays requires at least one weekday")
@@ -76,6 +103,13 @@ class RecurringPeriod(BaseModel):
                 raise ValueError("biweekly_weekday requires weekday in range 0..6")
             if self.start_date is None:
                 raise ValueError("biweekly_weekday requires start_date")
+        elif self.kind == "every_n_weeks_weekday":
+            if self.weekday is None or not 0 <= self.weekday <= 6:
+                raise ValueError("every_n_weeks_weekday requires weekday in range 0..6")
+            if self.interval_weeks is None or self.interval_weeks < 1:
+                raise ValueError("every_n_weeks_weekday requires interval_weeks >= 1")
+            if self.start_date is None:
+                raise ValueError("every_n_weeks_weekday requires start_date")
         return self
 
     def describe(self) -> str:
@@ -88,9 +122,22 @@ class RecurringPeriod(BaseModel):
             assert self.day_1 is not None and self.day_2 is not None
             low, high = sorted([self.day_1, self.day_2])
             return f"Twice monthly on the {ordinal(low)} and {ordinal(high)}"
+        if self.kind == "every_n_months_day":
+            assert self.day is not None and self.interval_months is not None
+            return f"Every {self.interval_months} months on the {ordinal(self.day)}"
         if self.kind == "yearly_month_day":
             assert self.month is not None and self.day is not None
             return f"Yearly on {calendar.month_name[self.month]} {ordinal(self.day)}"
+        if self.kind == "every_n_years_month_day":
+            assert (
+                self.month is not None
+                and self.day is not None
+                and self.interval_years is not None
+            )
+            return (
+                f"Every {self.interval_years} years on "
+                f"{calendar.month_name[self.month]} {ordinal(self.day)}"
+            )
         if self.kind == "daily_weekdays":
             assert self.weekdays is not None
             symbols = "".join(
@@ -100,6 +147,11 @@ class RecurringPeriod(BaseModel):
         if self.kind == "biweekly_weekday":
             assert self.weekday is not None
             return f"Every 2 weeks on {WEEKDAY_LABELS[self.weekday]}"
+        if self.kind == "every_n_weeks_weekday":
+            assert self.weekday is not None and self.interval_weeks is not None
+            return (
+                f"Every {self.interval_weeks} weeks on {WEEKDAY_LABELS[self.weekday]}"
+            )
         assert self.weekday is not None
         return f"Weekly on {WEEKDAY_LABELS[self.weekday]}"
 
@@ -112,9 +164,32 @@ class RecurringPeriod(BaseModel):
         if self.kind == "twice_monthly":
             assert self.day_1 is not None and self.day_2 is not None
             return _next_twice_monthly(candidate, self.day_1, self.day_2)
+        if self.kind == "every_n_months_day":
+            assert (
+                self.day is not None
+                and self.interval_months is not None
+                and self.start_date is not None
+            )
+            return _next_every_n_months_day(
+                candidate, self.day, self.interval_months, self.start_date
+            )
         if self.kind == "yearly_month_day":
             assert self.month is not None and self.day is not None
             return _next_yearly_month_day(candidate, self.month, self.day)
+        if self.kind == "every_n_years_month_day":
+            assert (
+                self.month is not None
+                and self.day is not None
+                and self.interval_years is not None
+                and self.start_date is not None
+            )
+            return _next_every_n_years_month_day(
+                candidate,
+                self.month,
+                self.day,
+                self.interval_years,
+                self.start_date,
+            )
         if self.kind == "daily_weekdays":
             assert self.weekdays is not None
             allowed = set(self.weekdays)
@@ -125,6 +200,18 @@ class RecurringPeriod(BaseModel):
         if self.kind == "biweekly_weekday":
             assert self.weekday is not None and self.start_date is not None
             return _next_biweekly_weekday(candidate, self.weekday, self.start_date)
+        if self.kind == "every_n_weeks_weekday":
+            assert (
+                self.weekday is not None
+                and self.start_date is not None
+                and self.interval_weeks is not None
+            )
+            return _next_every_n_weeks_weekday(
+                candidate,
+                self.weekday,
+                self.start_date,
+                self.interval_weeks,
+            )
         assert self.weekday is not None
         delta_days = (self.weekday - candidate.weekday()) % 7
         return candidate + timedelta(days=delta_days)
@@ -198,6 +285,53 @@ def _next_yearly_month_day(candidate: date, month: int, day: int) -> date:
     return date(next_year, month, min(day, _month_last_day(next_year, month)))
 
 
+def _next_every_n_months_day(
+    candidate: date, day: int, interval_months: int, start_date: date
+) -> date:
+    anchor = date(
+        start_date.year,
+        start_date.month,
+        min(day, _month_last_day(start_date.year, start_date.month)),
+    )
+    if candidate <= anchor:
+        return anchor
+    candidate_index = candidate.year * 12 + (candidate.month - 1)
+    anchor_index = anchor.year * 12 + (anchor.month - 1)
+    elapsed = candidate_index - anchor_index
+    steps = max(0, (elapsed + interval_months - 1) // interval_months)
+    while True:
+        idx = anchor_index + steps * interval_months
+        year = idx // 12
+        month = (idx % 12) + 1
+        possible = date(year, month, min(day, _month_last_day(year, month)))
+        if possible >= candidate:
+            return possible
+        steps += 1
+
+
+def _next_every_n_years_month_day(
+    candidate: date,
+    month: int,
+    day: int,
+    interval_years: int,
+    start_date: date,
+) -> date:
+    anchor_year = start_date.year
+    candidate_year = candidate.year
+    if candidate_year <= anchor_year:
+        year = anchor_year
+    else:
+        elapsed = candidate_year - anchor_year
+        steps = (elapsed + interval_years - 1) // interval_years
+        year = anchor_year + steps * interval_years
+    for _ in range(6):
+        possible = date(year, month, min(day, _month_last_day(year, month)))
+        if possible >= candidate:
+            return possible
+        year += interval_years
+    return date(year, month, min(day, _month_last_day(year, month)))
+
+
 def _next_biweekly_weekday(candidate: date, weekday: int, start_date: date) -> date:
     base = start_date + timedelta(days=(weekday - start_date.weekday()) % 7)
     if candidate <= base:
@@ -205,3 +339,15 @@ def _next_biweekly_weekday(candidate: date, weekday: int, start_date: date) -> d
     days_since = (candidate - base).days
     periods_since = (days_since + 13) // 14
     return base + timedelta(days=periods_since * 14)
+
+
+def _next_every_n_weeks_weekday(
+    candidate: date, weekday: int, start_date: date, interval_weeks: int
+) -> date:
+    base = start_date + timedelta(days=(weekday - start_date.weekday()) % 7)
+    if candidate <= base:
+        return base
+    interval_days = max(1, interval_weeks) * 7
+    days_since = (candidate - base).days
+    periods_since = (days_since + interval_days - 1) // interval_days
+    return base + timedelta(days=periods_since * interval_days)

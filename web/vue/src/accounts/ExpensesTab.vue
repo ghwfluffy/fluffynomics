@@ -117,6 +117,7 @@
               <button type="button" class="cds--btn cds--btn--ghost clear-next-btn" @click="clearNextExpensedDate">Clear Next Date</button>
             </div>
           </div>
+          <BankField v-model="form.notes" class="notes-field" label="Notes" multiline />
 
           <div class="modal-actions">
             <button class="cds--btn cds--btn--ghost" type="button" @click="closeDialog">Cancel</button>
@@ -213,6 +214,7 @@ interface Expense {
   id: string
   name: string
   category: string
+  notes?: string
   linked_account_id?: string
   icon_id?: string
   icon_type: 'Letters' | 'Gravatar' | 'Icon'
@@ -267,6 +269,7 @@ const iconPickerDraftType = ref<'Letters' | 'Gravatar' | 'Icon'>('Letters')
 const form = ref({
   name: '',
   category: 'Living',
+  notes: '',
   linked_account_id: '',
   icon_id: '',
   icon_type: 'Letters' as 'Letters' | 'Gravatar' | 'Icon',
@@ -423,6 +426,17 @@ const frequencyLabel = (raw?: string) => {
       const day = Number(parsed.day)
       return `Yearly (${monthLabel[month] || month} ${day})`
     }
+    if (kind === 'every_n_months_day') {
+      const interval = Math.max(1, Number(parsed.interval_months || 1))
+      const day = Number(parsed.day || 1)
+      return `Every ${interval} month${interval === 1 ? '' : 's'} (day ${day})`
+    }
+    if (kind === 'every_n_years_month_day') {
+      const interval = Math.max(1, Number(parsed.interval_years || 1))
+      const month = Number(parsed.month || 1)
+      const day = Number(parsed.day || 1)
+      return `Every ${interval} year${interval === 1 ? '' : 's'} (${monthLabel[month] || month} ${day})`
+    }
     if (kind === 'weekly_weekday') {
       const weekday = Number(parsed.weekday)
       return `Weekly (${weekdayLabel[weekday] || 'Day'})`
@@ -430,6 +444,11 @@ const frequencyLabel = (raw?: string) => {
     if (kind === 'biweekly_weekday') {
       const weekday = Number(parsed.weekday)
       return `Every 2 weeks (${weekdayLabel[weekday] || 'Day'})`
+    }
+    if (kind === 'every_n_weeks_weekday') {
+      const interval = Math.max(1, Number(parsed.interval_weeks || 1))
+      const weekday = Number(parsed.weekday)
+      return `Every ${interval} weeks (${weekdayLabel[weekday] || 'Day'})`
     }
     if (kind === 'daily_weekdays') {
       return 'Daily'
@@ -462,6 +481,7 @@ const resetForm = () => {
   form.value = {
     name: '',
     category: 'Living',
+    notes: '',
     linked_account_id: linkedAccounts.value[0]?.id || '',
     icon_id: '',
     icon_type: 'Letters',
@@ -495,6 +515,7 @@ const openEdit = (item: Expense) => {
   form.value = {
     name: item.name,
     category: item.category,
+    notes: item.notes || '',
     linked_account_id: item.linked_account_id || '',
     icon_id: item.icon_id || '',
     icon_type: item.icon_type,
@@ -572,6 +593,7 @@ const saveExpense = async () => {
   const payload = {
     ...form.value,
     linked_account_id: form.value.linked_account_id || null,
+    notes: form.value.notes || null,
     icon_id: form.value.icon_type === 'Icon' ? form.value.icon_id || null : null,
     general_frequency: form.value.general_frequency || null,
     last_expensed_date: form.value.last_expensed_date || null,
@@ -670,11 +692,34 @@ const onWindowClick = (event: MouseEvent) => {
   }
 }
 
+const onWindowKeyDown = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') {
+    return
+  }
+  if (iconPickerDialog.value) {
+    cancelIconPickerModal()
+    return
+  }
+  if (updateDialog.value) {
+    closeUpdateDialog()
+    return
+  }
+  if (deleteId.value) {
+    deleteId.value = null
+    return
+  }
+  if (dialogOpen.value) {
+    closeDialog()
+  }
+}
+
 onMounted(loadExpenses)
 onMounted(loadAccounts)
 onMounted(loadIcons)
 onMounted(() => window.addEventListener('click', onWindowClick))
+onMounted(() => window.addEventListener('keydown', onWindowKeyDown))
 onUnmounted(() => window.removeEventListener('click', onWindowClick))
+onUnmounted(() => window.removeEventListener('keydown', onWindowKeyDown))
 
 defineExpose({
   openFromCalendar,
@@ -818,6 +863,10 @@ defineExpose({
 .icon-picker {
   display: flex;
   flex-direction: column;
+}
+
+.notes-field {
+  grid-column: 1 / -1;
 }
 
 .icon-picker-row {

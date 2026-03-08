@@ -53,6 +53,11 @@ class Account(Base):
     payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     expiration_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    closed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    max_credit_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rewards_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     cvc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     usd_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     retirement_account_type: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -277,6 +282,9 @@ class AccountBaseSchema(BaseModel):
     payment_day: Optional[int] = None
     last_payment_date: Optional[date] = None
     expiration_date: Optional[date] = None
+    closed: bool = False
+    max_credit_cents: Optional[int] = None
+    rewards_balance_cents: Optional[int] = None
     cvc: Optional[str] = None
     usd_balance_cents: Optional[int] = None
     retirement_account_type: Optional[str] = None
@@ -311,6 +319,9 @@ class AccountUpdateSchema(BaseModel):
     payment_day: Optional[int] = None
     last_payment_date: Optional[date] = None
     expiration_date: Optional[date] = None
+    closed: Optional[bool] = None
+    max_credit_cents: Optional[int] = None
+    rewards_balance_cents: Optional[int] = None
     cvc: Optional[str] = None
     usd_balance_cents: Optional[int] = None
     retirement_account_type: Optional[str] = None
@@ -325,6 +336,7 @@ class AccountUpdateSchema(BaseModel):
 class AccountValueUpdateSchema(BaseModel):
     balance_cents: Optional[int] = None
     usd_balance_cents: Optional[int] = None
+    rewards_balance_cents: Optional[int] = None
     last_payment_date: Optional[date] = None
     expiration_date: Optional[date] = None
     stock_positions: Optional[list[PositionStockSchema]] = None

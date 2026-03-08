@@ -5,18 +5,21 @@ Prod deployment
 [ ] Site
 [ ] Lets encrypt w/ ACME
 Nice to have
-[ ] Import legacy format
+[ ] sunday payday logic
+[ ] delete my account
+[ ] admin manage users (update pw, lock account, see last login, delete account)
 [ ] queued payments/transfers
 [ ] Mobile site
 [ ] Visualized net worth
-[ ] note reminders
 [ ] Stock dividens
 [ ] Pull crypto/stock prices automatically
     [ ] tastytrade integration
     [ ] coinbase integration
-[ ] upcoming payment alerts (UI)
-[ ] upcoming payment alerts (SMS)
-[ ] notifications: tasks to review
+[ ] notifications
+    [ ] note reminders
+    [ ] upcoming payment alerts (UI)
+    [ ] upcoming payment alerts (SMS)
+    [ ] tasks to review (item not updated in 60 days)
 [ ] Assets
 [ ] Receivables
 [ ] Credit score

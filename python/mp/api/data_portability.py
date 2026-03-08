@@ -2,7 +2,8 @@ import base64
 import binascii
 import hashlib
 import json
-from datetime import date, datetime, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID, uuid4
@@ -10,8 +11,11 @@ from uuid import UUID, uuid4
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+import yaml
 
+from mp.api.accounts import _compute_user_net_worth_cents
 from mp.api.auth import get_current_user
 from mp.db import get_db
 from mp.schema.account import (
@@ -20,8 +24,10 @@ from mp.schema.account import (
     AccountCryptoPosition,
     AccountStockPosition,
     AccountValueHistory,
+    DefaultIcon,
     IconAsset,
     NetWorthDailySnapshot,
+    Organization,
     Stock,
 )
 from mp.schema.contract import Contract, ContractPosting
@@ -32,7 +38,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 3
+PAYLOAD_SCHEMA_VERSION = 4
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -49,7 +55,7 @@ class ExportRequestSchema(BaseModel):
 
 
 class ImportRequestSchema(BaseModel):
-    package: dict[str, Any]
+    package: Any
     password: str | None = None
     replace_existing: bool = True
 
@@ -206,6 +212,1314 @@ def _required_list(raw: Any, field: str) -> list[Any]:
     if not isinstance(raw, list):
         raise HTTPException(status_code=400, detail=f"{field} must be an array")
     return raw
+
+
+def _is_export_envelope(raw: Any) -> bool:
+    return (
+        isinstance(raw, dict)
+        and raw.get("format") == PACKAGE_FORMAT
+        and "package_version" in raw
+    )
+
+
+def _is_legacy_payload(raw: Any) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    legacy_keys = {"assets", "contracts", "budget", "bonds"}
+    return any(key in raw for key in legacy_keys) and "schema_version" not in raw
+
+
+def _slugify(value: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower())
+    normalized = normalized.strip("-")
+    return normalized or "item"
+
+
+def _parse_optional_iso_date(raw: Any) -> date | None:
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, datetime):
+        return raw.date()
+    if not isinstance(raw, str):
+        return None
+    try:
+        return date.fromisoformat(raw.strip()[:10])
+    except ValueError:
+        return None
+
+
+def _dollars_to_cents(raw: Any) -> int:
+    if raw is None:
+        return 0
+    try:
+        return int(round(float(raw) * 100))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _legacy_account_type(raw: str | None, *, default: str = "checking") -> str:
+    value = (raw or "").strip().lower()
+    mapping = {
+        "checking account": "checking",
+        "savings account": "savings",
+        "cash": "cash",
+        "credit card": "credit_card",
+        "line of credit": "line_of_credit",
+        "loan": "loan",
+        "retirement": "retirement",
+    }
+    if value in mapping:
+        return mapping[value]
+    if "credit" in value and "card" in value:
+        return "credit_card"
+    if "line" in value and "credit" in value:
+        return "line_of_credit"
+    if "loan" in value or "mortgage" in value:
+        return "loan"
+    if "retirement" in value or "ira" in value or "401" in value:
+        return "retirement"
+    if "stock" in value or "broker" in value or "fund" in value:
+        return "stocks_account"
+    if "crypto" in value:
+        if "wallet" in value:
+            return "crypto_wallet"
+        return "crypto_exchange"
+    return default
+
+
+def _normalize_legacy_period(raw: Any) -> str:
+    return re.sub(r"\s+", " ", str(raw or "").strip().lower())
+
+
+def _legacy_value_as_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, sort_keys=True, ensure_ascii=True)
+
+
+def _normalize_retirement_account_type(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", "", value.lower())
+    mapping = {
+        "roth": "roth",
+        "rothira": "roth",
+        "simple": "simple",
+        "simpleira": "simple",
+        "401k": "401k",
+    }
+    return mapping.get(normalized)
+
+
+def _canonical_org_name(raw: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (raw or "").strip().lower())
+
+
+def _matches_organization(name: str | None, org: str | None) -> bool:
+    left = _canonical_org_name(name)
+    right = _canonical_org_name(org)
+    if not left or not right:
+        return False
+    return left in right or right in left
+
+
+def _legacy_org_alias_match(name: str | None, org: str | None) -> bool:
+    canonical_name = _canonical_org_name(name)
+    canonical_org = _canonical_org_name(org)
+    if not canonical_name or not canonical_org:
+        return False
+    if canonical_org == "wellsfargo" and re.search(r"\bwf\b", (name or "").lower()):
+        return True
+    if canonical_org == "citibank" and "citicard" in canonical_name:
+        return True
+    return False
+
+
+def _legacy_org_match_score(name: str | None, org: str | None) -> tuple[int, int, int]:
+    canonical_name = _canonical_org_name(name)
+    canonical_org = _canonical_org_name(org)
+    if not canonical_name or not canonical_org:
+        return (0, 0, 0)
+    alias_boost = 1 if _legacy_org_alias_match(name, org) else 0
+    direct_match = canonical_name in canonical_org or canonical_org in canonical_name
+    if not alias_boost and not direct_match:
+        return (0, 0, 0)
+    return (
+        2 if alias_boost else 1,
+        min(len(canonical_name), len(canonical_org)),
+        len(canonical_org),
+    )
+
+
+def _date_plus_years(base: date, years: int) -> date:
+    try:
+        return base.replace(year=base.year + years)
+    except ValueError:
+        # Handle leap day.
+        return base.replace(month=2, day=28, year=base.year + years)
+
+
+def _legacy_next_payment_is_far_future(raw_next_payment: Any, years: int = 30) -> bool:
+    next_payment = _parse_optional_iso_date(raw_next_payment)
+    if next_payment is None:
+        return False
+    return next_payment > _date_plus_years(date.today(), years)
+
+
+def _legacy_extract_date(raw: dict[str, Any], *keys: str) -> date | None:
+    for key in keys:
+        if key not in raw:
+            continue
+        parsed = _parse_optional_iso_date(raw.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _is_far_future_date(value: date | None, years: int = 30) -> bool:
+    if value is None:
+        return False
+    return value > _date_plus_years(date.today(), years)
+
+
+def _append_note(base: str | None, line: str) -> str:
+    rendered = line.strip()
+    if not rendered:
+        return (base or "").strip()
+    root = (base or "").strip()
+    if not root:
+        return rendered
+    return f"{root}\n{rendered}"
+
+
+def _legacy_notes(
+    raw: dict[str, Any],
+    *,
+    consumed_keys: set[str],
+    seed_note: str | None = None,
+) -> str | None:
+    note = (seed_note or "").strip() or None
+    extras: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in consumed_keys:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, dict)) and not value:
+            continue
+        extras[key] = value
+    if extras:
+        note = _append_note(
+            note,
+            f"Legacy extras: {json.dumps(extras, sort_keys=True, ensure_ascii=True)}",
+        )
+    return note
+
+
+def _legacy_contract_period(
+    raw_period: Any,
+    last_payment_date: date | None,
+    next_payment_date: date | None,
+    unsupported_periods: set[str],
+) -> tuple[str | None, int | None]:
+    period = _normalize_legacy_period(raw_period)
+    reference_date = next_payment_date or last_payment_date
+    payment_day = reference_date.day if reference_date is not None else 1
+    reference = reference_date or date.today()
+    every_n_months_match = re.fullmatch(r"(\d+)\s+months?", period)
+    every_n_weeks_match = re.fullmatch(r"(?:every\s+)?(\d+)\s+weeks?", period)
+    every_n_years_match = re.fullmatch(r"(\d+)\s+years?", period)
+    if period in {"", "month", "1 month", "monthly"}:
+        return json.dumps({"kind": "monthly_day", "day": payment_day}), payment_day
+    if period in {"half month", "half-month", "semi monthly", "semimonthly"}:
+        return json.dumps({"kind": "twice_monthly", "day_1": 15, "day_2": 31}), 15
+    if every_n_months_match is not None:
+        interval_months = int(every_n_months_match.group(1))
+        return (
+            json.dumps(
+                {
+                    "kind": "every_n_months_day",
+                    "interval_months": interval_months,
+                    "day": payment_day,
+                    "start_date": reference.isoformat(),
+                }
+            ),
+            payment_day,
+        )
+    if period in {"2 weeks", "2 week", "biweekly"}:
+        weekday = reference_date.weekday() if reference_date is not None else 0
+        start = last_payment_date or next_payment_date
+        payload = {
+            "kind": "biweekly_weekday",
+            "weekday": weekday,
+            "start_date": (start or date.today()).isoformat(),
+        }
+        return json.dumps(payload), None
+    if every_n_weeks_match is not None:
+        interval_weeks = int(every_n_weeks_match.group(1))
+        weekday = reference_date.weekday() if reference_date is not None else 0
+        start = last_payment_date or next_payment_date
+        if interval_weeks == 1:
+            return (
+                json.dumps({"kind": "weekly_weekday", "weekday": weekday}),
+                None,
+            )
+        if interval_weeks == 2:
+            return (
+                json.dumps(
+                    {
+                        "kind": "biweekly_weekday",
+                        "weekday": weekday,
+                        "start_date": (start or date.today()).isoformat(),
+                    }
+                ),
+                None,
+            )
+        return (
+            json.dumps(
+                {
+                    "kind": "every_n_weeks_weekday",
+                    "interval_weeks": interval_weeks,
+                    "weekday": weekday,
+                    "start_date": (start or date.today()).isoformat(),
+                }
+            ),
+            None,
+        )
+    if period in {"week", "weekly"}:
+        weekday = reference_date.weekday() if reference_date is not None else 0
+        return json.dumps({"kind": "weekly_weekday", "weekday": weekday}), None
+    if period in {"year", "yearly", "1 year"}:
+        ref = reference
+        return (
+            json.dumps(
+                {"kind": "yearly_month_day", "month": ref.month, "day": ref.day}
+            ),
+            payment_day,
+        )
+    if every_n_years_match is not None:
+        interval_years = int(every_n_years_match.group(1))
+        return (
+            json.dumps(
+                {
+                    "kind": "every_n_years_month_day",
+                    "interval_years": interval_years,
+                    "month": reference.month,
+                    "day": reference.day,
+                    "start_date": reference.isoformat(),
+                }
+            ),
+            payment_day,
+        )
+    unsupported_periods.add(period or "<empty>")
+    return None, payment_day
+
+
+def _legacy_expense_frequency(
+    raw_period: Any, unsupported_periods: set[str]
+) -> str | None:
+    period = _normalize_legacy_period(raw_period)
+    every_n_months_match = re.fullmatch(r"(\d+)\s+months?", period)
+    every_n_weeks_match = re.fullmatch(r"(?:every\s+)?(\d+)\s+weeks?", period)
+    every_n_years_match = re.fullmatch(r"(\d+)\s+years?", period)
+    if period in {"", "month", "1 month", "monthly"}:
+        return json.dumps({"kind": "monthly_day", "day": 1})
+    if period in {"half month", "half-month", "semi monthly", "semimonthly"}:
+        return json.dumps({"kind": "twice_monthly", "day_1": 15, "day_2": 31})
+    if every_n_months_match is not None:
+        interval_months = int(every_n_months_match.group(1))
+        return json.dumps(
+            {
+                "kind": "every_n_months_day",
+                "interval_months": interval_months,
+                "day": 1,
+                "start_date": "2025-01-01",
+            }
+        )
+    if period in {"2 weeks", "2 week", "biweekly"}:
+        return json.dumps(
+            {"kind": "biweekly_weekday", "weekday": 0, "start_date": "2025-01-06"}
+        )
+    if every_n_weeks_match is not None:
+        interval_weeks = int(every_n_weeks_match.group(1))
+        if interval_weeks == 1:
+            return json.dumps({"kind": "weekly_weekday", "weekday": 0})
+        if interval_weeks == 2:
+            return json.dumps(
+                {"kind": "biweekly_weekday", "weekday": 0, "start_date": "2025-01-06"}
+            )
+        return json.dumps(
+            {
+                "kind": "every_n_weeks_weekday",
+                "interval_weeks": interval_weeks,
+                "weekday": 0,
+                "start_date": "2025-01-06",
+            }
+        )
+    if period in {"week", "weekly"}:
+        return json.dumps({"kind": "weekly_weekday", "weekday": 0})
+    if period in {"year", "yearly", "1 year"}:
+        return json.dumps({"kind": "yearly_month_day", "month": 1, "day": 1})
+    if every_n_years_match is not None:
+        interval_years = int(every_n_years_match.group(1))
+        return json.dumps(
+            {
+                "kind": "every_n_years_month_day",
+                "interval_years": interval_years,
+                "month": 1,
+                "day": 1,
+                "start_date": "2025-01-01",
+            }
+        )
+    unsupported_periods.add(period or "<empty>")
+    return None
+
+
+def _legacy_account_payload(
+    *,
+    account_id: str,
+    account_number: str,
+    name: str,
+    account_type: str,
+    organization_name: str | None,
+    url: str | None,
+    notes: str | None,
+    rank: int,
+    now_iso: str,
+    balance_cents: int | None = None,
+    fee_amount_cents: int | None = None,
+    fee_period: str | None = None,
+    routing_number: str | None = None,
+    apy_bps: int | None = None,
+    compound_period: str | None = None,
+    apr_bps: int | None = None,
+    billing_day: int | None = None,
+    payment_day: int | None = None,
+    last_payment_date: date | None = None,
+    expiration_date: date | None = None,
+    closed: bool = False,
+    max_credit_cents: int | None = None,
+    rewards_balance_cents: int | None = None,
+    icon_id: str | None = None,
+    cvc: str | None = None,
+    usd_balance_cents: int | None = None,
+    retirement_account_type: str | None = None,
+    payment_amount_cents: int | None = None,
+    stock_positions: list[dict[str, Any]] | None = None,
+    crypto_positions: list[dict[str, Any]] | None = None,
+    cash_bills: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": account_id,
+        "account_number": account_number,
+        "name": name,
+        "type": account_type,
+        "organization": organization_name,
+        "url": url,
+        "notes": notes,
+        "balance_cents": balance_cents,
+        "fee_amount_cents": fee_amount_cents,
+        "fee_period": fee_period,
+        "routing_number": routing_number,
+        "apy_bps": apy_bps,
+        "compound_period": compound_period,
+        "apr_bps": apr_bps,
+        "billing_day": billing_day,
+        "payment_day": payment_day,
+        "last_payment_date": last_payment_date.isoformat()
+        if last_payment_date
+        else None,
+        "expiration_date": expiration_date.isoformat() if expiration_date else None,
+        "closed": bool(closed),
+        "max_credit_cents": max_credit_cents,
+        "rewards_balance_cents": rewards_balance_cents,
+        "cvc": cvc,
+        "usd_balance_cents": usd_balance_cents,
+        "retirement_account_type": retirement_account_type,
+        "payment_amount_cents": payment_amount_cents,
+        "icon_id": icon_id,
+        "icon_type": "Icon" if icon_id is not None else "Letters",
+        "rank": float(rank),
+        "last_update": None,
+        "created_at": now_iso,
+        "stock_positions": stock_positions or [],
+        "crypto_positions": crypto_positions or [],
+        "cash_bills": cash_bills or [],
+    }
+
+
+def _coerce_import_package(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Import package text is empty")
+        try:
+            parsed_json = json.loads(text)
+            if isinstance(parsed_json, dict):
+                return parsed_json
+        except json.JSONDecodeError:
+            pass
+        try:
+            parsed_yaml = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise HTTPException(
+                status_code=400, detail="Import package is not valid JSON or YAML"
+            ) from exc
+        if not isinstance(parsed_yaml, dict):
+            raise HTTPException(
+                status_code=400, detail="Import package root must be an object"
+            )
+        return parsed_yaml
+    raise HTTPException(
+        status_code=400, detail="Import package must be an object or text"
+    )
+
+
+def _convert_legacy_payload_to_latest(
+    raw_payload: dict[str, Any], user: User, db: Session
+) -> dict[str, Any]:
+    default_organizations = (
+        db.query(Organization).filter(Organization.is_default.is_(True)).all()
+    )
+    texas_default_icon = (
+        db.query(DefaultIcon).filter(DefaultIcon.key == "texas").first()
+    )
+    texas_icon_id = (
+        str(texas_default_icon.icon_id) if texas_default_icon is not None else None
+    )
+
+    def matched_default_org(name: str) -> Organization | None:
+        best_org: Organization | None = None
+        best_score = (0, 0, 0)
+        for org in default_organizations:
+            score = _legacy_org_match_score(name, org.name)
+            if score > best_score:
+                best_score = score
+                best_org = org
+        return best_org
+
+    def matched_icon_id(name: str, org: Organization | None) -> str | None:
+        if org is not None and org.icon_id is not None:
+            return str(org.icon_id)
+        if texas_icon_id is not None and "texas" in _canonical_org_name(name):
+            return texas_icon_id
+        return None
+
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    assets = _required_list(raw_payload.get("assets", []), "legacy.assets")
+    payables = _required_list(raw_payload.get("payables", []), "legacy.payables")
+    liabilities = _required_list(
+        raw_payload.get("liabilities", []), "legacy.liabilities"
+    )
+    closed_accounts = _required_list(raw_payload.get("closed", []), "legacy.closed")
+    funds = _required_list(raw_payload.get("funds", []), "legacy.funds")
+    retirement = _required_list(raw_payload.get("retirement", []), "legacy.retirement")
+    stock_accounts = _required_list(raw_payload.get("stocks", []), "legacy.stocks")
+    crypto_accounts = _required_list(raw_payload.get("crypto", []), "legacy.crypto")
+    receivables = _required_list(
+        raw_payload.get("receivables", []), "legacy.receivables"
+    )
+    contracts = _required_list(raw_payload.get("contracts", []), "legacy.contracts")
+    expenses = _required_list(raw_payload.get("expenses", []), "legacy.expenses")
+
+    account_id_by_name: dict[str, str] = {}
+    stock_id_by_ticker: dict[str, str] = {}
+    converted_accounts: list[dict[str, Any]] = []
+    converted_stocks: list[dict[str, Any]] = []
+    converted_expenses: list[dict[str, Any]] = []
+    pending_retirement_contributions: list[tuple[str, int, str | None]] = []
+
+    def reserve_account_id(name: str) -> str:
+        account_id = str(uuid4())
+        key = name.strip().lower()
+        if key and key not in account_id_by_name:
+            account_id_by_name[key] = account_id
+        return account_id
+
+    account_rank = 1
+    stock_rank = 1
+
+    def ensure_stock_id(ticker: str, fallback_name: str, price_cents: int) -> str:
+        nonlocal stock_rank
+        key = ticker.strip().upper()
+        if not key:
+            key = f"LEGACY-{stock_rank}"
+        existing = stock_id_by_ticker.get(key)
+        if existing is not None:
+            return existing
+        stock_id = str(uuid4())
+        stock_id_by_ticker[key] = stock_id
+        converted_stocks.append(
+            {
+                "id": stock_id,
+                "name": fallback_name.strip() or key,
+                "ticker": key,
+                "exchange": None,
+                "last_price_cents": price_cents,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
+        stock_rank += 1
+        return stock_id
+
+    def append_account(record: dict[str, Any]) -> None:
+        nonlocal account_rank
+        converted_accounts.append(record)
+        account_rank += 1
+
+    for index, raw_asset in enumerate(assets, start=1):
+        asset = _required_dict(raw_asset, "legacy.assets[]")
+        name = str(asset.get("name") or "").strip() or f"Legacy Account {index}"
+        account_id = reserve_account_id(name)
+        account_type = _legacy_account_type(
+            str(asset.get("type") or ""), default="checking"
+        )
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        denominations_raw = asset.get("denominations")
+        cash_bills: list[dict[str, Any]] = []
+        if isinstance(denominations_raw, dict):
+            for denom, qty in denominations_raw.items():
+                try:
+                    denomination = int(denom)
+                    quantity = int(qty)
+                except (TypeError, ValueError):
+                    continue
+                cash_bills.append(
+                    {
+                        "denomination_cents": denomination * 100,
+                        "quantity": max(0, quantity),
+                    }
+                )
+        notes = _legacy_notes(
+            asset,
+            consumed_keys={
+                "name",
+                "type",
+                "url",
+                "balance",
+                "notes",
+                "apr",
+                "denominations",
+            },
+            seed_note=str(asset.get("notes")).strip()
+            if asset.get("notes") is not None
+            else None,
+        )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-ASSET-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type=account_type,
+                organization_name=organization_name,
+                url=str(asset.get("url")).strip()
+                if asset.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(asset.get("balance")),
+                apy_bps=(
+                    int(round(float(asset.get("apr", 0)) * 100))
+                    if asset.get("apr") is not None
+                    else None
+                ),
+                cash_bills=cash_bills,
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_payable in enumerate(payables, start=1):
+        payable = _required_dict(raw_payable, "legacy.payables[]")
+        name = str(payable.get("name") or "").strip() or f"Legacy Payable {index}"
+        account_id = reserve_account_id(name)
+        base_type = _legacy_account_type(
+            str(payable.get("type") or ""), default="credit_card"
+        )
+        if base_type not in {"credit_card", "line_of_credit", "loan"}:
+            base_type = "credit_card"
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        payable_balance_cents = _dollars_to_cents(payable.get("balance"))
+        notes = _legacy_notes(
+            payable,
+            consumed_keys={
+                "name",
+                "type",
+                "url",
+                "credit",
+                "lastPayment",
+                "nextPayment",
+                "paymentDay",
+                "apr",
+                "balance",
+                "rewards",
+                "notes",
+            },
+            seed_note=str(payable.get("notes")).strip()
+            if payable.get("notes") is not None
+            else None,
+        )
+        if payable.get("credit") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy credit_limit: {_legacy_value_as_text(payable.get('credit'))}",
+            )
+        if payable.get("rewards") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy rewards_balance: {_legacy_value_as_text(payable.get('rewards'))}",
+            )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-PAYABLE-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type=base_type,
+                organization_name=organization_name,
+                url=str(payable.get("url")).strip()
+                if payable.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=payable_balance_cents,
+                apr_bps=(
+                    int(round(float(payable.get("apr", 0)) * 100))
+                    if payable.get("apr") is not None
+                    else None
+                ),
+                payment_day=_parse_int(
+                    payable.get("paymentDay"), "legacy.payables[].paymentDay"
+                )
+                if payable.get("paymentDay") is not None
+                else None,
+                last_payment_date=_parse_optional_iso_date(payable.get("lastPayment")),
+                closed=(
+                    (base_type == "loan" and payable_balance_cents == 0)
+                    or _legacy_next_payment_is_far_future(payable.get("nextPayment"))
+                ),
+                max_credit_cents=_dollars_to_cents(payable.get("credit")),
+                rewards_balance_cents=_dollars_to_cents(payable.get("rewards")),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_liability in enumerate(liabilities, start=1):
+        liability = _required_dict(raw_liability, "legacy.liabilities[]")
+        name = str(liability.get("name") or "").strip() or f"Legacy Liability {index}"
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        liability_balance_cents = _dollars_to_cents(liability.get("balance"))
+        notes = _legacy_notes(
+            liability,
+            consumed_keys={
+                "name",
+                "url",
+                "balance",
+                "interestRate",
+                "paymentDay",
+                "lastPayment",
+                "nextPayment",
+                "monthlyPayment",
+                "notes",
+                "NOTES",
+            },
+            seed_note=(
+                str(liability.get("notes")).strip()
+                if liability.get("notes") is not None
+                else str(liability.get("NOTES")).strip()
+                if liability.get("NOTES") is not None
+                else None
+            ),
+        )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-LIABILITY-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type="loan",
+                organization_name=organization_name,
+                url=str(liability.get("url")).strip()
+                if liability.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=liability_balance_cents,
+                apr_bps=(
+                    int(round(float(liability.get("interestRate", 0)) * 100))
+                    if liability.get("interestRate") is not None
+                    else None
+                ),
+                payment_day=_parse_int(
+                    liability.get("paymentDay"), "legacy.liabilities[].paymentDay"
+                )
+                if liability.get("paymentDay") is not None
+                else None,
+                last_payment_date=_parse_optional_iso_date(
+                    liability.get("lastPayment")
+                ),
+                payment_amount_cents=_dollars_to_cents(liability.get("monthlyPayment")),
+                closed=(
+                    liability_balance_cents == 0
+                    or _legacy_next_payment_is_far_future(liability.get("nextPayment"))
+                ),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_fund in enumerate(funds, start=1):
+        fund = _required_dict(raw_fund, "legacy.funds[]")
+        name = str(fund.get("name") or "").strip() or f"Legacy Fund {index}"
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        notes = _legacy_notes(
+            fund,
+            consumed_keys={
+                "name",
+                "type",
+                "url",
+                "monthlyContribution",
+                "balance",
+                "notes",
+            },
+            seed_note=str(fund.get("notes")).strip()
+            if fund.get("notes") is not None
+            else None,
+        )
+        if fund.get("monthlyContribution") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy monthly_contribution: {_legacy_value_as_text(fund.get('monthlyContribution'))}",
+            )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-FUND-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type="stocks_account",
+                organization_name=organization_name,
+                url=str(fund.get("url")).strip()
+                if fund.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(fund.get("balance")),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_retirement in enumerate(retirement, start=1):
+        item = _required_dict(raw_retirement, "legacy.retirement[]")
+        name = str(item.get("name") or "").strip() or f"Legacy Retirement {index}"
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        notes = _legacy_notes(
+            item,
+            consumed_keys={
+                "name",
+                "type",
+                "symbol",
+                "url",
+                "balance",
+                "monthlyContribution",
+                "funds",
+                "notes",
+            },
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        if item.get("monthlyContribution") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy monthly_contribution: {_legacy_value_as_text(item.get('monthlyContribution'))}",
+            )
+            monthly_contribution_cents = _dollars_to_cents(
+                item.get("monthlyContribution")
+            )
+            if monthly_contribution_cents > 0:
+                pending_retirement_contributions.append(
+                    (name, monthly_contribution_cents, organization_name)
+                )
+        if item.get("symbol") is not None:
+            notes = _append_note(
+                notes, f"Legacy symbol: {_legacy_value_as_text(item.get('symbol'))}"
+            )
+        if item.get("funds") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy retirement_funds: {_legacy_value_as_text(item.get('funds'))}",
+            )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-RETIRE-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type="retirement",
+                organization_name=organization_name,
+                url=str(item.get("url")).strip()
+                if item.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(item.get("balance")),
+                retirement_account_type=_normalize_retirement_account_type(
+                    item.get("type")
+                ),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_stock_account in enumerate(stock_accounts, start=1):
+        item = _required_dict(raw_stock_account, "legacy.stocks[]")
+        name = (
+            str(item.get("broker") or item.get("name") or "").strip()
+            or f"Legacy Brokerage {index}"
+        )
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        notes = _legacy_notes(
+            item,
+            consumed_keys={"broker", "name", "balance", "stocks", "notes"},
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        positions: list[dict[str, Any]] = []
+        for raw_position in _required_list(
+            item.get("stocks", []), "legacy.stocks[].stocks"
+        ):
+            position = _required_dict(raw_position, "legacy.stocks[].stocks[]")
+            ticker = str(position.get("ticker") or "").strip().upper()
+            stock_name = (
+                str(position.get("stock") or "").strip() or ticker or "Legacy Stock"
+            )
+            stock_id = ensure_stock_id(
+                ticker=ticker,
+                fallback_name=stock_name,
+                price_cents=_dollars_to_cents(position.get("price")),
+            )
+            quantity_text = "0"
+            try:
+                parsed_quantity = _parse_decimal(
+                    position.get("shares"), "legacy.stocks[].stocks[].shares"
+                )
+                quantity_text = _serialize_decimal(parsed_quantity)
+            except HTTPException:
+                quantity_text = "0"
+            positions.append({"stock_id": stock_id, "quantity": quantity_text})
+            position_note = _legacy_notes(
+                position,
+                consumed_keys={"stock", "ticker", "shares", "price"},
+                seed_note=None,
+            )
+            if position_note:
+                notes = _append_note(
+                    notes,
+                    f"Legacy stock '{stock_name}' extras: {position_note}",
+                )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-STOCK-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type="stocks_account",
+                organization_name=organization_name,
+                url=None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(item.get("balance")),
+                stock_positions=positions,
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_crypto in enumerate(crypto_accounts, start=1):
+        item = _required_dict(raw_crypto, "legacy.crypto[]")
+        name = (
+            str(item.get("wallet") or item.get("name") or "").strip()
+            or f"Legacy Crypto {index}"
+        )
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        is_metamask = name.strip().lower() == "metamask"
+        account_type = "crypto_wallet" if is_metamask else "crypto_exchange"
+        notes = _legacy_notes(
+            item,
+            consumed_keys={"wallet", "name", "balance", "url", "notes"},
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-CRYPTO-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type=account_type,
+                organization_name=organization_name,
+                url=str(item.get("url")).strip()
+                if item.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                usd_balance_cents=_dollars_to_cents(item.get("balance"))
+                if account_type == "crypto_exchange"
+                else None,
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_receivable in enumerate(receivables, start=1):
+        item = _required_dict(raw_receivable, "legacy.receivables[]")
+        name = str(item.get("name") or "").strip() or f"Legacy Receivable {index}"
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        receivable_type = str(item.get("type") or "").strip().lower()
+        mapped_receivable_account_type = (
+            "rewards_card"
+            if receivable_type in {"store credit", "store-credit", "rewards"}
+            else "checking"
+        )
+        notes = _legacy_notes(
+            item,
+            consumed_keys={"name", "type", "balance", "notes"},
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        if item.get("type") is not None:
+            notes = _append_note(
+                notes,
+                f"Legacy receivable_type: {_legacy_value_as_text(item.get('type'))}",
+            )
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-RECV-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type=mapped_receivable_account_type,
+                organization_name=organization_name,
+                url=None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(item.get("balance")),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    for index, raw_closed in enumerate(closed_accounts, start=1):
+        item = _required_dict(raw_closed, "legacy.closed[]")
+        name = str(item.get("name") or "").strip() or f"Legacy Closed {index}"
+        account_id = reserve_account_id(name)
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        notes = _legacy_notes(
+            item,
+            consumed_keys={
+                "name",
+                "type",
+                "url",
+                "credit",
+                "lastPayment",
+                "nextPayment",
+                "paymentDay",
+                "apr",
+                "balance",
+                "rewards",
+                "notes",
+            },
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        notes = _append_note(notes, "Legacy status: closed")
+        append_account(
+            _legacy_account_payload(
+                account_id=account_id,
+                account_number=f"LEG-CLOSED-{_slugify(name)}-{account_rank:03d}",
+                name=name,
+                account_type=_legacy_account_type(
+                    str(item.get("type") or ""), default="credit_card"
+                ),
+                organization_name=organization_name,
+                url=str(item.get("url")).strip()
+                if item.get("url") is not None
+                else None,
+                notes=notes,
+                rank=account_rank,
+                now_iso=now_iso,
+                balance_cents=_dollars_to_cents(item.get("balance")),
+                apr_bps=(
+                    int(round(float(item.get("apr", 0)) * 100))
+                    if item.get("apr") is not None
+                    else None
+                ),
+                payment_day=_parse_int(
+                    item.get("paymentDay"), "legacy.closed[].paymentDay"
+                )
+                if item.get("paymentDay") is not None
+                else None,
+                last_payment_date=_parse_optional_iso_date(item.get("lastPayment")),
+                closed=True,
+                max_credit_cents=_dollars_to_cents(item.get("credit")),
+                rewards_balance_cents=_dollars_to_cents(item.get("rewards")),
+                icon_id=matched_icon_id(name, matched_org),
+            )
+        )
+
+    converted_contracts: list[dict[str, Any]] = []
+    unsupported_periods: set[str] = set()
+    for index, raw_contract in enumerate(contracts, start=1):
+        item = _required_dict(raw_contract, "legacy.contracts[]")
+        name = str(item.get("name") or "").strip() or f"Legacy Contract {index}"
+        amount_cents = _dollars_to_cents(item.get("amount"))
+        contract_type = "income" if amount_cents > 0 else "payment"
+        payment_account_name = str(item.get("paymentAccount") or "").strip().lower()
+        linked_account_id = account_id_by_name.get(payment_account_name)
+        last_payment_date = _legacy_extract_date(
+            item,
+            "lastPayment",
+            "last_payment_date",
+            "lastPaymentDate",
+            "last_paid",
+            "lastPaid",
+        )
+        next_payment_date = _legacy_extract_date(
+            item,
+            "nextPayment",
+            "next_payment_date",
+            "nextPaymentDate",
+        )
+        explicit_expiration_date = _legacy_extract_date(
+            item,
+            "expiration_date",
+            "expirationDate",
+            "expires",
+            "expiry",
+            "endDate",
+        )
+        mark_expired = _is_far_future_date(next_payment_date) or _is_far_future_date(
+            explicit_expiration_date
+        )
+        payment_period, payment_day = _legacy_contract_period(
+            item.get("period"),
+            last_payment_date,
+            next_payment_date,
+            unsupported_periods,
+        )
+        category = (
+            str(item.get("category") or item.get("catgory") or "Financial").strip()
+            or "Financial"
+        )
+        matched_org = matched_default_org(name)
+        organization_name = matched_org.name if matched_org is not None else name
+        matched_contract_icon_id = matched_icon_id(name, matched_org)
+        notes = _legacy_notes(
+            item,
+            consumed_keys={
+                "name",
+                "details",
+                "amount",
+                "period",
+                "lastPayment",
+                "last_payment_date",
+                "lastPaymentDate",
+                "last_paid",
+                "lastPaid",
+                "nextPayment",
+                "next_payment_date",
+                "nextPaymentDate",
+                "automatic",
+                "category",
+                "catgory",
+                "expiration_date",
+                "expirationDate",
+                "expires",
+                "expiry",
+                "endDate",
+                "paymentAccount",
+                "url",
+                "notes",
+            },
+            seed_note=str(item.get("details")).strip()
+            if item.get("details") is not None
+            else str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+        )
+        converted_contracts.append(
+            {
+                "id": str(uuid4()),
+                "name": name,
+                "type": contract_type,
+                "automatic": bool(item.get("automatic", True)),
+                "amount_cents": abs(amount_cents),
+                "organization": organization_name,
+                "icon_id": matched_contract_icon_id,
+                "icon_type": "Icon"
+                if matched_contract_icon_id is not None
+                else "Letters",
+                "rank": float(index),
+                "linked_account_id": linked_account_id,
+                "source_account_id": None,
+                "last_payment_date": last_payment_date.isoformat()
+                if last_payment_date
+                else None,
+                "payment_period": payment_period,
+                "payment_day": payment_day,
+                "expiration_date": (
+                    (date.today() - timedelta(days=1)).isoformat()
+                    if mark_expired
+                    else explicit_expiration_date.isoformat()
+                    if explicit_expiration_date
+                    else None
+                ),
+                "notes": notes,
+                "category": category,
+                "url": str(item.get("url")).strip()
+                if item.get("url") is not None
+                else None,
+                "account_number": None,
+                "billing_day": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
+
+    for index, (account_name, monthly_cents, contribution_org_name) in enumerate(
+        pending_retirement_contributions, start=1
+    ):
+        linked_account_id = account_id_by_name.get(account_name.strip().lower())
+        if linked_account_id is None:
+            continue
+        converted_contracts.append(
+            {
+                "id": str(uuid4()),
+                "name": f"{account_name} Contribution",
+                "type": "income",
+                "automatic": True,
+                "amount_cents": int(monthly_cents),
+                "organization": contribution_org_name,
+                "icon_id": None,
+                "icon_type": "Letters",
+                "rank": float(1000 + index),
+                "linked_account_id": linked_account_id,
+                "source_account_id": None,
+                "last_payment_date": None,
+                "payment_period": json.dumps({"kind": "monthly_last_day"}),
+                "payment_day": None,
+                "expiration_date": None,
+                "notes": "Imported from legacy retirement monthlyContribution",
+                "category": "Retirement",
+                "url": None,
+                "account_number": None,
+                "billing_day": None,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
+
+    for index, raw_expense in enumerate(expenses, start=1):
+        item = _required_dict(raw_expense, "legacy.expenses[]")
+        name = str(item.get("name") or "").strip() or f"Legacy Expense {index}"
+        frequency = _legacy_expense_frequency(item.get("period"), unsupported_periods)
+        account_name = (
+            str(item.get("account") or item.get("paymentAccount") or "").strip().lower()
+        )
+        linked_account_id = (
+            account_id_by_name.get(account_name) if account_name else None
+        )
+        notes = _legacy_notes(
+            item,
+            consumed_keys={
+                "name",
+                "amount",
+                "period",
+                "enabled",
+                "category",
+                "account",
+                "paymentAccount",
+                "notes",
+                "details",
+            },
+            seed_note=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else str(item.get("details")).strip()
+            if item.get("details") is not None
+            else None,
+        )
+        converted_expenses.append(
+            {
+                "id": str(uuid4()),
+                "name": name,
+                "category": str(item.get("category") or "Legacy").strip() or "Legacy",
+                "icon_id": None,
+                "icon_type": "Letters",
+                "estimated_amount_cents": abs(_dollars_to_cents(item.get("amount"))),
+                "linked_account_id": linked_account_id,
+                "enabled": bool(item.get("enabled", True)),
+                "general_frequency": frequency,
+                "last_expensed_date": None,
+                "next_expensed_date": None,
+                "next_date_is_static": False,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "notes": notes,
+            }
+        )
+
+    if unsupported_periods:
+        bad_periods = ", ".join(sorted(unsupported_periods))
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Unsupported legacy period strings: "
+                f"{bad_periods}. Please clarify how these should recur."
+            ),
+        )
+
+    return {
+        "schema_version": PAYLOAD_SCHEMA_VERSION,
+        "exported_at": now_iso,
+        "user_profile": {
+            "avatar_icon_id": None,
+            "last_login_at": None,
+            "password_changed_at": None,
+            "created_at": user.created_at.isoformat() if user.created_at else now_iso,
+            "updated_at": now_iso,
+        },
+        "icons": [],
+        "stocks": converted_stocks,
+        "accounts": converted_accounts,
+        "contracts": converted_contracts,
+        "contract_postings": [],
+        "expenses": converted_expenses,
+        "account_value_history": [],
+        "net_worth_daily_snapshot": [],
+    }
 
 
 def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
@@ -380,6 +1694,9 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "payment_day": account.payment_day,
                 "last_payment_date": _serialize_date(account.last_payment_date),
                 "expiration_date": _serialize_date(account.expiration_date),
+                "closed": bool(account.closed),
+                "max_credit_cents": account.max_credit_cents,
+                "rewards_balance_cents": account.rewards_balance_cents,
                 "cvc": account.cvc,
                 "usd_balance_cents": account.usd_balance_cents,
                 "retirement_account_type": account.retirement_account_type,
@@ -450,6 +1767,7 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "id": str(expense.id),
                 "name": expense.name,
                 "category": expense.category,
+                "notes": expense.notes,
                 "icon_id": str(expense.icon_id)
                 if expense.icon_id is not None
                 else None,
@@ -527,10 +1845,30 @@ def _upgrade_payload_v2_to_v3(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v3_to_v4(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 4
+    accounts = _required_list(upgraded.get("accounts", []), "accounts")
+    upgraded_accounts: list[dict[str, Any]] = []
+    for raw in accounts:
+        account = _required_dict(raw, "accounts[]")
+        normalized = dict(account)
+        if "closed" not in normalized:
+            normalized["closed"] = False
+        if "max_credit_cents" not in normalized:
+            normalized["max_credit_cents"] = None
+        if "rewards_balance_cents" not in normalized:
+            normalized["rewards_balance_cents"] = None
+        upgraded_accounts.append(normalized)
+    upgraded["accounts"] = upgraded_accounts
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
     2: _upgrade_payload_v2_to_v3,
+    3: _upgrade_payload_v3_to_v4,
 }
 
 
@@ -733,12 +2071,21 @@ def _replace_user_data(
         icon_id_map[old_id] = existing.id
         imported_icons += 1
 
+    def resolve_import_icon_id(raw_icon_id: UUID | None) -> UUID | None:
+        if raw_icon_id is None:
+            return None
+        mapped_icon_id = icon_id_map.get(raw_icon_id)
+        if mapped_icon_id is not None:
+            return mapped_icon_id
+        existing_icon = db.get(IconAsset, raw_icon_id)
+        if existing_icon is not None:
+            return existing_icon.id
+        return None
+
     raw_avatar_icon_id = _parse_optional_uuid(
         user_profile.get("avatar_icon_id"), "user_profile.avatar_icon_id"
     )
-    user.avatar_icon_id = (
-        icon_id_map.get(raw_avatar_icon_id) if raw_avatar_icon_id is not None else None
-    )
+    user.avatar_icon_id = resolve_import_icon_id(raw_avatar_icon_id)
     user.last_login_at = _parse_optional_datetime(
         user_profile.get("last_login_at"), "user_profile.last_login_at"
     )
@@ -800,9 +2147,7 @@ def _replace_user_data(
         old_id = _parse_uuid(item.get("id"), "accounts[].id")
         icon_type = _coerce_icon_type(item.get("icon_type"))
         raw_icon_id = _parse_optional_uuid(item.get("icon_id"), "accounts[].icon_id")
-        resolved_icon_id = (
-            icon_id_map.get(raw_icon_id) if raw_icon_id is not None else None
-        )
+        resolved_icon_id = resolve_import_icon_id(raw_icon_id)
         account = Account(
             id=uuid4(),
             user_id=user_id,
@@ -853,15 +2198,27 @@ def _replace_user_data(
             expiration_date=_parse_optional_date(
                 item.get("expiration_date"), "accounts[].expiration_date"
             ),
+            closed=bool(item.get("closed", False)),
+            max_credit_cents=_parse_int(
+                item.get("max_credit_cents"), "accounts[].max_credit_cents"
+            )
+            if item.get("max_credit_cents") is not None
+            else None,
+            rewards_balance_cents=_parse_int(
+                item.get("rewards_balance_cents"),
+                "accounts[].rewards_balance_cents",
+            )
+            if item.get("rewards_balance_cents") is not None
+            else None,
             cvc=str(item.get("cvc")).strip() if item.get("cvc") is not None else None,
             usd_balance_cents=_parse_int(
                 item.get("usd_balance_cents"), "accounts[].usd_balance_cents"
             )
             if item.get("usd_balance_cents") is not None
             else None,
-            retirement_account_type=str(item.get("retirement_account_type")).strip()
-            if item.get("retirement_account_type") is not None
-            else None,
+            retirement_account_type=_normalize_retirement_account_type(
+                item.get("retirement_account_type")
+            ),
             payment_amount_cents=_parse_int(
                 item.get("payment_amount_cents"), "accounts[].payment_amount_cents"
             )
@@ -971,6 +2328,16 @@ def _replace_user_data(
         )
         raw_icon_id = _parse_optional_uuid(item.get("icon_id"), "contracts[].icon_id")
         icon_type = _coerce_icon_type(item.get("icon_type"))
+        parsed_contract_last_payment_date = _parse_optional_date(
+            item.get("last_payment_date", item.get("lastPayment")),
+            "contracts[].last_payment_date",
+        )
+        parsed_contract_expiration_date = _parse_optional_date(
+            item.get("expiration_date", item.get("expirationDate")),
+            "contracts[].expiration_date",
+        )
+        if _is_far_future_date(parsed_contract_expiration_date):
+            parsed_contract_expiration_date = date.today() - timedelta(days=1)
         contract = Contract(
             id=uuid4(),
             user_id=user_id,
@@ -983,7 +2350,7 @@ def _replace_user_data(
             organization=str(item.get("organization")).strip()
             if item.get("organization") is not None
             else None,
-            icon_id=icon_id_map.get(raw_icon_id)
+            icon_id=resolve_import_icon_id(raw_icon_id)
             if icon_type == "Icon" and raw_icon_id is not None
             else None,
             icon_type=icon_type,
@@ -994,18 +2361,14 @@ def _replace_user_data(
             source_account_id=account_id_map.get(source_old)
             if source_old is not None
             else None,
-            last_payment_date=_parse_optional_date(
-                item.get("last_payment_date"), "contracts[].last_payment_date"
-            ),
+            last_payment_date=parsed_contract_last_payment_date,
             payment_period=str(item.get("payment_period")).strip()
             if item.get("payment_period") is not None
             else None,
             payment_day=_parse_int(item.get("payment_day"), "contracts[].payment_day")
             if item.get("payment_day") is not None
             else None,
-            expiration_date=_parse_optional_date(
-                item.get("expiration_date"), "contracts[].expiration_date"
-            )
+            expiration_date=parsed_contract_expiration_date
             or DEFAULT_CONTRACT_EXPIRATION,
             notes=str(item.get("notes")).strip()
             if item.get("notes") is not None
@@ -1090,7 +2453,10 @@ def _replace_user_data(
             user_id=user_id,
             name=str(item.get("name") or "").strip(),
             category=str(item.get("category") or "").strip(),
-            icon_id=icon_id_map.get(raw_icon_id)
+            notes=str(item.get("notes")).strip()
+            if item.get("notes") is not None
+            else None,
+            icon_id=resolve_import_icon_id(raw_icon_id)
             if icon_type == "Icon" and raw_icon_id is not None
             else None,
             icon_type=icon_type,
@@ -1221,8 +2587,41 @@ def import_data(
         )
 
     normalized_password = _normalize_password(payload.password)
-    raw_data = _extract_payload_from_envelope(payload.package, normalized_password)
-    migrated_data = _migrate_payload_to_latest(raw_data)
+    incoming_package = _coerce_import_package(payload.package)
+    imported_legacy_payload = False
+
+    if _is_export_envelope(incoming_package):
+        raw_data = _extract_payload_from_envelope(incoming_package, normalized_password)
+        migrated_data = _migrate_payload_to_latest(raw_data)
+    elif _is_legacy_payload(incoming_package):
+        imported_legacy_payload = True
+        migrated_data = _convert_legacy_payload_to_latest(
+            incoming_package, current_user, db
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported import format: expected export package or legacy YAML",
+        )
+
     result = _replace_user_data(db, current_user.id, migrated_data)
+    if imported_legacy_payload:
+        snapshot_day = date.today()
+        snapshot_value_cents = _compute_user_net_worth_cents(db, current_user.id)
+        stmt = pg_insert(NetWorthDailySnapshot).values(
+            user_id=current_user.id,
+            snapshot_date=snapshot_day,
+            value_cents=snapshot_value_cents,
+            updated_at=datetime.utcnow(),
+        )
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_net_worth_daily_snapshot_user_day",
+            set_={
+                "value_cents": snapshot_value_cents,
+                "updated_at": datetime.utcnow(),
+            },
+        )
+        db.execute(stmt)
+        result.imported_net_worth_snapshots += 1
     db.commit()
     return result

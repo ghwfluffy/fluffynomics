@@ -81,11 +81,12 @@ def _ensure_expense(db: Session, user: User, name: str, payload: dict) -> Expens
 
 
 def _account_value_cents(db: Session, account: Account) -> int:
+    rewards = max(0, int(account.rewards_balance_cents or 0))
     if account.type == "cash":
         denoms = (
             db.query(AccountCashDenomination).filter_by(account_id=account.id).all()
         )
-        return int(sum(d.denomination_cents * d.quantity for d in denoms))
+        return int(sum(d.denomination_cents * d.quantity for d in denoms)) + rewards
     if account.type in {"crypto_wallet", "crypto_exchange"}:
         crypto_positions = (
             db.query(AccountCryptoPosition).filter_by(account_id=account.id).all()
@@ -98,13 +99,13 @@ def _account_value_cents(db: Session, account: Account) -> int:
         )
         if account.type == "crypto_exchange":
             total += int(account.usd_balance_cents or 0)
-        return total
+        return total + rewards
     if account.type == "stocks_account":
         stock_positions = (
             db.query(AccountStockPosition).filter_by(account_id=account.id).all()
         )
         if not stock_positions:
-            return int(account.balance_cents or 0)
+            return int(account.balance_cents or 0) + rewards
         stock_ids = [p.stock_id for p in stock_positions]
         prices = {
             s.id: int(s.last_price_cents or 0)
@@ -116,8 +117,8 @@ def _account_value_cents(db: Session, account: Account) -> int:
                 for p in stock_positions
             )
         )
-        return total + int(account.balance_cents or 0)
-    return int(account.balance_cents or 0)
+        return total + int(account.balance_cents or 0) + rewards
+    return int(account.balance_cents or 0) + rewards
 
 
 def _ensure_history_seed(db: Session, user: User, account: Account) -> None:
@@ -292,6 +293,8 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "type": "credit_card",
             "organization": "Nimbus Card",
             "balance_cents": 156700,
+            "max_credit_cents": 500000,
+            "rewards_balance_cents": 3845,
             "fee_amount_cents": 0,
             "fee_period": "monthly",
             "apr_bps": 2499,
@@ -359,6 +362,8 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "type": "rewards_card",
             "organization": "SkyMile Club",
             "balance_cents": 42000,
+            "max_credit_cents": 120000,
+            "rewards_balance_cents": 42000,
             "expiration_date": date(2027, 12, 1),
             "last_update": recent,
         },
@@ -578,6 +583,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
         "Groceries",
         {
             "category": "Living",
+            "notes": "Seeded weekly grocery budget",
             "icon_type": "Letters",
             "estimated_amount_cents": 65000,
             "general_frequency": '{"kind":"weekly_weekday","weekday":6}',

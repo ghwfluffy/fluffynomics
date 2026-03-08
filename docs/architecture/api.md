@@ -124,6 +124,7 @@ Defined in `python/mp/api/accounts.py`.
   - `Letters`/`Gravatar` are generated at read-time and do not create DB icon records
 - Type-specific fields are mostly optional unless directly required by a specialized endpoint flow.
 - `fee_period` accepts structured recurring-period JSON and is schema-validated.
+  - recurring JSON supports monthly/yearly, plus interval forms: `every_n_months_day` and `every_n_years_month_day`.
 
 ## Stock API Behavior
 
@@ -178,7 +179,7 @@ Defined in `python/mp/api/expenses.py`.
 - `DELETE /expenses/{expense_id}`
 
 Expense semantics:
-- Fields: `name`, `category`, `icon_id/icon_type`, `estimated_amount_cents`, `linked_account_id`, `general_frequency`, `last_expensed_date`, `next_expensed_date`, `next_date_is_static`.
+- Fields: `name`, `category`, `notes`, `icon_id/icon_type`, `estimated_amount_cents`, `linked_account_id`, `general_frequency`, `last_expensed_date`, `next_expensed_date`, `next_date_is_static`.
 - Includes `enabled` boolean so expenses can be turned off without deletion.
 - Validation:
   - `name` and `category` are required.
@@ -243,6 +244,19 @@ Defined in `python/mp/api/data_portability.py`.
 - `POST /data/import`
   - accepts package envelope + optional password
   - decrypts (if needed), deserializes JSON, migrates payload schema to latest, then replaces user-scoped records via insert flow
+  - also accepts legacy YAML/object imports (auto-detected by legacy keys like `assets`/`contracts`) and converts them into current payload schema before replace
+  - legacy period mappings include `N Months` and `N Years`; `Half Month` maps to 15th and last day of month
+  - legacy period mappings also include `Every N Weeks` (`every_n_weeks_weekday`); weekday is inferred from `nextPayment` when present
+  - legacy default-org matching uses canonical-name containment with special aliases:
+    - `WF` token matches `Wells Fargo`
+    - `CitiCard` matches `Citibank`
+    - longest-match scoring prevents generic card-brand collisions (for example `Wells Fargo Visa` resolves to `Wells Fargo`)
+  - legacy org fallback:
+    - if no default org match and account name contains `texas`, importer assigns the default `texas` generic icon
+  - legacy closure rule:
+    - payable/liability accounts with `nextPayment` more than 30 years in the future are imported as `closed=true`
+    - contracts with `nextPayment` more than 30 years in the future are imported with an expired `expiration_date`
+  - legacy import also writes a current-day net-worth snapshot after replace, computed from imported account balances using liability sign rules
   - currently supports only `replace_existing=true`
   - response returns imported object counts for each dataset class
 
@@ -253,7 +267,7 @@ Defined in `python/mp/api/data_portability.py`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
-- Current payload schema version: `3`.
+- Current payload schema version: `4`.
 - Security metadata rule:
   - brute-force lockout state (`failed_password_attempts`, `password_lockout_until`) is intentionally not exported/imported and remains local runtime state.
 - Schema-change rule:

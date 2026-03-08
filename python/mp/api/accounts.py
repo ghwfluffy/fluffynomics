@@ -203,10 +203,22 @@ def _compute_account_value_cents(db: Session, account: Account) -> int:
     return int(account.balance_cents or 0)
 
 
+def _account_rewards_cents(account: Account) -> int:
+    return max(0, int(account.rewards_balance_cents or 0))
+
+
 def _net_worth_sign_for_account_type(account_type: str) -> int:
     if account_type in {"credit_card", "line_of_credit", "loan"}:
         return -1
     return 1
+
+
+def _net_worth_contribution_cents(db: Session, account: Account) -> int:
+    base_value = _compute_account_value_cents(db, account)
+    rewards_value = _account_rewards_cents(account)
+    if account.type in {"credit_card", "line_of_credit", "loan"}:
+        return (-base_value) + rewards_value
+    return base_value + rewards_value
 
 
 def _record_account_value_history(db: Session, account: Account) -> None:
@@ -222,13 +234,7 @@ def _record_account_value_history(db: Session, account: Account) -> None:
 
 def _compute_user_net_worth_cents(db: Session, user_id: UUID) -> int:
     user_accounts = db.query(Account).filter(Account.user_id == user_id).all()
-    return int(
-        sum(
-            _compute_account_value_cents(db, item)
-            * _net_worth_sign_for_account_type(item.type)
-            for item in user_accounts
-        )
-    )
+    return int(sum(_net_worth_contribution_cents(db, item) for item in user_accounts))
 
 
 def _upsert_daily_net_worth_snapshot(db: Session, user_id: UUID) -> None:
@@ -259,9 +265,9 @@ def _build_net_worth_points_from_events(
     if not rows:
         return []
 
-    type_by_account_id = {
-        account.id: account.type
-        for account in db.query(Account.id, Account.type)
+    account_meta_by_id = {
+        account.id: (account.type, int(account.rewards_balance_cents or 0))
+        for account in db.query(Account.id, Account.type, Account.rewards_balance_cents)
         .filter(Account.user_id == user_id)
         .all()
     }
@@ -269,12 +275,16 @@ def _build_net_worth_points_from_events(
     last_by_account: dict[UUID, int] = {}
     by_day: dict[date, int] = {}
     for row in rows:
-        sign = _net_worth_sign_for_account_type(
-            type_by_account_id.get(row.account_id, "")
+        account_type, rewards_balance_cents = account_meta_by_id.get(
+            row.account_id, ("", 0)
         )
+        sign = _net_worth_sign_for_account_type(account_type)
         previous = last_by_account.get(row.account_id, 0)
         current = int(row.value_cents or 0)
-        running_total += (current - previous) * sign
+        reward_delta = 0
+        if previous == 0 and row.account_id not in last_by_account:
+            reward_delta = max(0, int(rewards_balance_cents or 0))
+        running_total += (current - previous) * sign + reward_delta
         last_by_account[row.account_id] = current
         by_day[row.recorded_at.date()] = running_total
     return [
@@ -300,8 +310,8 @@ def _forecast_net_worth_points(
         for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
     }
     accounts = {
-        account.id: account.type
-        for account in db.query(Account.id, Account.type)
+        account.id: (account.type, int(account.rewards_balance_cents or 0))
+        for account in db.query(Account.id, Account.type, Account.rewards_balance_cents)
         .filter(Account.user_id == user_id)
         .all()
     }
@@ -327,10 +337,10 @@ def _forecast_net_worth_points(
                 else None
             )
             source_sign = (
-                _net_worth_sign_for_account_type(source_type) if source_type else 1
+                _net_worth_sign_for_account_type(source_type[0]) if source_type else 1
             )
             linked_sign = (
-                _net_worth_sign_for_account_type(linked_type) if linked_type else 1
+                _net_worth_sign_for_account_type(linked_type[0]) if linked_type else 1
             )
             net_delta = (-amount * source_sign) + (amount * linked_sign)
         else:
@@ -340,7 +350,7 @@ def _forecast_net_worth_points(
                 else None
             )
             linked_sign = (
-                _net_worth_sign_for_account_type(linked_type) if linked_type else 1
+                _net_worth_sign_for_account_type(linked_type[0]) if linked_type else 1
             )
             net_delta = int(posting.delta_cents) * linked_sign
         deltas_by_day[posting.effective_date] = (
@@ -353,7 +363,7 @@ def _forecast_net_worth_points(
             continue
         account_type = accounts.get(expense_posting.account_id)
         account_sign = (
-            _net_worth_sign_for_account_type(account_type) if account_type else 1
+            _net_worth_sign_for_account_type(account_type[0]) if account_type else 1
         )
         net_delta = int(expense_posting.delta_cents) * account_sign
         deltas_by_day[expense_posting.effective_date] = (
@@ -432,6 +442,9 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         payment_day=account.payment_day,
         last_payment_date=account.last_payment_date,
         expiration_date=account.expiration_date,
+        closed=bool(account.closed),
+        max_credit_cents=account.max_credit_cents,
+        rewards_balance_cents=account.rewards_balance_cents,
         cvc=account.cvc,
         usd_balance_cents=account.usd_balance_cents,
         retirement_account_type=account.retirement_account_type,
@@ -774,6 +787,9 @@ def create_account(
         payment_day=payload.payment_day,
         last_payment_date=payload.last_payment_date,
         expiration_date=payload.expiration_date,
+        closed=bool(payload.closed),
+        max_credit_cents=payload.max_credit_cents,
+        rewards_balance_cents=payload.rewards_balance_cents,
         cvc=payload.cvc,
         usd_balance_cents=payload.usd_balance_cents,
         retirement_account_type=payload.retirement_account_type,
@@ -892,6 +908,11 @@ def update_account(
         payment_day=data.get("payment_day", account.payment_day),
         last_payment_date=data.get("last_payment_date", account.last_payment_date),
         expiration_date=data.get("expiration_date", account.expiration_date),
+        closed=data.get("closed", account.closed),
+        max_credit_cents=data.get("max_credit_cents", account.max_credit_cents),
+        rewards_balance_cents=data.get(
+            "rewards_balance_cents", account.rewards_balance_cents
+        ),
         cvc=data.get("cvc", account.cvc),
         usd_balance_cents=data.get("usd_balance_cents", account.usd_balance_cents),
         retirement_account_type=data.get(
@@ -973,6 +994,9 @@ def update_account(
         "payment_day",
         "last_payment_date",
         "expiration_date",
+        "closed",
+        "max_credit_cents",
+        "rewards_balance_cents",
         "cvc",
         "usd_balance_cents",
         "retirement_account_type",
@@ -1262,6 +1286,8 @@ def update_account_value(
         account.balance_cents = data["balance_cents"]
     if "usd_balance_cents" in data:
         account.usd_balance_cents = data["usd_balance_cents"]
+    if "rewards_balance_cents" in data:
+        account.rewards_balance_cents = max(0, int(data["rewards_balance_cents"] or 0))
     if "last_payment_date" in data:
         _validate_last_payment_date(data["last_payment_date"])
         account.last_payment_date = data["last_payment_date"]

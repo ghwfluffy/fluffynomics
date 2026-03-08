@@ -193,7 +193,7 @@
             <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" :options="accountDropdownOptions" />
           </div>
           <RecurringPeriodField v-model="contractForm.payment_period" label="Payment Period" />
-          <BankField v-model="contractForm.payment_day" label="Payment Day" type="number" required />
+          <BankField v-if="showPaymentDayField" v-model="contractForm.payment_day" label="Payment Day" type="number" required />
           <UnifiedDropdown v-model="contractForm.category" label="Category" searchable allow-custom :options="categoryOptions" />
           <BankField v-model="contractForm.url" label="URL" type="url" />
           <BankField v-if="contractForm.type === 'payment'" v-model="contractForm.billing_day" label="Billing Day" type="number" />
@@ -221,6 +221,10 @@
       <section class="confirm-card cds--tile">
         <h3>Update {{ updatingContract?.name }}</h3>
         <div class="form-grid form-grid--single">
+          <div class="check-row update-expired-row">
+            <input id="contract-expired" v-model="updateForm.expired" type="checkbox" />
+            <label for="contract-expired">Expired</label>
+          </div>
           <BankField v-model="updateForm.last_payment_date" label="Last Payment Date" type="date" />
           <BankField v-model="updateForm.expiration_date" label="Expiration Date" type="date" />
         </div>
@@ -394,7 +398,9 @@ const deleteContractDialog = ref(false)
 const pendingDeleteContractId = ref<string | null>(null)
 const updateDialog = ref(false)
 const updatingContract = ref<ContractPayload | null>(null)
-const updateForm = ref<{ last_payment_date?: string; expiration_date?: string }>({})
+const updateForm = ref<{ last_payment_date?: string; expiration_date?: string; expired: boolean }>({
+  expired: false,
+})
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
 const iconPickerDialog = ref(false)
@@ -684,6 +690,9 @@ const clampMonthDay = (year: number, monthZeroBased: number, day: number) =>
 const monthlyDate = (year: number, monthZeroBased: number, day: number) =>
   startOfDay(new Date(year, monthZeroBased, clampMonthDay(year, monthZeroBased, day)))
 
+const addMonths = (value: Date, months: number, day: number) =>
+  monthlyDate(value.getFullYear(), value.getMonth() + months, day)
+
 const parseContractPeriod = (contract: ContractPayload) => {
   const raw = contract.payment_period?.trim()
   let payload: Record<string, unknown> | null = null
@@ -697,6 +706,28 @@ const parseContractPeriod = (contract: ContractPayload) => {
   const kind = (payload?.kind as string | undefined) || (contract.payment_day ? 'monthly_day' : undefined)
   return { kind, payload }
 }
+
+const periodRequiresPaymentDay = (rawPeriod?: string) => {
+  const trimmed = (rawPeriod || '').trim().toLowerCase()
+  if (!trimmed) {
+    return true
+  }
+  if (trimmed === 'weekly' || trimmed === 'biweekly') {
+    return false
+  }
+  if (!trimmed.startsWith('{')) {
+    return true
+  }
+  try {
+    const payload = JSON.parse(trimmed) as Record<string, unknown>
+    const kind = String(payload.kind || '')
+    return !['weekly_weekday', 'biweekly_weekday', 'every_n_weeks_weekday'].includes(kind)
+  } catch {
+    return true
+  }
+}
+
+const showPaymentDayField = computed(() => periodRequiresPaymentDay(contractForm.value.payment_period))
 
 const occurrenceOnOrAfter = (
   anchor: Date,
@@ -730,6 +761,33 @@ const occurrenceOnOrAfter = (
     const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
     const thisYear = monthlyDate(anchor.getFullYear(), month, day)
     return thisYear >= anchor ? thisYear : monthlyDate(anchor.getFullYear() + 1, month, day)
+  }
+  if (kind === 'every_n_months_day') {
+    const intervalMonths = Math.max(1, Number(payload?.interval_months ?? 1))
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    let candidate = monthlyDate(startDate.getFullYear(), startDate.getMonth(), day)
+    let guard = 0
+    while (candidate < anchor && guard < 2400) {
+      candidate = addMonths(candidate, intervalMonths, day)
+      guard += 1
+    }
+    return candidate
+  }
+  if (kind === 'every_n_years_month_day') {
+    const intervalYears = Math.max(1, Number(payload?.interval_years ?? 1))
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    let year = startDate.getFullYear()
+    let candidate = monthlyDate(year, month, day)
+    let guard = 0
+    while (candidate < anchor && guard < 400) {
+      year += intervalYears
+      candidate = monthlyDate(year, month, day)
+      guard += 1
+    }
+    return candidate
   }
   if (kind === 'daily_weekdays') {
     const weekdays =
@@ -768,6 +826,25 @@ const occurrenceOnOrAfter = (
     result.setDate(result.getDate() + periods * 14)
     return startOfDay(result)
   }
+  if (kind === 'every_n_weeks_weekday') {
+    const weekday = Math.max(0, Math.min(6, Number(payload?.weekday ?? 0)))
+    const intervalWeeks = Math.max(1, Number(payload?.interval_weeks ?? 1))
+    const jsWeekday = weekday === 6 ? 0 : weekday + 1
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    const base = new Date(startDate)
+    const baseDelta = (jsWeekday - base.getDay() + 7) % 7
+    base.setDate(base.getDate() + baseDelta)
+    if (anchor <= base) {
+      return startOfDay(base)
+    }
+    const intervalDays = intervalWeeks * 7
+    const daysSince = Math.floor((anchor.getTime() - base.getTime()) / (1000 * 60 * 60 * 24))
+    const periods = Math.ceil(daysSince / intervalDays)
+    const result = new Date(base)
+    result.setDate(result.getDate() + periods * intervalDays)
+    return startOfDay(result)
+  }
   return null
 }
 
@@ -801,6 +878,15 @@ const previousOccurrenceBefore = (
     const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
     return monthlyDate(current.getFullYear() - 1, month, day)
   }
+  if (kind === 'every_n_months_day') {
+    const intervalMonths = Math.max(1, Number(payload?.interval_months ?? 1))
+    return addMonths(current, -intervalMonths, day)
+  }
+  if (kind === 'every_n_years_month_day') {
+    const intervalYears = Math.max(1, Number(payload?.interval_years ?? 1))
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    return monthlyDate(current.getFullYear() - intervalYears, month, day)
+  }
   if (kind === 'daily_weekdays') {
     const weekdays =
       Array.isArray(payload?.weekdays) && payload?.weekdays.length
@@ -822,6 +908,12 @@ const previousOccurrenceBefore = (
   if (kind === 'biweekly_weekday') {
     const probe = new Date(current)
     probe.setDate(probe.getDate() - 14)
+    return startOfDay(probe)
+  }
+  if (kind === 'every_n_weeks_weekday') {
+    const intervalWeeks = Math.max(1, Number(payload?.interval_weeks ?? 1))
+    const probe = new Date(current)
+    probe.setDate(probe.getDate() - intervalWeeks * 7)
     return startOfDay(probe)
   }
   const probe = new Date(current)
@@ -969,7 +1061,10 @@ const validateContractForm = () => {
     snackbar.value = true
     return false
   }
-  if (!contractForm.value.payment_day || contractForm.value.payment_day < 1 || contractForm.value.payment_day > 31) {
+  if (
+    showPaymentDayField.value &&
+    (!contractForm.value.payment_day || contractForm.value.payment_day < 1 || contractForm.value.payment_day > 31)
+  ) {
     errorMessage.value = 'Payment day is required (1-31)'
     snackbar.value = true
     return false
@@ -992,6 +1087,7 @@ const submitContract = async () => {
     organization: contractForm.value.organization?.trim(),
     last_payment_date: contractForm.value.last_payment_date || null,
     payment_period: contractForm.value.payment_period || null,
+    payment_day: showPaymentDayField.value ? contractForm.value.payment_day : null,
     notes: contractForm.value.notes || null,
     url: contractForm.value.url || null,
     billing_day: contractForm.value.billing_day || null,
@@ -1048,6 +1144,7 @@ const openUpdateDialog = (contract: ContractPayload) => {
   updateForm.value = {
     last_payment_date: contract.last_payment_date?.slice(0, 10) || '',
     expiration_date: contract.expiration_date?.slice(0, 10) || '',
+    expired: isExpired(contract),
   }
   updateDialog.value = true
 }
@@ -1055,7 +1152,7 @@ const openUpdateDialog = (contract: ContractPayload) => {
 const closeUpdateDialog = () => {
   updateDialog.value = false
   updatingContract.value = null
-  updateForm.value = {}
+  updateForm.value = { expired: false }
 }
 
 const submitUpdateDialog = async () => {
@@ -1070,9 +1167,21 @@ const submitUpdateDialog = async () => {
       return
     }
   }
+  const todayIso = new Date().toISOString().slice(0, 10)
+  let expirationDate = updateForm.value.expiration_date || null
+  if (updateForm.value.expired) {
+    if (!expirationDate || expirationDate >= todayIso) {
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      expirationDate = yesterday.toISOString().slice(0, 10)
+    }
+  } else if (expirationDate && expirationDate < todayIso) {
+    expirationDate = null
+  }
+
   await request.put(`/contracts/${updatingContract.value.id}`, {
     last_payment_date: updateForm.value.last_payment_date || null,
-    expiration_date: updateForm.value.expiration_date || null,
+    expiration_date: expirationDate,
   })
   closeUpdateDialog()
   await loadContracts()
@@ -1217,14 +1326,37 @@ const onWindowClick = (event: MouseEvent) => {
   }
 }
 
+const onWindowKeyDown = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') {
+    return
+  }
+  if (iconPickerDialog.value) {
+    cancelIconPickerModal()
+    return
+  }
+  if (updateDialog.value) {
+    closeUpdateDialog()
+    return
+  }
+  if (deleteContractDialog.value) {
+    closeDeleteContractDialog()
+    return
+  }
+  if (contractDialog.value) {
+    closeContractDialog()
+  }
+}
+
 onMounted(loadContracts)
 onMounted(loadOrganizations)
 onMounted(loadIcons)
 onMounted(() => {
   window.addEventListener('click', onWindowClick)
+  window.addEventListener('keydown', onWindowKeyDown)
 })
 onUnmounted(() => {
   window.removeEventListener('click', onWindowClick)
+  window.removeEventListener('keydown', onWindowKeyDown)
 })
 
 defineExpose({
@@ -1392,6 +1524,10 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.update-expired-row {
+  grid-column: 1 / -1;
 }
 
 .contract-type-readonly {

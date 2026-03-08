@@ -143,6 +143,7 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 ### Expenses table intent
 
 - `expenses` stores user-scoped budgeting estimates (not account balances).
+- `expenses.notes` stores free-form context/details and legacy import extras for an expense.
 - `expenses.linked_account_id` is intentionally nullable with `ON DELETE SET NULL` so deleting an account never deletes expense definitions.
 - `next_date_is_static` distinguishes fixed next date from derived next date.
 - `general_frequency` is stored as recurring-period JSON for derivation math.
@@ -186,6 +187,7 @@ Import/restore (`POST /data/import`) is intentionally modeled as:
 - deserialize package JSON,
 - migrate payload schema to current version,
 - replace existing user-scoped rows with fresh inserts.
+- legacy YAML payloads are supported via conversion into the same current payload schema before replace.
 
 Current replace order removes user rows from:
 - `expenses`

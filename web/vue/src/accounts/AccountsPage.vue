@@ -161,7 +161,7 @@
           v-for="cell in calendarCells"
           :key="cell.key"
           class="calendar-day-cell"
-          :class="{ 'calendar-day-cell--outside': !cell.inMonth }"
+          :class="{ 'calendar-day-cell--outside': !cell.inMonth, 'calendar-day-cell--today': cell.isToday }"
         >
           <div class="calendar-day-number">{{ cell.dayNumber }}</div>
           <div class="calendar-day-events">
@@ -170,7 +170,7 @@
               :key="event.key"
               type="button"
               class="calendar-event-chip"
-              :class="`calendar-event-chip--${event.kind}`"
+              :class="calendarEventToneClass(event)"
               @click="openCalendarEvent(event)"
             >
               {{ event.label }}
@@ -182,14 +182,31 @@
       <div class="calendar-upcoming">
         <h4>Upcoming This Month</h4>
         <div v-if="calendarUpcomingEvents.length === 0" class="calendar-upcoming-empty">No events in this month.</div>
-        <ul v-else class="calendar-upcoming-list">
-          <li v-for="event in calendarUpcomingEvents" :key="`up-${event.key}`">
-            <button type="button" class="calendar-upcoming-item" @click="openCalendarEvent(event)">
-              <span>{{ event.dateLabel }} • {{ event.title }}</span>
-              <span class="calendar-upcoming-type">{{ event.kindLabel }}</span>
-            </button>
-          </li>
-        </ul>
+        <div v-else class="calendar-upcoming-table-wrap">
+          <table class="calendar-upcoming-table">
+            <thead>
+              <tr>
+                <th>Date / Event</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Running Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="event in calendarUpcomingEventsWithRunning"
+                :key="`up-${event.key}`"
+                class="calendar-upcoming-row"
+                @click="openCalendarEvent(event)"
+              >
+                <td>{{ event.dateLabel }} • {{ event.title }}</td>
+                <td class="calendar-upcoming-type">{{ event.kindLabel }}</td>
+                <td>{{ signedCents(event.signedAmountCents) }}</td>
+                <td>{{ signedCents(event.runningTotalCents) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -255,6 +272,12 @@
           <div v-if="needsBalance">
             <DollarField v-model="createForm.balance_cents" label="Balance" />
           </div>
+          <div v-if="needsMaxCredit">
+            <DollarField v-model="createForm.max_credit_cents" label="Max Credit" />
+          </div>
+          <div v-if="needsRewardsBalance">
+            <DollarField v-model="createForm.rewards_balance_cents" label="Rewards Balance" />
+          </div>
 
           <div v-if="needsFee" class="fee-row">
             <DollarField v-model="createForm.fee_amount_cents" label="Fee Amount" />
@@ -311,6 +334,7 @@
           <div class="field-row">
             <BankField v-model="createForm.url" label="Account URL" type="url" />
           </div>
+          <label class="check-row"><input v-model="createForm.closed" type="checkbox" /> <span>Closed Account</span></label>
           <BankField v-model="createForm.notes" class="notes-field" label="Notes" multiline />
 
           <div class="modal-actions">
@@ -401,6 +425,11 @@
             v-if="updateMode === 'dollars'"
             v-model="updateForm.amountCents"
             :label="updateAmountLabel"
+          />
+          <DollarField
+            v-if="showRewardsBalanceField"
+            v-model="updateForm.rewardsCents"
+            label="Rewards Balance"
           />
           <div v-else-if="updateMode === 'cash_bills'" class="cash-bills-grid">
             <BankField v-model="updateForm.cashBills[100]" label="$1 bills" type="number" />
@@ -505,6 +534,7 @@
               ▶
             </button>
             <span
+              v-if="!account.closed"
               class="tile-update-clock"
               :class="lastUpdateTone(account)"
               :title="lastUpdateTooltip(account)"
@@ -524,7 +554,7 @@
             <div class="tile-title">{{ account.name }}</div>
             <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
             <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
-            <div class="tile-balance" :class="balanceTone(section.key)">
+            <div class="tile-balance" :class="balanceTone(account, section.key)">
               {{ balanceLabel(account) }}
             </div>
             <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
@@ -762,8 +792,11 @@ interface AccountPayload {
   payment_day?: number
   last_payment_date?: string
   expiration_date?: string
+  closed?: boolean
   last_update?: string
   balance_cents?: number
+  max_credit_cents?: number
+  rewards_balance_cents?: number
   fee_amount_cents?: number
   fee_period?: string
   usd_balance_cents?: number
@@ -810,6 +843,7 @@ interface CalendarEventItem {
   label: string
   dateIso: string
   dateLabel: string
+  signedAmountCents: number
 }
 
 type ContractsTabExpose = {
@@ -844,6 +878,9 @@ interface CreateAccountPayload {
   payment_day?: number
   last_payment_date?: string
   expiration_date?: string
+  closed?: boolean
+  max_credit_cents?: number
+  rewards_balance_cents?: number
   cvc?: string
   usd_balance_cents?: number
   retirement_account_type?: string
@@ -889,6 +926,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
   name: '',
   type: 'checking',
   organization: '',
+  closed: false,
   icon_type: 'Icon',
   stock_positions: [],
   crypto_positions: [],
@@ -929,6 +967,7 @@ const historyAccount = ref<AccountPayload | null>(null)
 const historyItems = ref<AccountHistoryPoint[]>([])
 const updateForm = ref({
   amountCents: 0,
+  rewardsCents: 0,
   quantity: '0',
   ticker: '',
   lastPaymentDate: '',
@@ -998,6 +1037,7 @@ const sectionDefinitions: Array<Omit<Section, 'accounts'>> = [
   { key: 'credit_cards', title: 'Credit Cards', types: ['credit_card'] },
   { key: 'payables', title: 'Payables', types: ['loan', 'line_of_credit'] },
   { key: 'rewards', title: 'Rewards', types: ['rewards_card'] },
+  { key: 'closed', title: 'Closed Accounts', types: [] },
 ]
 
 const compoundPeriods = ['daily', 'monthly']
@@ -1028,16 +1068,24 @@ const needsBillingDay = computed(() => ['line_of_credit', 'credit_card'].include
 const needsPaymentDay = computed(() => ['line_of_credit', 'credit_card', 'loan'].includes(createForm.value.type))
 const needsExpiration = computed(() => ['credit_card', 'rewards_card'].includes(createForm.value.type))
 const needsCvc = computed(() => createForm.value.type === 'credit_card')
+const needsMaxCredit = computed(() => ['line_of_credit', 'credit_card', 'rewards_card'].includes(createForm.value.type))
+const needsRewardsBalance = computed(() => ['credit_card', 'rewards_card'].includes(createForm.value.type))
 
 const sections = computed<Section[]>(() =>
   sectionDefinitions.map((section) => ({
     ...section,
-    accounts: accounts.value.filter((account) => section.types.includes(account.type)),
+    accounts:
+      section.key === 'closed'
+        ? accounts.value.filter((account) => account.closed)
+        : accounts.value.filter((account) => !account.closed && section.types.includes(account.type)),
   })),
 )
 
+const sectionTitleForAccount = (account: AccountPayload) =>
+  account.closed ? 'Closed Accounts' : sectionTitleByType(account.type)
+
 const accountsSectionOptions = computed(() =>
-  Array.from(new Set(accounts.value.map((account) => sectionTitleByType(account.type)))).sort((a, b) => a.localeCompare(b)),
+  Array.from(new Set(accounts.value.map((account) => sectionTitleForAccount(account)))).sort((a, b) => a.localeCompare(b)),
 )
 const accountsOrganizationOptions = computed(() =>
   Array.from(new Set(accounts.value.map((account) => account.organization || 'Unknown'))).sort((a, b) => a.localeCompare(b)),
@@ -1064,7 +1112,7 @@ const accountsTableRows = computed(() => {
       return true
     }
     const haystack = [
-      sectionTitleByType(account.type),
+      sectionTitleForAccount(account),
       account.name,
       account.organization || '',
       account.account_number,
@@ -1077,7 +1125,7 @@ const accountsTableRows = computed(() => {
     return haystack.includes(needle)
   })
   const filteredByColumns = rows.filter((account) => {
-    const section = sectionTitleByType(account.type)
+    const section = sectionTitleForAccount(account)
     const organization = account.organization || 'Unknown'
     const typeLabel = account.type.replaceAll('_', ' ')
     if (accountsSectionValues.value.length && !accountsSectionValues.value.includes(section)) {
@@ -1095,7 +1143,7 @@ const accountsTableRows = computed(() => {
     const key = accountsSortKey.value
     const av =
       key === 'section'
-        ? sectionTitleByType(a.type)
+        ? sectionTitleForAccount(a)
         : key === 'name'
           ? a.name
           : key === 'organization'
@@ -1109,7 +1157,7 @@ const accountsTableRows = computed(() => {
                   : new Date(a.last_update || 0).getTime()
     const bv =
       key === 'section'
-        ? sectionTitleByType(b.type)
+        ? sectionTitleForAccount(b)
         : key === 'name'
           ? b.name
           : key === 'organization'
@@ -1172,7 +1220,20 @@ const accountTypeLabel = (type: AccountType) =>
     rewards_card: 'Rewards Card',
   })[type]
 
-const currentNetWorthCents = computed(() => accounts.value.reduce((sum, account) => sum + tableBalanceCents(account), 0))
+const isLiabilityAccountType = (type: AccountType) => ['credit_card', 'line_of_credit', 'loan'].includes(type)
+
+const netWorthContributionCents = (account: AccountPayload) => {
+  const rewards = accountRewardsCents(account)
+  const baseValue = tableBalanceCents(account) - rewards
+  if (isLiabilityAccountType(account.type)) {
+    return -Math.abs(baseValue) + rewards
+  }
+  return baseValue + rewards
+}
+
+const currentNetWorthCents = computed(() =>
+  accounts.value.reduce((sum, account) => sum + netWorthContributionCents(account), 0),
+)
 const netChangePast30 = computed(() => currentNetWorthCents.value - netWorthPast30Cents.value)
 const netChangeNext30 = computed(() => netWorthNext30Cents.value - currentNetWorthCents.value)
 
@@ -1186,8 +1247,9 @@ const mixPalette = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#17b
 const mixSlices = computed(() => {
   const totals = new Map<string, number>()
   for (const account of accounts.value) {
-    const key = accountTypeLabel(account.type)
-    const value = Math.abs(tableBalanceCents(account))
+    const isLiability = isLiabilityAccountType(account.type)
+    const key = isLiability ? 'Rewards' : accountTypeLabel(account.type)
+    const value = isLiability ? accountRewardsCents(account) : Math.abs(tableBalanceCents(account))
     totals.set(key, (totals.get(key) || 0) + value)
   }
   const nonZeroEntries = Array.from(totals.entries()).filter(([, value]) => value > 0)
@@ -1426,6 +1488,11 @@ const showLastPaymentDateField = computed(
 const showRewardsExpirationField = computed(
   () => updateMode.value === 'dollars' && updatingAccount.value?.type === 'rewards_card',
 )
+const showRewardsBalanceField = computed(
+  () =>
+    updateMode.value === 'dollars' &&
+    ['credit_card', 'rewards_card'].includes(updatingAccount.value?.type || ''),
+)
 
 const organizationOptions = computed(() => organizations.value.map((item) => item.name))
 
@@ -1504,6 +1571,8 @@ const deltaClass = (value: number) => {
   return 'delta-neutral'
 }
 
+const accountRewardsCents = (account: AccountPayload) => Math.max(0, account.rewards_balance_cents || 0)
+
 const balanceLabel = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
     const total = (account.stock_positions || []).reduce((sum, position) => {
@@ -1530,9 +1599,12 @@ const balanceLabel = (account: AccountPayload) => {
   }
   if (account.type === 'cash') {
     const computed = (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
-    return `Balance ${cents(computed)}`
+    return `Balance ${cents(computed + accountRewardsCents(account))}`
   }
-  return `Balance ${cents(account.balance_cents)}`
+  if (account.type === 'credit_card') {
+    return `Balance ${cents(account.balance_cents || 0)}`
+  }
+  return `Balance ${cents((account.balance_cents || 0) + accountRewardsCents(account))}`
 }
 
 const tableBalanceCents = (account: AccountPayload) => {
@@ -1559,9 +1631,9 @@ const tableBalanceCents = (account: AccountPayload) => {
     return total + (account.type === 'crypto_exchange' ? account.usd_balance_cents || 0 : 0)
   }
   if (account.type === 'cash') {
-    return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
+    return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0) + accountRewardsCents(account)
   }
-  return account.balance_cents || 0
+  return (account.balance_cents || 0) + accountRewardsCents(account)
 }
 
 const localIsoDate = (value: Date) => {
@@ -1579,7 +1651,7 @@ const shiftDays = (base: Date, days: number) => {
 
 const getNetWorthAsOf = async (asOf: Date) => {
   const snapshot = await request.get<AccountPayload[]>('/accounts', { params: { as_of_date: localIsoDate(asOf) } })
-  return snapshot.reduce((sum, account) => sum + tableBalanceCents(account), 0)
+  return snapshot.reduce((sum, account) => sum + netWorthContributionCents(account), 0)
 }
 
 const loadWidgets = async () => {
@@ -1715,8 +1787,16 @@ const loadWidgets = async () => {
   }
 }
 
-const balanceTone = (sectionKey: string) =>
-  ['credit_cards', 'payables'].includes(sectionKey) ? 'balance-liability' : 'balance-asset'
+const balanceTone = (account: AccountPayload, sectionKey: string) => {
+  const amountCents = tableBalanceCents(account)
+  if (amountCents === 0) {
+    return 'delta-neutral'
+  }
+  if (['credit_cards', 'payables'].includes(sectionKey)) {
+    return 'delta-negative'
+  }
+  return 'delta-positive'
+}
 
 const parseDateOnly = (raw?: string) => {
   if (!raw) {
@@ -1788,11 +1868,23 @@ const annualOccurrencesFromRecurring = (raw?: string, fallbackDay?: number) => {
   if (kind === 'yearly_month_day') {
     return 1
   }
+  if (kind === 'every_n_months_day') {
+    const intervalMonths = Math.max(1, Number(payload?.interval_months || 1))
+    return 12 / intervalMonths
+  }
+  if (kind === 'every_n_years_month_day') {
+    const intervalYears = Math.max(1, Number(payload?.interval_years || 1))
+    return 1 / intervalYears
+  }
   if (kind === 'weekly_weekday') {
     return 52
   }
   if (kind === 'biweekly_weekday') {
     return 26
+  }
+  if (kind === 'every_n_weeks_weekday') {
+    const intervalWeeks = Math.max(1, Number(payload?.interval_weeks || 1))
+    return 52 / intervalWeeks
   }
   if (kind === 'daily_weekdays') {
     if (Array.isArray(payload?.weekdays) && payload.weekdays.length) {
@@ -1825,6 +1917,9 @@ const monthlyRecurringDate = (year: number, monthZeroBased: number, day: number)
   value.setHours(0, 0, 0, 0)
   return value
 }
+
+const addMonthsRecurring = (value: Date, months: number, day: number) =>
+  monthlyRecurringDate(value.getFullYear(), value.getMonth() + months, day)
 
 const recurringOnOrAfter = (
   anchor: Date,
@@ -1859,6 +1954,33 @@ const recurringOnOrAfter = (
     const thisYear = monthlyRecurringDate(anchor.getFullYear(), month, day)
     return thisYear >= anchor ? thisYear : monthlyRecurringDate(anchor.getFullYear() + 1, month, day)
   }
+  if (kind === 'every_n_months_day') {
+    const intervalMonths = Math.max(1, Number(payload?.interval_months ?? 1))
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    let candidate = monthlyRecurringDate(startDate.getFullYear(), startDate.getMonth(), day)
+    let guard = 0
+    while (candidate < anchor && guard < 2400) {
+      candidate = addMonthsRecurring(candidate, intervalMonths, day)
+      guard += 1
+    }
+    return candidate
+  }
+  if (kind === 'every_n_years_month_day') {
+    const intervalYears = Math.max(1, Number(payload?.interval_years ?? 1))
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    let year = startDate.getFullYear()
+    let candidate = monthlyRecurringDate(year, month, day)
+    let guard = 0
+    while (candidate < anchor && guard < 400) {
+      year += intervalYears
+      candidate = monthlyRecurringDate(year, month, day)
+      guard += 1
+    }
+    return candidate
+  }
   if (kind === 'daily_weekdays') {
     const weekdays = Array.isArray(payload?.weekdays) && payload?.weekdays.length ? (payload.weekdays as number[]) : [0, 1, 2, 3, 4]
     const allowed = new Set(weekdays)
@@ -1890,6 +2012,25 @@ const recurringOnOrAfter = (
     const periods = Math.ceil(daysSince / 14)
     const result = new Date(base)
     result.setDate(result.getDate() + periods * 14)
+    return startOfDay(result)
+  }
+  if (kind === 'every_n_weeks_weekday') {
+    const weekday = Math.max(0, Math.min(6, Number(payload?.weekday ?? 0)))
+    const intervalWeeks = Math.max(1, Number(payload?.interval_weeks ?? 1))
+    const jsWeekday = weekday === 6 ? 0 : weekday + 1
+    const startRaw = String(payload?.start_date || '')
+    const startDate = startRaw ? startOfDay(new Date(`${startRaw}T00:00:00`)) : anchor
+    const base = new Date(startDate)
+    const baseDelta = (jsWeekday - base.getDay() + 7) % 7
+    base.setDate(base.getDate() + baseDelta)
+    if (anchor <= base) {
+      return startOfDay(base)
+    }
+    const intervalDays = intervalWeeks * 7
+    const daysSince = Math.floor((anchor.getTime() - base.getTime()) / (1000 * 60 * 60 * 24))
+    const periods = Math.ceil(daysSince / intervalDays)
+    const result = new Date(base)
+    result.setDate(result.getDate() + periods * intervalDays)
     return startOfDay(result)
   }
   return null
@@ -1951,6 +2092,9 @@ const calendarGridEnd = computed(() => addDays(calendarGridStart.value, 41))
 const calendarEvents = computed<CalendarEventItem[]>(() => {
   const items: CalendarEventItem[] = []
   for (const account of accounts.value) {
+    if (account.closed) {
+      continue
+    }
     if ((account.fee_amount_cents || 0) <= 0 || !account.fee_period?.trim()) {
       continue
     }
@@ -1971,6 +2115,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
         label: `${account.name} fee`,
         dateIso,
         dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        signedAmountCents: -Math.abs(account.fee_amount_cents || 0),
       })
     }
   }
@@ -2002,6 +2147,12 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
         label: contract.name,
         dateIso,
         dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        signedAmountCents:
+          contract.type === 'income'
+            ? Math.abs(contract.amount_cents || 0)
+            : contract.type === 'payment'
+              ? -Math.abs(contract.amount_cents || 0)
+              : 0,
       })
     }
   }
@@ -2024,6 +2175,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
       label: expense.name,
       dateIso: raw,
       dateLabel: parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      signedAmountCents: -Math.abs(expense.estimated_amount_cents || 0),
     })
   }
   const deduped = new Map<string, CalendarEventItem>()
@@ -2048,7 +2200,8 @@ const calendarEventsByIso = computed(() => {
 const calendarCells = computed(() => {
   const month = monthStart.value
   const firstCell = calendarGridStart.value
-  const cells: Array<{ key: string; dayNumber: number; inMonth: boolean; events: CalendarEventItem[] }> = []
+  const todayIso = formatCalendarDateIso(new Date())
+  const cells: Array<{ key: string; dayNumber: number; inMonth: boolean; isToday: boolean; events: CalendarEventItem[] }> = []
   for (let i = 0; i < 42; i += 1) {
     const day = addDays(firstCell, i)
     const dayIso = formatCalendarDateIso(day)
@@ -2056,6 +2209,7 @@ const calendarCells = computed(() => {
       key: dayIso,
       dayNumber: day.getDate(),
       inMonth: day.getMonth() === month.getMonth() && day.getFullYear() === month.getFullYear(),
+      isToday: dayIso === todayIso,
       events: calendarEventsByIso.value.get(dayIso) || [],
     })
   }
@@ -2067,6 +2221,35 @@ const calendarUpcomingEvents = computed(() => {
   const endIso = formatCalendarDateIso(monthEnd.value)
   return calendarEvents.value.filter((event) => event.dateIso >= startIso && event.dateIso <= endIso)
 })
+
+const calendarUpcomingEventsWithRunning = computed(() => {
+  let running = 0
+  return calendarUpcomingEvents.value.map((event) => {
+    running += event.signedAmountCents
+    return {
+      ...event,
+      runningTotalCents: running,
+    }
+  })
+})
+
+const calendarEventToneClass = (event: CalendarEventItem) => {
+  const amount = event.signedAmountCents || 0
+  if (amount >= 50_000) {
+    return 'calendar-event-chip--positive-large'
+  }
+  if (amount >= 0) {
+    return 'calendar-event-chip--positive-small'
+  }
+  const abs = Math.abs(amount)
+  if (abs < 20_000) {
+    return 'calendar-event-chip--negative-1'
+  }
+  if (abs < 100_000) {
+    return 'calendar-event-chip--negative-2'
+  }
+  return 'calendar-event-chip--negative-3'
+}
 
 const projectedRateRows = computed(() => rateRowsFromDailyCents(projectedNetWorthDailyRateCents.value))
 const historicalRateRows = computed(() => rateRowsFromDailyCents(historicalNetWorthDailyRateCents.value))
@@ -2442,6 +2625,7 @@ const openUpdateDialog = (account: AccountPayload) => {
   } else {
     updateForm.value.amountCents = account.balance_cents || 0
   }
+  updateForm.value.rewardsCents = account.rewards_balance_cents || 0
   updateForm.value.lastPaymentDate = account.last_payment_date?.slice(0, 10) || ''
   updateForm.value.expirationDate = account.expiration_date?.slice(0, 10) || ''
   updateDialog.value = true
@@ -2563,6 +2747,9 @@ const submitUpdateValue = async () => {
     if (showRewardsExpirationField.value) {
       payload.expiration_date = updateForm.value.expirationDate || null
     }
+    if (showRewardsBalanceField.value) {
+      payload.rewards_balance_cents = updateForm.value.rewardsCents
+    }
   } else if (updateMode.value === 'cash_bills') {
     payload.cash_bills = Object.entries(updateForm.value.cashBills).map(([denomination, quantity]) => ({
       denomination_cents: Number.parseInt(denomination, 10),
@@ -2679,6 +2866,35 @@ const onWindowClick = (event: MouseEvent) => {
   }
 }
 
+const onWindowKeyDown = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') {
+    return
+  }
+  if (iconPickerDialog.value) {
+    cancelIconPickerModal()
+    return
+  }
+  if (calendarEventDialogOpen.value) {
+    closeCalendarEventDialog()
+    return
+  }
+  if (historyDialog.value) {
+    closeHistoryDialog()
+    return
+  }
+  if (updateDialog.value) {
+    closeUpdateDialog()
+    return
+  }
+  if (deleteDialog.value) {
+    closeDeleteDialog()
+    return
+  }
+  if (createDialog.value) {
+    closeCreateDialog()
+  }
+}
+
 const clearForecastDate = () => {
   forecastDate.value = ''
 }
@@ -2689,9 +2905,11 @@ onMounted(loadIcons)
 onMounted(loadCalendarSources)
 onMounted(async () => {
   window.addEventListener('click', onWindowClick)
+  window.addEventListener('keydown', onWindowKeyDown)
 })
 onUnmounted(() => {
   window.removeEventListener('click', onWindowClick)
+  window.removeEventListener('keydown', onWindowKeyDown)
 })
 
 watch(
@@ -3329,6 +3547,13 @@ watch(
   background: #fff7d6;
 }
 
+.calendar-day-cell.calendar-day-cell--today,
+.calendar-day-cell.calendar-day-cell--today:nth-child(odd),
+.calendar-day-cell.calendar-day-cell--today.calendar-day-cell--outside,
+.calendar-day-cell.calendar-day-cell--today.calendar-day-cell--outside:nth-child(odd) {
+  background: #bbf7d0;
+}
+
 .calendar-day-number {
   font-size: 0.84rem;
   font-weight: 600;
@@ -3348,19 +3573,29 @@ watch(
   cursor: pointer;
 }
 
-.calendar-event-chip--fee {
-  background: #fde68a;
-  color: #78350f;
-}
-
-.calendar-event-chip--contract {
+.calendar-event-chip--positive-small {
   background: #bfdbfe;
   color: #1e3a8a;
 }
 
-.calendar-event-chip--expense {
+.calendar-event-chip--positive-large {
+  background: #86efac;
+  color: #14532d;
+}
+
+.calendar-event-chip--negative-1 {
   background: #fecaca;
   color: #7f1d1d;
+}
+
+.calendar-event-chip--negative-2 {
+  background: #fca5a5;
+  color: #7f1d1d;
+}
+
+.calendar-event-chip--negative-3 {
+  background: #ef4444;
+  color: #ffffff;
 }
 
 .calendar-more-events {
@@ -3381,27 +3616,35 @@ watch(
   color: var(--cds-text-secondary);
 }
 
-.calendar-upcoming-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
+.calendar-upcoming-table-wrap {
+  border: 1px solid var(--cds-border-subtle-01);
+  border-radius: 6px;
+  overflow: hidden;
 }
 
-.calendar-upcoming-item {
+.calendar-upcoming-table {
   width: 100%;
-  border: 1px solid var(--cds-border-subtle-01);
-  background: var(--cds-layer);
-  border-radius: 6px;
+  border-collapse: collapse;
+}
+
+.calendar-upcoming-table th,
+.calendar-upcoming-table td {
+  border-bottom: 1px solid var(--cds-border-subtle-01);
   padding: 7px 9px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  text-align: left;
+  font-size: 0.84rem;
+}
+
+.calendar-upcoming-table th {
+  background: var(--cds-layer-accent-01);
+  font-weight: 600;
+}
+
+.calendar-upcoming-row {
   cursor: pointer;
 }
 
-.calendar-upcoming-item:hover {
+.calendar-upcoming-row:hover {
   background: var(--cds-layer-hover);
 }
 

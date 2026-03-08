@@ -22,6 +22,7 @@ class Expense(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     icon_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
     )
@@ -56,6 +57,7 @@ class Expense(Base):
 class ExpenseBaseSchema(BaseModel):
     name: str
     category: str
+    notes: Optional[str] = None
     icon_id: Optional[UUID] = None
     icon_type: Literal["Letters", "Gravatar", "Icon"] = "Icon"
     estimated_amount_cents: int = 0
@@ -74,6 +76,7 @@ class ExpenseCreateSchema(ExpenseBaseSchema):
 class ExpenseUpdateSchema(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
+    notes: Optional[str] = None
     icon_id: Optional[UUID] = None
     icon_type: Optional[Literal["Letters", "Gravatar", "Icon"]] = None
     estimated_amount_cents: Optional[int] = None

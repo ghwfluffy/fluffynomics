@@ -169,6 +169,7 @@ def create_expense(
         user_id=current_user.id,
         name=payload.name.strip(),
         category=payload.category.strip(),
+        notes=payload.notes.strip() if payload.notes is not None else None,
         icon_id=icon_id,
         icon_type=icon_type,
         estimated_amount_cents=payload.estimated_amount_cents,
@@ -214,6 +215,7 @@ def update_expense(
     merged = ExpenseCreateSchema(
         name=data.get("name", expense.name),
         category=data.get("category", expense.category),
+        notes=data.get("notes", expense.notes),
         icon_id=data.get("icon_id", expense.icon_id),
         icon_type=data.get("icon_type", expense.icon_type),
         estimated_amount_cents=data.get(
@@ -240,6 +242,7 @@ def update_expense(
     )
     expense.name = merged.name.strip()
     expense.category = merged.category.strip()
+    expense.notes = merged.notes.strip() if merged.notes is not None else None
     expense.icon_type = icon_type
     expense.icon_id = icon_id
     expense.estimated_amount_cents = merged.estimated_amount_cents

@@ -121,6 +121,18 @@ def run_expense_simulation(
         account = accounts.get(expense.linked_account_id)
         if account is None:
             continue
+        if bool(account.closed):
+            postings.append(
+                SimulatedExpensePosting(
+                    expense_id=expense.id,
+                    account_id=account.id,
+                    effective_date=as_of_date,
+                    delta_cents=0,
+                    status="skipped",
+                    reason="linked account is closed",
+                )
+            )
+            continue
         period = _parse_period(expense.general_frequency)
         due_dates = list(_iter_due_dates(expense, as_of_date, period))
         if not due_dates:

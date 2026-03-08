@@ -59,6 +59,9 @@ organizations:
 - name: Coinbase
   icon: coinbase.png
   url: https://www.coinbase.com
+- name: Computershare
+  icon: computershare.png
+  url: https://ic4.computershare.com/
 - name: Kraken
   icon: kraken.png
   url: https://www.kraken.com
@@ -68,6 +71,9 @@ organizations:
 - name: Crypto.com
   icon: crypto_com.png
   url: https://crypto.com
+- name: MetaMask
+  icon: metamask.png
+  url: https://metamask.io
 - name: PayPal
   icon: paypal.png
   url: https://www.paypal.com
@@ -92,6 +98,9 @@ organizations:
 - name: Empower
   icon: empower.png
   url: https://www.empower.com
+- name: Ascensus
+  icon: ascensus.jpg
+  url: https://www.ascensus.com
 - name: American Express
   icon: american_express.png
   url: https://www.americanexpress.com

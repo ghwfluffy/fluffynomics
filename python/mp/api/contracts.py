@@ -66,6 +66,31 @@ def _validate_recurring_period(raw: str | None) -> None:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _payment_period_kind(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    normalized = raw.strip()
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    if lowered in LEGACY_RECURRING_PERIODS:
+        return lowered
+    try:
+        parsed = parse_recurring_period(normalized)
+    except ValueError:
+        return None
+    return parsed.kind
+
+
+def _requires_payment_day(payment_period: str | None) -> bool:
+    kind = _payment_period_kind(payment_period)
+    if kind in {"weekly", "biweekly"}:
+        return False
+    if kind in {"weekly_weekday", "biweekly_weekday", "every_n_weeks_weekday"}:
+        return False
+    return True
+
+
 def _validate_contract_payload(
     payload: ContractCreateSchema,
     linked_account: Account | None,
@@ -83,12 +108,13 @@ def _validate_contract_payload(
     _validate_last_payment_date(payload.last_payment_date)
     _validate_expiration_date(payload.expiration_date)
     _validate_recurring_period(payload.payment_period)
-    if payload.payment_day is None:
-        raise HTTPException(status_code=400, detail="payment_day is required")
-    if not (1 <= payload.payment_day <= 31):
-        raise HTTPException(
-            status_code=400, detail="payment_day must be in range 1..31"
-        )
+    if _requires_payment_day(payload.payment_period):
+        if payload.payment_day is None:
+            raise HTTPException(status_code=400, detail="payment_day is required")
+        if not (1 <= payload.payment_day <= 31):
+            raise HTTPException(
+                status_code=400, detail="payment_day must be in range 1..31"
+            )
     if payload.billing_day is not None and not (1 <= payload.billing_day <= 31):
         raise HTTPException(
             status_code=400, detail="billing_day must be in range 1..31"
@@ -208,6 +234,9 @@ def create_contract(
         payload.organization,
         db,
     )
+    normalized_payment_day = (
+        payload.payment_day if _requires_payment_day(payload.payment_period) else None
+    )
     contract = Contract(
         user_id=current_user.id,
         name=payload.name.strip(),
@@ -224,7 +253,7 @@ def create_contract(
         else None,
         last_payment_date=payload.last_payment_date,
         payment_period=payload.payment_period,
-        payment_day=payload.payment_day,
+        payment_day=normalized_payment_day,
         expiration_date=payload.expiration_date or DEFAULT_CONTRACT_EXPIRATION,
         notes=payload.notes,
         category=(payload.category or "Financial"),
@@ -299,6 +328,9 @@ def update_contract(
         merged.organization,
         db,
     )
+    normalized_payment_day = (
+        merged.payment_day if _requires_payment_day(merged.payment_period) else None
+    )
 
     contract.name = merged.name.strip()
     contract.type = merged.type
@@ -314,7 +346,7 @@ def update_contract(
     )
     contract.last_payment_date = merged.last_payment_date
     contract.payment_period = merged.payment_period
-    contract.payment_day = merged.payment_day
+    contract.payment_day = normalized_payment_day
     contract.expiration_date = merged.expiration_date or DEFAULT_CONTRACT_EXPIRATION
     contract.notes = merged.notes
     contract.category = merged.category or "Financial"

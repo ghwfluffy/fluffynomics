@@ -54,6 +54,10 @@ Use `UnifiedDropdown` for dropdown/combobox-style menus (account type picker, or
 - searchable/custom entry behavior,
 consistent across the app.
 
+Recurring period UI (`RecurringPeriodField.vue`) must support interval schedules in addition to base monthly/yearly:
+- `every_n_months_day` (every N months on a day),
+- `every_n_years_month_day` (every N years on month/day).
+
 Use `AddTypePickerButton.vue` for right-aligned "Add ..." flows that open a type-selection dropdown from the action button. This is now shared by Accounts and Contracts tabs.
 
 Forecast-date UX:
@@ -110,6 +114,7 @@ Organization fuzzy search sources organizations from `GET /organizations` (not o
   - downloads a JSON package from `POST /data/export`
 - `Import Data`
   - opens modal for package file selection + optional password
+  - accepts both modern JSON export package files and legacy `.yml/.yaml` files
   - uploads package to `POST /data/import` with replace semantics
   - app reloads after successful import to refresh dashboard state
 - `Logout`
@@ -177,6 +182,7 @@ Contracts intentionally mirror account tile UX:
 - link icon and update-age clock badge,
 - bottom-right three-dot menu for edit/delete.
 - `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
+- Update modal includes a `Mark Expired` action that sets expiration into the past immediately.
 - Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections.
 - active contracts are grouped by `type + category` (example: `Incoming Work`, `Payment Digital`).
 
@@ -184,12 +190,14 @@ Contract create/edit also mirrors account create/edit patterns:
 - organization fuzzy dropdown from `/organizations`,
 - icon selection/upload from `/icons` and generated icon variants,
 - immutable type selected before modal opens.
+- `Payment Day` field is hidden and omitted from payload for week-based recurring periods (`weekly_weekday`, `biweekly_weekday`, `every_n_weeks_weekday`).
 
 ## Expenses UX
 
 Expenses support CRUD in `ExpensesTab.vue` with:
 - name,
 - category,
+- notes,
 - linked account (required),
 - icon selection (`Letters|Gravatar|Icon`),
 - estimated amount,

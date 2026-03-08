@@ -103,7 +103,7 @@
             ref="importFileInput"
             class="import-file-input"
             type="file"
-            accept="application/json,.json"
+            accept="application/json,.json,.yml,.yaml,text/yaml,text/x-yaml"
             @change="onImportFileSelected"
           />
           <label class="bank-label" for="import-password">Password (optional)</label>
@@ -123,7 +123,7 @@
           <button
             class="cds--btn cds--btn--primary"
             type="button"
-            :disabled="importBusy || !importPackageObject"
+            :disabled="importBusy || importPackageData === null"
             @click="runImport"
           >
             {{ importBusy ? 'Importing...' : 'Import And Replace' }}
@@ -384,7 +384,7 @@ const importDialogOpen = ref(false)
 const importPassword = ref('')
 const importBusy = ref(false)
 const importFileName = ref('')
-const importPackageObject = ref<Record<string, unknown> | null>(null)
+const importPackageData = ref<Record<string, unknown> | string | null>(null)
 const importFileInput = ref<HTMLInputElement | null>(null)
 const profileMenuRef = ref<HTMLElement | null>(null)
 const profileMenuOpen = ref(false)
@@ -767,12 +767,39 @@ const onWindowPointerDown = (event: Event) => {
   closeProfileMenu()
 }
 
+const onWindowKeyDown = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') {
+    return
+  }
+  if (adminDialogOpen.value) {
+    closeAdminDialog()
+    return
+  }
+  if (profileDialogOpen.value) {
+    closeProfileDialog()
+    return
+  }
+  if (importDialogOpen.value) {
+    closeImportDialog()
+    return
+  }
+  if (exportDialogOpen.value) {
+    closeExportDialog()
+    return
+  }
+  if (profileMenuOpen.value) {
+    closeProfileMenu()
+  }
+}
+
 onMounted(() => {
   window.addEventListener('pointerdown', onWindowPointerDown)
+  window.addEventListener('keydown', onWindowKeyDown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('pointerdown', onWindowPointerDown)
+  window.removeEventListener('keydown', onWindowKeyDown)
 })
 
 watch(adminTab, async (tab) => {
@@ -834,7 +861,7 @@ const runExport = async () => {
 const openImportDialog = async () => {
   importPassword.value = ''
   importFileName.value = ''
-  importPackageObject.value = null
+  importPackageData.value = null
   importDialogOpen.value = true
   await nextTick()
   if (importFileInput.value) {
@@ -858,19 +885,29 @@ const onImportFileSelected = async (event: Event) => {
   const file = input.files?.[0]
   if (!file) {
     importFileName.value = ''
-    importPackageObject.value = null
+    importPackageData.value = null
     return
   }
   try {
     const text = await file.text()
-    const parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Package file must contain a JSON object')
+    const normalized = text.trim()
+    if (!normalized) {
+      throw new Error('Package file is empty')
     }
-    importPackageObject.value = parsed as Record<string, unknown>
+    let parsed: unknown = null
+    try {
+      parsed = JSON.parse(normalized)
+    } catch {
+      parsed = null
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      importPackageData.value = parsed as Record<string, unknown>
+    } else {
+      importPackageData.value = normalized
+    }
     importFileName.value = file.name
   } catch (err: any) {
-    importPackageObject.value = null
+    importPackageData.value = null
     importFileName.value = ''
     errorMessage.value = err?.message || 'Invalid package file'
     snackbar.value = true
@@ -878,14 +915,14 @@ const onImportFileSelected = async (event: Event) => {
 }
 
 const runImport = async () => {
-  if (!importPackageObject.value) {
+  if (importPackageData.value === null) {
     return
   }
   importBusy.value = true
   try {
     const password = importPassword.value.trim() || null
     await request.post('/data/import', {
-      package: importPackageObject.value,
+      package: importPackageData.value,
       password,
       replace_existing: true,
     })
