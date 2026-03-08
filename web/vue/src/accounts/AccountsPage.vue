@@ -1420,13 +1420,14 @@ watch(
   border-radius: 12px;
   position: relative;
   padding-bottom: 2rem;
-  padding-left: 2.1rem;
+  padding-left: 2.3rem;
+  padding-top: 0.62rem;
 }
 
 .tile-icon {
   position: absolute;
   left: 0.55rem;
-  top: 0.65rem;
+  top: 0.7rem;
   width: 24px;
   height: 24px;
   border-radius: 6px;
@@ -1475,9 +1476,9 @@ watch(
 .tile-update-clock {
   position: absolute;
   right: 0.75rem;
-  top: 0.6rem;
-  width: 16px;
-  height: 16px;
+  top: 0.42rem;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   border: 2px solid currentColor;
   cursor: default;
@@ -1513,13 +1514,13 @@ watch(
 
 .tile-update-clock::before {
   width: 2px;
-  height: 5px;
+  height: 6px;
   transform: translate(-50%, -100%) rotate(0deg);
 }
 
 .tile-update-clock::after {
   width: 2px;
-  height: 4px;
+  height: 5px;
   transform: translate(-50%, -100%) rotate(60deg);
 }
 
@@ -1543,7 +1544,9 @@ watch(
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--cds-text-primary);
+  margin-top: 0.05rem;
   margin-bottom: 2px;
+  line-height: 1.2;
 }
 
 .tile-sub {
