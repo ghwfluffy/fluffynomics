@@ -189,7 +189,7 @@
         <h3>{{ calendarMonthLabel }}</h3>
         <button class="cds--btn cds--btn--ghost" type="button" @click="goToNextCalendarMonth">Next</button>
       </div>
-      <div class="calendar-grid">
+      <div class="calendar-grid calendar-grid--desktop">
         <div v-for="weekday in calendarWeekdayLabels" :key="weekday" class="calendar-weekday">{{ weekday }}</div>
         <div
           v-for="cell in calendarCells"
@@ -212,6 +212,33 @@
             </button>
             <div v-if="cell.events.length > 3" class="calendar-more-events">+{{ cell.events.length - 3 }} more</div>
           </div>
+        </div>
+      </div>
+      <div class="calendar-mobile" aria-label="Mobile calendar month view">
+        <div class="calendar-mobile-weekdays">
+          <div v-for="weekday in calendarWeekdayLabels" :key="`mobile-${weekday}`" class="calendar-mobile-weekday">
+            {{ weekday.slice(0, 1) }}
+          </div>
+        </div>
+        <div class="calendar-mobile-grid">
+          <button
+            v-for="cell in calendarCells"
+            :key="`mobile-${cell.key}`"
+            type="button"
+            class="calendar-mobile-day"
+            :class="[
+              calendarMobileDayToneClass(cell.dailyNetChangeCents, cell.events.length > 0),
+              {
+                'calendar-mobile-day--outside': !cell.inMonth,
+                'calendar-mobile-day--today': cell.isToday,
+                'calendar-mobile-day--interactive': cell.events.length > 0,
+              },
+            ]"
+            :aria-label="calendarMobileDayAriaLabel(cell)"
+            @click="openCalendarDayDialog(cell)"
+          >
+            <span class="calendar-mobile-day-number">{{ cell.dayNumber }}</span>
+          </button>
         </div>
       </div>
       <div class="calendar-upcoming">
@@ -775,6 +802,39 @@
         </div>
       </section>
     </div>
+
+    <div v-if="calendarDayDialogOpen && selectedCalendarDay" class="modal-backdrop">
+      <section class="confirm-card confirm-card--wide cds--tile calendar-day-dialog">
+        <h3>{{ selectedCalendarDay.dateLabel }}</h3>
+        <p>
+          Net change:
+          <strong :class="deltaClass(selectedCalendarDay.dailyNetChangeCents)">
+            {{ signedCents(selectedCalendarDay.dailyNetChangeCents) }}
+          </strong>
+        </p>
+        <div v-if="selectedCalendarDay.events.length === 0" class="calendar-day-dialog-empty">No changes on this day.</div>
+        <div v-else class="calendar-day-dialog-list">
+          <button
+            v-for="event in selectedCalendarDay.events"
+            :key="`day-dialog-${event.key}`"
+            type="button"
+            class="calendar-day-dialog-item"
+            @click="openCalendarEventFromDay(event)"
+          >
+            <span class="calendar-day-dialog-item-main">
+              <strong>{{ event.title }}</strong>
+              <span>{{ event.kindLabel }}</span>
+            </span>
+            <span class="calendar-day-dialog-item-amount" :class="deltaClass(event.signedAmountCents)">
+              {{ signedCents(event.signedAmountCents) }}
+            </span>
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" @click="closeCalendarDayDialog">Close</button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -912,6 +972,17 @@ interface CalendarEventItem {
   dateIso: string
   dateLabel: string
   signedAmountCents: number
+}
+
+interface CalendarCell {
+  key: string
+  dateIso: string
+  dateLabel: string
+  dayNumber: number
+  inMonth: boolean
+  isToday: boolean
+  events: CalendarEventItem[]
+  dailyNetChangeCents: number
 }
 
 type ContractsTabExpose = {
@@ -1093,6 +1164,8 @@ const calendarContracts = ref<ContractCalendarPayload[]>([])
 const calendarExpenses = ref<ExpenseCalendarPayload[]>([])
 const calendarEventDialogOpen = ref(false)
 const selectedCalendarEvent = ref<CalendarEventItem | null>(null)
+const calendarDayDialogOpen = ref(false)
+const selectedCalendarDay = ref<CalendarCell | null>(null)
 
 const accountTypes = [
   { label: 'Checking', value: 'checking' },
@@ -2421,20 +2494,32 @@ const calendarEventsByIso = computed(() => {
   return map
 })
 
-const calendarCells = computed(() => {
+const calendarNetChangeByIso = computed(() => {
+  const map = new Map<string, number>()
+  for (const event of calendarEvents.value) {
+    map.set(event.dateIso, (map.get(event.dateIso) || 0) + event.signedAmountCents)
+  }
+  return map
+})
+
+const calendarCells = computed<CalendarCell[]>(() => {
   const month = monthStart.value
   const firstCell = calendarGridStart.value
   const todayIso = formatCalendarDateIso(new Date())
-  const cells: Array<{ key: string; dayNumber: number; inMonth: boolean; isToday: boolean; events: CalendarEventItem[] }> = []
+  const cells: CalendarCell[] = []
   for (let i = 0; i < 42; i += 1) {
     const day = addDays(firstCell, i)
     const dayIso = formatCalendarDateIso(day)
+    const events = calendarEventsByIso.value.get(dayIso) || []
     cells.push({
       key: dayIso,
+      dateIso: dayIso,
+      dateLabel: day.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       dayNumber: day.getDate(),
       inMonth: day.getMonth() === month.getMonth() && day.getFullYear() === month.getFullYear(),
       isToday: dayIso === todayIso,
-      events: calendarEventsByIso.value.get(dayIso) || [],
+      events,
+      dailyNetChangeCents: calendarNetChangeByIso.value.get(dayIso) || 0,
     })
   }
   return cells
@@ -2473,6 +2558,31 @@ const calendarEventToneClass = (event: CalendarEventItem) => {
     return 'calendar-event-chip--negative-2'
   }
   return 'calendar-event-chip--negative-3'
+}
+
+const calendarMobileDayToneClass = (amountCents: number, hasEvents: boolean) => {
+  if (!hasEvents) {
+    return 'calendar-mobile-day--none'
+  }
+  const abs = Math.abs(amountCents)
+  if (abs < 20_000) {
+    return 'calendar-mobile-day--low'
+  }
+  if (amountCents > 0) {
+    return abs < 100_000 ? 'calendar-mobile-day--positive-mid' : 'calendar-mobile-day--positive-high'
+  }
+  if (amountCents < 0) {
+    return abs < 100_000 ? 'calendar-mobile-day--negative-mid' : 'calendar-mobile-day--negative-high'
+  }
+  return 'calendar-mobile-day--low'
+}
+
+const calendarMobileDayAriaLabel = (cell: CalendarCell) => {
+  if (!cell.events.length) {
+    return `${cell.dateLabel}, no changes`
+  }
+  const eventCount = `${cell.events.length} event${cell.events.length === 1 ? '' : 's'}`
+  return `${cell.dateLabel}, ${eventCount}, net change ${signedCents(cell.dailyNetChangeCents)}`
 }
 
 const projectedRateRows = computed(() => rateRowsFromDailyCents(projectedNetWorthDailyRateCents.value))
@@ -2883,9 +2993,27 @@ const goToNextCalendarMonth = async () => {
   await loadCalendarSources()
 }
 
+const openCalendarDayDialog = (cell: CalendarCell) => {
+  if (!cell.events.length) {
+    return
+  }
+  selectedCalendarDay.value = cell
+  calendarDayDialogOpen.value = true
+}
+
+const closeCalendarDayDialog = () => {
+  calendarDayDialogOpen.value = false
+  selectedCalendarDay.value = null
+}
+
 const openCalendarEvent = (event: CalendarEventItem) => {
   selectedCalendarEvent.value = event
   calendarEventDialogOpen.value = true
+}
+
+const openCalendarEventFromDay = (event: CalendarEventItem) => {
+  closeCalendarDayDialog()
+  openCalendarEvent(event)
 }
 
 const closeCalendarEventDialog = () => {
@@ -3096,6 +3224,10 @@ const onWindowKeyDown = (event: KeyboardEvent) => {
   }
   if (iconPickerDialog.value) {
     cancelIconPickerModal()
+    return
+  }
+  if (calendarDayDialogOpen.value) {
+    closeCalendarDayDialog()
     return
   }
   if (calendarEventDialogOpen.value) {
@@ -3820,6 +3952,10 @@ watch(
   border-bottom: 0;
 }
 
+.calendar-mobile {
+  display: none;
+}
+
 .calendar-weekday {
   padding: 8px;
   font-size: 0.78rem;
@@ -3995,6 +4131,61 @@ watch(
   font-size: 0.82rem;
 }
 
+.calendar-day-dialog {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.calendar-day-dialog h3,
+.calendar-day-dialog p {
+  margin: 0;
+}
+
+.calendar-day-dialog-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.calendar-day-dialog-item {
+  border: 1px solid var(--cds-border-subtle-01);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.calendar-day-dialog-item-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.calendar-day-dialog-item-main strong,
+.calendar-day-dialog-item-main span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-day-dialog-item-main span {
+  color: var(--cds-text-secondary);
+  font-size: 0.78rem;
+}
+
+.calendar-day-dialog-item-amount {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.calendar-day-dialog-empty {
+  color: var(--cds-text-secondary);
+}
+
 .section-wrap {
   margin-bottom: 1.25rem;
 }
@@ -4035,21 +4226,93 @@ watch(
     grid-template-columns: 1fr;
   }
 
-  .calendar-grid {
-    grid-template-columns: repeat(1, minmax(0, 1fr));
-  }
-
-  .calendar-weekday {
+  .calendar-grid--desktop {
     display: none;
   }
 
-  .calendar-day-cell {
-    border-right: 0;
-    min-height: 88px;
+  .calendar-mobile {
+    display: grid;
+    gap: 0.45rem;
   }
 
-  .calendar-day-cell--outside {
-    display: none;
+  .calendar-mobile-weekdays,
+  .calendar-mobile-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+
+  .calendar-mobile-weekday {
+    text-align: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--cds-text-secondary);
+  }
+
+  .calendar-mobile-day {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    min-height: 2.85rem;
+    padding: 0.15rem;
+    display: grid;
+    place-items: center;
+    background: #f8fafc;
+    color: #0f172a;
+  }
+
+  .calendar-mobile-day-number {
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .calendar-mobile-day--interactive {
+    cursor: pointer;
+  }
+
+  .calendar-mobile-day--outside {
+    opacity: 0.45;
+  }
+
+  .calendar-mobile-day--today {
+    box-shadow: 0 0 0 2px #0f62fe inset;
+  }
+
+  .calendar-mobile-day--none {
+    background: #f8fafc;
+  }
+
+  .calendar-mobile-day--low {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    color: #1e3a8a;
+  }
+
+  .calendar-mobile-day--positive-mid {
+    background: #bbf7d0;
+    border-color: #4ade80;
+    color: #14532d;
+  }
+
+  .calendar-mobile-day--positive-high {
+    background: #4ade80;
+    border-color: #16a34a;
+    color: #052e16;
+  }
+
+  .calendar-mobile-day--negative-mid {
+    background: #fecaca;
+    border-color: #f87171;
+    color: #7f1d1d;
+  }
+
+  .calendar-mobile-day--negative-high {
+    background: #ef4444;
+    border-color: #b91c1c;
+    color: #ffffff;
+  }
+
+  .calendar-upcoming-table-wrap {
+    overflow-x: auto;
   }
 }
 

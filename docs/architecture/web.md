@@ -28,6 +28,7 @@ Calendar tab behavior:
 - shows month view with previous/next month navigation.
 - renders upcoming fee, contract, and expense events on day cells.
 - clicking an event opens actions and supports `Edit` / `Update` using the same object flows as the source tab.
+- on narrow screens, swaps to a compact month grid with day-level color coding by net change magnitude; tapping a day opens the exact event names and amounts for that date.
 
 ## Design System Direction
 
