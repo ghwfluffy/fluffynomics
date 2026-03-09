@@ -22,6 +22,7 @@ Dashboard top-level tabs are now:
 - `Calendar`
 
 `Overview` is the default tab on dashboard load.
+On narrow screens, the desktop tab bar is replaced with a top-of-page section dropdown that drives the same dashboard tab state.
 
 Calendar tab behavior:
 - shows month view with previous/next month navigation.

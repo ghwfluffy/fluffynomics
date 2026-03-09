@@ -1,6 +1,17 @@
 <template>
   <div class="dashboard">
-    <div class="cds--tabs" role="navigation" aria-label="Dashboard Sections">
+    <div class="dashboard-mobile-tab-picker">
+      <label class="dashboard-mobile-tab-picker-label" for="dashboard-tab-select">Section</label>
+      <div class="cds--select">
+        <select id="dashboard-tab-select" v-model="activeTab" class="cds--select-input" aria-label="Dashboard section">
+          <option v-for="tab in dashboardTabs" :key="tab.value" :value="tab.value">{{ tab.label }}</option>
+        </select>
+        <svg class="cds--select__arrow" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 11 3 6l.7-.7L8 9.6l4.3-4.3.7.7z" />
+        </svg>
+      </div>
+    </div>
+    <div class="cds--tabs dashboard-tabs" role="navigation" aria-label="Dashboard Sections">
       <ul class="cds--tabs__nav" role="tablist">
         <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'overview' }" role="presentation">
           <button
@@ -911,6 +922,8 @@ type ExpensesTabExpose = {
   openFromCalendar: (expenseId: string, action: CalendarEventAction) => Promise<boolean>
 }
 
+type DashboardTab = 'overview' | 'accounts' | 'contracts' | 'expenses' | 'calendar'
+
 interface Section {
   key: string
   title: string
@@ -991,7 +1004,14 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
-const activeTab = ref<'overview' | 'accounts' | 'contracts' | 'expenses' | 'calendar'>('overview')
+const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'accounts', label: 'Accounts' },
+  { value: 'contracts', label: 'Contracts' },
+  { value: 'expenses', label: 'Expenses' },
+  { value: 'calendar', label: 'Calendar' },
+]
+const activeTab = ref<DashboardTab>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
@@ -3179,6 +3199,23 @@ watch(
   margin-bottom: 1.25rem;
 }
 
+.dashboard-tabs {
+  margin-bottom: 0.75rem;
+}
+
+.dashboard-mobile-tab-picker {
+  display: none;
+  margin-bottom: 0.75rem;
+}
+
+.dashboard-mobile-tab-picker-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--cds-text-secondary);
+}
+
 .widget-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -4017,6 +4054,14 @@ watch(
 }
 
 @media (max-width: 640px) {
+  .dashboard-mobile-tab-picker {
+    display: block;
+  }
+
+  .dashboard-tabs {
+    display: none;
+  }
+
   .forecast-popover {
     min-width: min(330px, calc(100vw - 2.5rem));
     right: 0;
