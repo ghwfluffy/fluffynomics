@@ -56,6 +56,9 @@ Use `UnifiedDropdown` for dropdown/combobox-style menus (account type picker, or
 - searchable/custom entry behavior,
 consistent across the app.
 
+For account-selection inputs specifically (linked account, source account, wallet-backed account, credit-card payment funding account), prefer `UnifiedDropdown` with `searchable` enabled so large account lists stay usable.
+When a searchable dropdown already has a selected option, opening it should still show the full option list until the user starts typing a different query.
+
 Recurring period UI (`RecurringPeriodField.vue`) must support interval schedules in addition to base monthly/yearly:
 - `every_n_months_day` (every N months on a day),
 - `every_n_years_month_day` (every N years on month/day).
@@ -73,6 +76,11 @@ Forecast-date UX:
 View mode UX:
 - Accounts/Contracts/Expenses share one table-vs-tiles mode state.
 - Toggling `Tiles`/`Table` in one tab applies to the other tab for consistency.
+
+Expenses tab grouping:
+- enabled expenses stay under their normal category labels.
+- disabled expenses render separately as `Disabled <Category>` sections and sort after enabled categories.
+- the expenses table `Category` column and category sort should follow that same display grouping so tiles and table stay consistent.
 
 Trend widget behavior:
 - Net worth trend sources historical data from `GET /accounts/net-worth/history`.
@@ -159,8 +167,9 @@ In `AccountsPage.vue`:
   - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate
   - crypto tile balance is derived from sum(quantity * exchange_rate)
   - for `credit_card` accounts, update modal switches to a queued-payment flow:
-    - inputs `Current Balance`, `Pending Balance`, `Amount Paying`, and `Pay From`
+    - inputs `Current Balance`, `Pending Balance`, `Rewards Balance`, `Amount Paying`, and `Pay From`
     - calls `POST /accounts/{id}/queue-credit-card-payment`
+    - `Amount Paying = 0` is valid and means “sync card balance only, no queued payment”
     - tile/table balances immediately render as if the queued payment has already reduced both the card and the funding account
     - while a queued payment is active, the modal reopens with the queued values prefilled so the user can edit them
     - editing an active queued payment uses `PUT /accounts/{id}/queue-credit-card-payment` and restarts the 24-hour settlement timer

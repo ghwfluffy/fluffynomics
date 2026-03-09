@@ -395,6 +395,7 @@ class QueueCreditCardPaymentCreateSchema(BaseModel):
     pending_balance_cents: int = 0
     payment_cents: Optional[int] = None
     source_account_id: UUID
+    rewards_balance_cents: Optional[int] = None
 
 
 class AccountRankUpdateSchema(BaseModel):

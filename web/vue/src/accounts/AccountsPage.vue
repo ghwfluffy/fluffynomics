@@ -486,10 +486,12 @@
           <template v-if="updateMode === 'credit_card_payment'">
             <DollarField v-model="updateForm.currentBalanceCents" label="Current Balance" />
             <DollarField v-model="updateForm.pendingBalanceCents" label="Pending Balance" />
+            <DollarField v-model="updateForm.rewardsCents" label="Rewards Balance" />
             <DollarField v-model="updateForm.paymentCents" label="Amount Paying" />
-            <BankField
+            <UnifiedDropdown
               v-model="updateForm.sourceAccountId"
               label="Pay From"
+              searchable
               :options="creditCardFundingAccountOptions"
             />
           </template>
@@ -1334,7 +1336,7 @@ const accountsTableRows = computed(() => {
               : key === 'type'
                 ? a.type
                 : key === 'balance'
-                  ? tableBalanceCents(a)
+                  ? visibleBalanceCents(a)
                   : new Date(a.last_update || 0).getTime()
     const bv =
       key === 'section'
@@ -1348,7 +1350,7 @@ const accountsTableRows = computed(() => {
               : key === 'type'
                 ? b.type
                 : key === 'balance'
-                  ? tableBalanceCents(b)
+                  ? visibleBalanceCents(b)
                   : new Date(b.last_update || 0).getTime()
     if (typeof av === 'number' && typeof bv === 'number') {
       return accountsSortDir.value === 'asc' ? av - bv : bv - av
@@ -1813,17 +1815,16 @@ const updateModalBalanceCents = (account: AccountPayload) =>
 const updateModalUsdBalanceCents = (account: AccountPayload) =>
   intOrZero(account.usd_balance_cents) + queuedOutgoingCreditCardPaymentCents(account.id)
 
-const balanceLabel = (account: AccountPayload) => {
+const visibleBalanceCents = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
-    const total = (account.stock_positions || []).reduce((sum, position) => {
+    return (account.stock_positions || []).reduce((sum, position) => {
       const qty = Number.parseFloat(position.quantity || '0')
       const price = position.last_price_cents || 0
       if (!Number.isFinite(qty)) {
         return sum
       }
       return sum + Math.round(qty * price)
-    }, 0)
-    return `Balance ${cents(total + (account.balance_cents || 0))}`
+    }, account.balance_cents || 0)
   }
   if (account.type === 'crypto_wallet' || account.type === 'crypto_exchange') {
     const total = (account.crypto_positions || []).reduce((sum, position) => {
@@ -1834,17 +1835,19 @@ const balanceLabel = (account: AccountPayload) => {
       }
       return sum + Math.round(qty * rateCents)
     }, 0)
-    const usdCash = account.type === 'crypto_exchange' ? account.usd_balance_cents || 0 : 0
-    return `Balance ${cents(total + usdCash)}`
+    return total + (account.type === 'crypto_exchange' ? account.usd_balance_cents || 0 : 0)
   }
   if (account.type === 'cash') {
-    const computed = (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0)
-    return `Balance ${cents(computed + accountRewardsCents(account))}`
+    return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0) + accountRewardsCents(account)
   }
   if (account.type === 'credit_card') {
-    return `Balance ${cents(account.balance_cents || 0)}`
+    return account.balance_cents || 0
   }
-  return `Balance ${cents((account.balance_cents || 0) + accountRewardsCents(account))}`
+  return (account.balance_cents || 0) + accountRewardsCents(account)
+}
+
+const balanceLabel = (account: AccountPayload) => {
+  return `Balance ${cents(visibleBalanceCents(account))}`
 }
 
 const tableBalanceCents = (account: AccountPayload) => {
@@ -2165,7 +2168,7 @@ const loadWidgets = async () => {
 }
 
 const balanceTone = (account: AccountPayload, sectionKey: string) => {
-  const amountCents = tableBalanceCents(account)
+  const amountCents = visibleBalanceCents(account)
   if (amountCents === 0) {
     return 'delta-neutral'
   }
@@ -3171,17 +3174,13 @@ const submitUpdateValue = async () => {
       snackbar.value = true
       return
     }
-    if (!account.queued_credit_card_payment && (updateForm.value.paymentCents || 0) <= 0) {
-      errorMessage.value = 'Payment amount must be greater than zero'
-      snackbar.value = true
-      return
-    }
     const endpoint = `/accounts/${account.id}/queue-credit-card-payment`
     const payload = {
       current_balance_cents: Math.max(0, updateForm.value.currentBalanceCents || 0),
       pending_balance_cents: Math.max(0, updateForm.value.pendingBalanceCents || 0),
       payment_cents: Math.max(0, updateForm.value.paymentCents || 0),
       source_account_id: updateForm.value.sourceAccountId,
+      rewards_balance_cents: Math.max(0, updateForm.value.rewardsCents || 0),
     }
     if (account.queued_credit_card_payment) {
       await request.put(endpoint, payload)

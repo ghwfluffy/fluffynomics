@@ -1610,10 +1610,23 @@ def queue_credit_card_payment(
         current_balance_cents,
         pending_balance_cents,
         payment_cents,
-    ) = _validate_credit_card_queue_payload(db, current_user.id, credit_card, payload)
+    ) = _validate_credit_card_queue_payload(
+        db,
+        current_user.id,
+        credit_card,
+        payload,
+        allow_zero_payment=True,
+    )
 
     credit_card.balance_cents = current_balance_cents + pending_balance_cents
+    if payload.rewards_balance_cents is not None:
+        credit_card.rewards_balance_cents = max(0, int(payload.rewards_balance_cents))
     credit_card.last_update = datetime.utcnow()
+    if payment_cents == 0:
+        _record_account_value_history(db, credit_card)
+        db.commit()
+        db.refresh(credit_card)
+        return _serialize_account(db, credit_card)
     queued_at = datetime.utcnow()
     effective_at = queued_at + timedelta(hours=24)
     db.add(
@@ -1689,6 +1702,8 @@ def update_queued_credit_card_payment(
 
     now = datetime.utcnow()
     credit_card.balance_cents = current_balance_cents + pending_balance_cents
+    if payload.rewards_balance_cents is not None:
+        credit_card.rewards_balance_cents = max(0, int(payload.rewards_balance_cents))
     credit_card.last_update = now
     if payment_cents == 0:
         db.delete(active_existing)

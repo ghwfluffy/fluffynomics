@@ -283,11 +283,13 @@
           <UnifiedDropdown
             v-model="profilePaypalAccountId"
             label="PayPal Linked Account"
+            searchable
             :options="walletAccountDropdownOptions"
           />
           <UnifiedDropdown
             v-model="profileGooglePayAccountId"
             label="Google Pay Linked Account"
+            searchable
             :options="walletAccountDropdownOptions"
           />
         </div>

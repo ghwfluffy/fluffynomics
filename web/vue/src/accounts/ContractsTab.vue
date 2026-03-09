@@ -188,9 +188,9 @@
             <label for="contract-auto">Automatic</label>
           </div>
           <DollarField v-model="contractForm.amount_cents" label="Amount" />
-          <UnifiedDropdown v-model="linkedTargetSelector" label="Linked Account" :options="accountDropdownOptions" />
+          <UnifiedDropdown v-model="linkedTargetSelector" label="Linked Account" searchable :options="accountDropdownOptions" />
           <div v-if="contractForm.type === 'transfer'">
-            <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" :options="sourceAccountDropdownOptions" />
+            <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" searchable :options="sourceAccountDropdownOptions" />
           </div>
           <RecurringPeriodField v-model="contractForm.payment_period" label="Payment Period" />
           <BankField v-if="showPaymentDayField" v-model="contractForm.payment_day" label="Payment Day" type="number" required />

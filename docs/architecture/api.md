@@ -99,8 +99,9 @@ Defined in `python/mp/api/accounts.py`.
   - upserts one daily net-worth snapshot for the user (same day updates overwrite that day’s snapshot)
 - `POST /accounts/{account_id}/queue-credit-card-payment`
   - credit-card-only update flow used by the dashboard Update modal
-  - payload captures `current_balance_cents`, `pending_balance_cents`, `payment_cents`, and `source_account_id`
+  - payload captures `current_balance_cents`, `pending_balance_cents`, `rewards_balance_cents`, `payment_cents`, and `source_account_id`
   - stores the card balance as `current + pending` immediately, then creates a queued payment with `effective_at = queued_at + 24h`
+  - if `payment_cents = 0`, it updates the card balance only and does not create a queued payment
   - account reads present balances as if the payment has already reduced both the credit card and the funding account, even before settlement
   - settlement is lazy: once `effective_at` is reached, the next account read/write applies the transfer into the underlying account balances and records value history
 - `PUT /accounts/{account_id}/queue-credit-card-payment`

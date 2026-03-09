@@ -117,6 +117,9 @@ const filteredOptions = computed(() => {
   if (!query) {
     return props.options
   }
+  if (selectedLabel.value && query === selectedLabel.value.trim().toLowerCase()) {
+    return props.options
+  }
   return props.options.filter((option) => option.label.toLowerCase().includes(query))
 })
 

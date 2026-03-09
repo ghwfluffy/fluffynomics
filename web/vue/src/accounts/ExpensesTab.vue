@@ -8,8 +8,8 @@
     </div>
 
     <template v-if="viewMode === 'tiles'">
-      <section v-for="section in sections" :key="section.category" class="section-wrap">
-        <h2 class="section-title">{{ section.category }}</h2>
+      <section v-for="section in sections" :key="section.label" class="section-wrap">
+        <h2 class="section-title">{{ section.label }}</h2>
         <div v-if="section.items.length" class="section-grid">
           <article v-for="item in section.items" :key="item.id" class="cds--tile account-tile">
             <img v-if="expenseIconUrl(item)" :src="expenseIconUrl(item)" class="tile-icon" alt="Expense icon" />
@@ -66,7 +66,7 @@
                 <div v-else class="table-icon table-icon--empty"></div>
               </td>
               <td>{{ item.name }}</td>
-              <td>{{ item.category }}</td>
+              <td>{{ expenseCategoryLabel(item) }}</td>
               <td>{{ cents(item.estimated_amount_cents) }}</td>
               <td>{{ frequencyLabel(item.general_frequency) }}</td>
               <td>{{ formatDate(item.last_expensed_date) }}</td>
@@ -97,7 +97,7 @@
           <UnifiedDropdown v-model="form.category" label="Category" searchable allow-custom required :options="categoryOptions" />
 
           <DollarField v-model="form.estimated_amount_cents" label="Estimated Amount" />
-          <UnifiedDropdown v-model="form.linked_account_id" label="Linked Account" required :options="accountDropdownOptions" />
+          <UnifiedDropdown v-model="form.linked_account_id" label="Linked Account" searchable required :options="accountDropdownOptions" />
           <div class="icon-picker">
             <label class="bank-label">Expense Icon</label>
             <div class="icon-picker-row">
@@ -291,16 +291,30 @@ const accountDropdownOptions = computed(() =>
   })),
 )
 
+const expenseCategoryLabel = (item: Expense) => (item.enabled ? item.category : `Disabled ${item.category}`)
+
+const expenseCategorySortValue = (item: Expense) => `${item.enabled ? '0' : '1'}:${item.category.toLowerCase()}`
+
 const sections = computed(() => {
   const byCat = new Map<string, Expense[]>()
   for (const item of expenses.value) {
-    const arr = byCat.get(item.category) || []
+    const categoryLabel = expenseCategoryLabel(item)
+    const arr = byCat.get(categoryLabel) || []
     arr.push(item)
-    byCat.set(item.category, arr)
+    byCat.set(categoryLabel, arr)
   }
   return Array.from(byCat.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([category, items]) => ({ category, items }))
+    .sort((a, b) => {
+      const aDisabled = a[0].startsWith('Disabled ')
+      const bDisabled = b[0].startsWith('Disabled ')
+      if (aDisabled !== bDisabled) {
+        return aDisabled ? 1 : -1
+      }
+      const aCategory = aDisabled ? a[0].slice('Disabled '.length) : a[0]
+      const bCategory = bDisabled ? b[0].slice('Disabled '.length) : b[0]
+      return aCategory.localeCompare(bCategory)
+    })
+    .map(([label, items]) => ({ label, items }))
 })
 
 const filteredExpenses = computed(() => {
@@ -308,7 +322,7 @@ const filteredExpenses = computed(() => {
   const filtered = expenses.value.filter((item) => {
     const matchesNeedle =
       !needle ||
-      [item.name, item.category, frequencyLabel(item.general_frequency), formatDate(item.last_expensed_date), formatDate(item.next_expensed_date)]
+      [item.name, item.category, expenseCategoryLabel(item), frequencyLabel(item.general_frequency), formatDate(item.last_expensed_date), formatDate(item.next_expensed_date)]
         .join(' ')
         .toLowerCase()
         .includes(needle)
@@ -329,7 +343,7 @@ const filteredExpenses = computed(() => {
       sortKey.value === 'name'
         ? a.name
         : sortKey.value === 'category'
-          ? a.category
+          ? expenseCategorySortValue(a)
           : sortKey.value === 'estimated'
             ? a.estimated_amount_cents
             : sortKey.value === 'frequency'
@@ -341,7 +355,7 @@ const filteredExpenses = computed(() => {
       sortKey.value === 'name'
         ? b.name
         : sortKey.value === 'category'
-          ? b.category
+          ? expenseCategorySortValue(b)
           : sortKey.value === 'estimated'
             ? b.estimated_amount_cents
             : sortKey.value === 'frequency'
