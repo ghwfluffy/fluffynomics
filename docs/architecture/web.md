@@ -152,12 +152,19 @@ In `AccountsPage.vue`:
   - `Delete`
 - Update flow:
   - opens custom modal
-  - calls `PUT /accounts/{id}/value`
   - intended to refresh business values and drive `last_update`
+  - default path calls `PUT /accounts/{id}/value`
   - for `cash` accounts, update modal edits bill quantities (`$1,$2,$5,$10,$20,$50,$100`) instead of static balance input
   - cash balance shown on tile is derived from bill quantities
   - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate
   - crypto tile balance is derived from sum(quantity * exchange_rate)
+  - for `credit_card` accounts, update modal switches to a queued-payment flow:
+    - inputs `Current Balance`, `Pending Balance`, `Amount Paying`, and `Pay From`
+    - calls `POST /accounts/{id}/queue-credit-card-payment`
+    - tile/table balances immediately render as if the queued payment has already reduced both the card and the funding account
+    - while a queued payment is active, the modal reopens with the queued values prefilled so the user can edit them
+    - editing an active queued payment uses `PUT /accounts/{id}/queue-credit-card-payment` and restarts the 24-hour settlement timer
+    - setting `Amount Paying` to `0` while editing an active queued payment cancels it
 - History flow:
   - opens history modal from tile menu
   - fetches `GET /accounts/{id}/history`

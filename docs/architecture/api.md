@@ -90,12 +90,24 @@ Defined in `python/mp/api/accounts.py`.
   - dedicated “value update” endpoint used by dashboard Update modal
   - updates balance/position values only
   - for `line_of_credit`/`credit_card`/`loan`, can also set `last_payment_date`
+  - `credit_card` accounts with an active queued payment reject direct `balance_cents` writes until the queued payment settles
   - for `cash` accounts, accepts `cash_bills` quantities and balance is derived from denominations
   - for crypto accounts, accepts multiple `crypto_positions` entries with `ticker`, `quantity`, and `exchange_rate_cents`
   - when crypto `exchange_rate_cents` is provided, backend propagates that rate to all holdings with same ticker for that user
   - sets `accounts.last_update = now()`
   - records an `account_value_history` point after each successful update
   - upserts one daily net-worth snapshot for the user (same day updates overwrite that day’s snapshot)
+- `POST /accounts/{account_id}/queue-credit-card-payment`
+  - credit-card-only update flow used by the dashboard Update modal
+  - payload captures `current_balance_cents`, `pending_balance_cents`, `payment_cents`, and `source_account_id`
+  - stores the card balance as `current + pending` immediately, then creates a queued payment with `effective_at = queued_at + 24h`
+  - account reads present balances as if the payment has already reduced both the credit card and the funding account, even before settlement
+  - settlement is lazy: once `effective_at` is reached, the next account read/write applies the transfer into the underlying account balances and records value history
+- `PUT /accounts/{account_id}/queue-credit-card-payment`
+  - edits the active queued payment for that card using the same payload shape
+  - updates the stored `current + pending` card balance immediately
+  - resets the queue timer so settlement happens 24 hours after the latest edit
+  - if `payment_cents = 0`, the active queued payment is canceled and removed
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)
   - used by tile left/right reorder controls
@@ -247,6 +259,7 @@ Defined in `python/mp/api/data_portability.py`.
     - expenses
     - account value history
     - net-worth daily snapshots
+    - queued credit-card payments
   - package envelope fields:
     - `format: "money-planner-export"`
     - `package_version: 1`

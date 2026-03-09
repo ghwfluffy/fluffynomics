@@ -483,8 +483,18 @@
         <p>{{ updateDescription }}</p>
 
         <div class="form-grid form-grid--single">
+          <template v-if="updateMode === 'credit_card_payment'">
+            <DollarField v-model="updateForm.currentBalanceCents" label="Current Balance" />
+            <DollarField v-model="updateForm.pendingBalanceCents" label="Pending Balance" />
+            <DollarField v-model="updateForm.paymentCents" label="Amount Paying" />
+            <BankField
+              v-model="updateForm.sourceAccountId"
+              label="Pay From"
+              :options="creditCardFundingAccountOptions"
+            />
+          </template>
           <DollarField
-            v-if="updateMode === 'dollars'"
+            v-else-if="updateMode === 'dollars'"
             v-model="updateForm.amountCents"
             :label="updateAmountLabel"
           />
@@ -896,9 +906,21 @@ interface AccountPayload {
   fee_amount_cents?: number
   fee_period?: string
   usd_balance_cents?: number
+  queued_credit_card_payment?: QueuedCreditCardPaymentPayload | null
   stock_positions?: Array<{ stock_id?: string; ticker?: string; quantity: string; last_price_cents?: number }>
   crypto_positions?: Array<{ ticker: string; quantity: string; exchange_rate_cents?: number }>
   cash_bills?: Array<{ denomination_cents: number; quantity: number }>
+}
+
+interface QueuedCreditCardPaymentPayload {
+  id: string
+  source_account_id: string
+  source_account_name: string
+  current_balance_cents: number
+  pending_balance_cents: number
+  payment_cents: number
+  queued_at: string
+  effective_at: string
 }
 
 interface ContractCalendarPayload {
@@ -1121,6 +1143,10 @@ const historyItems = ref<AccountHistoryPoint[]>([])
 const updateForm = ref({
   amountCents: 0,
   rewardsCents: 0,
+  currentBalanceCents: 0,
+  pendingBalanceCents: 0,
+  paymentCents: 0,
+  sourceAccountId: '',
   quantity: '0',
   ticker: '',
   lastPaymentDate: '',
@@ -1516,8 +1542,41 @@ const trendChartOption = computed(() => {
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
 const submitLabel = computed(() => (editingAccountId.value ? 'Save Changes' : 'Create'))
-const updateMode = computed<'dollars' | 'quantity' | 'cash_bills' | 'crypto_positions' | 'stock_positions'>(() => {
+const creditCardFundingAccountOptions = computed(() =>
+  accounts.value
+    .filter(
+      (account) =>
+        account.id !== updatingAccount.value?.id &&
+        !account.closed &&
+        !['credit_card', 'line_of_credit', 'loan', 'cash', 'crypto_wallet'].includes(account.type),
+    )
+    .map((account) => ({
+      label: `${account.name} (${account.organization || 'Unknown'})`,
+      value: account.id,
+    })),
+)
+
+const hasQueuedCreditCardPayment = computed(
+  () => updateMode.value === 'credit_card_payment' && !!updatingAccount.value?.queued_credit_card_payment,
+)
+
+const queuedCreditCardPaymentSummary = computed(() => {
+  const queued = updatingAccount.value?.queued_credit_card_payment
+  if (!queued) {
+    return null
+  }
+  const effective = new Date(queued.effective_at)
+  const effectiveLabel = Number.isNaN(effective.getTime())
+    ? 'Unknown'
+    : effective.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return `Queued from ${queued.source_account_name} for ${cents(queued.payment_cents)}. Settles after ${effectiveLabel}.`
+})
+
+const updateMode = computed<'dollars' | 'quantity' | 'cash_bills' | 'crypto_positions' | 'stock_positions' | 'credit_card_payment'>(() => {
   const type = updatingAccount.value?.type || ''
+  if (type === 'credit_card') {
+    return 'credit_card_payment'
+  }
   if (type === 'cash') {
     return 'cash_bills'
   }
@@ -1535,6 +1594,12 @@ const updateAmountLabel = computed(() =>
 const updateDescription = computed(() => {
   if (!updatingAccount.value) {
     return ''
+  }
+  if (updateMode.value === 'credit_card_payment') {
+    if (hasQueuedCreditCardPayment.value) {
+      return `${queuedCreditCardPaymentSummary.value || 'This card already has a queued payment awaiting settlement.'} Saving changes re-queues it for another 24 hours, and setting Amount Paying to $0 cancels it.`
+    }
+    return 'Record the website balance and queue a payment that will settle 24 hours later.'
   }
   if (updateMode.value === 'dollars') {
     return 'Update the current account balance amount.'
@@ -1646,7 +1711,7 @@ const showRewardsExpirationField = computed(
 const showRewardsBalanceField = computed(
   () =>
     updateMode.value === 'dollars' &&
-    ['credit_card', 'rewards_card'].includes(updatingAccount.value?.type || ''),
+    ['rewards_card'].includes(updatingAccount.value?.type || ''),
 )
 
 const organizationOptions = computed(() => organizations.value.map((item) => item.name))
@@ -1732,6 +1797,21 @@ const intOrZero = (value: unknown) => {
 }
 
 const accountRewardsCents = (account: AccountPayload) => Math.max(0, account.rewards_balance_cents || 0)
+
+const queuedOutgoingCreditCardPaymentCents = (accountId: string) =>
+  accounts.value.reduce((sum, account) => {
+    const queued = account.queued_credit_card_payment
+    if (!queued || queued.source_account_id !== accountId) {
+      return sum
+    }
+    return sum + intOrZero(queued.payment_cents)
+  }, 0)
+
+const updateModalBalanceCents = (account: AccountPayload) =>
+  intOrZero(account.balance_cents) + queuedOutgoingCreditCardPaymentCents(account.id)
+
+const updateModalUsdBalanceCents = (account: AccountPayload) =>
+  intOrZero(account.usd_balance_cents) + queuedOutgoingCreditCardPaymentCents(account.id)
 
 const balanceLabel = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
@@ -2640,6 +2720,9 @@ const formatPaymentDate = (date: Date | null) => {
 }
 
 const paymentSummary = (account: AccountPayload) => {
+  if (account.type === 'credit_card' && account.queued_credit_card_payment) {
+    return `Queued payment ${cents(account.queued_credit_card_payment.payment_cents)} from ${account.queued_credit_card_payment.source_account_name}`
+  }
   const dates = computePaymentDates(account)
   if (!dates) {
     return null
@@ -2925,6 +3008,11 @@ const confirmDeleteAccount = async () => {
 const openUpdateDialog = (account: AccountPayload) => {
   activeTileMenuId.value = null
   updatingAccount.value = account
+  const queuedPayment = account.queued_credit_card_payment
+  updateForm.value.currentBalanceCents = Math.max(0, queuedPayment?.current_balance_cents || account.balance_cents || 0)
+  updateForm.value.pendingBalanceCents = Math.max(0, queuedPayment?.pending_balance_cents || 0)
+  updateForm.value.paymentCents = Math.max(0, queuedPayment?.payment_cents || account.balance_cents || 0)
+  updateForm.value.sourceAccountId = queuedPayment?.source_account_id || creditCardFundingAccountOptions.value[0]?.value || ''
   if (account.type === 'stocks_account') {
     const positions =
       account.stock_positions?.map((position) => ({
@@ -2934,7 +3022,7 @@ const openUpdateDialog = (account: AccountPayload) => {
         last_price_cents: position.last_price_cents || 0,
       })) || []
     updateForm.value.stockPositions = positions
-    updateForm.value.amountCents = account.balance_cents || 0
+    updateForm.value.amountCents = updateModalBalanceCents(account)
   } else if (account.type === 'crypto_wallet' || account.type === 'crypto_exchange') {
     const positions =
       account.crypto_positions?.map((position) => ({
@@ -2946,7 +3034,7 @@ const openUpdateDialog = (account: AccountPayload) => {
       ? positions
       : [{ ticker: '', quantity: '0', exchange_rate_cents: 0 }]
     if (account.type === 'crypto_exchange') {
-      updateForm.value.amountCents = account.usd_balance_cents || 0
+      updateForm.value.amountCents = updateModalUsdBalanceCents(account)
     }
   } else if (account.type === 'cash') {
     const nextBills: Record<number, number> = { 100: 0, 200: 0, 500: 0, 1000: 0, 2000: 0, 5000: 0, 10000: 0 }
@@ -2957,7 +3045,7 @@ const openUpdateDialog = (account: AccountPayload) => {
     }
     updateForm.value.cashBills = nextBills
   } else {
-    updateForm.value.amountCents = account.balance_cents || 0
+    updateForm.value.amountCents = updateModalBalanceCents(account)
   }
   updateForm.value.rewardsCents = account.rewards_balance_cents || 0
   updateForm.value.lastPaymentDate = account.last_payment_date?.slice(0, 10) || ''
@@ -3077,6 +3165,33 @@ const submitUpdateValue = async () => {
     return
   }
   const account = updatingAccount.value
+  if (updateMode.value === 'credit_card_payment') {
+    if (!updateForm.value.sourceAccountId) {
+      errorMessage.value = 'Funding account is required'
+      snackbar.value = true
+      return
+    }
+    if (!account.queued_credit_card_payment && (updateForm.value.paymentCents || 0) <= 0) {
+      errorMessage.value = 'Payment amount must be greater than zero'
+      snackbar.value = true
+      return
+    }
+    const endpoint = `/accounts/${account.id}/queue-credit-card-payment`
+    const payload = {
+      current_balance_cents: Math.max(0, updateForm.value.currentBalanceCents || 0),
+      pending_balance_cents: Math.max(0, updateForm.value.pendingBalanceCents || 0),
+      payment_cents: Math.max(0, updateForm.value.paymentCents || 0),
+      source_account_id: updateForm.value.sourceAccountId,
+    }
+    if (account.queued_credit_card_payment) {
+      await request.put(endpoint, payload)
+    } else {
+      await request.post(endpoint, payload)
+    }
+    closeUpdateDialog()
+    await loadAccounts()
+    return
+  }
   const payload: Record<string, unknown> = {}
 
   if (updateMode.value === 'dollars') {
@@ -3282,6 +3397,18 @@ watch(
   async (next) => {
     if (next === 'calendar') {
       await loadCalendarSources()
+    }
+  },
+)
+
+watch(
+  () => updateForm.value.currentBalanceCents,
+  (next, previous) => {
+    if (updateMode.value !== 'credit_card_payment') {
+      return
+    }
+    if ((updateForm.value.paymentCents || 0) === (previous || 0)) {
+      updateForm.value.paymentCents = Math.max(0, next || 0)
     }
   },
 )

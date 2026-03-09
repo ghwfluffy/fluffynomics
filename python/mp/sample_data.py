@@ -12,6 +12,7 @@ from mp.schema.account import (
     AccountStockPosition,
     AccountValueHistory,
     Organization,
+    QueuedCreditCardPayment,
     Stock,
 )
 from mp.schema.contract import Contract
@@ -143,6 +144,43 @@ def _ensure_history_seed(db: Session, user: User, account: Account) -> None:
                 recorded_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
             )
         )
+
+
+def _ensure_queued_credit_card_payment(
+    db: Session,
+    user: User,
+    credit_card: Account,
+    source_account: Account,
+    *,
+    current_balance_cents: int,
+    pending_balance_cents: int,
+    payment_cents: int,
+    queued_at: datetime,
+) -> None:
+    existing = (
+        db.query(QueuedCreditCardPayment)
+        .filter(
+            QueuedCreditCardPayment.user_id == user.id,
+            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
+            QueuedCreditCardPayment.applied_at.is_(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        return
+    credit_card.balance_cents = current_balance_cents + pending_balance_cents
+    db.add(
+        QueuedCreditCardPayment(
+            user_id=user.id,
+            credit_card_account_id=credit_card.id,
+            source_account_id=source_account.id,
+            current_balance_cents=current_balance_cents,
+            pending_balance_cents=pending_balance_cents,
+            payment_cents=payment_cents,
+            queued_at=queued_at,
+            effective_at=queued_at + timedelta(hours=24),
+        )
+    )
 
 
 def ensure_example_data_for_user(db: Session, user: User) -> None:
@@ -284,7 +322,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "last_update": fresh,
         },
     )
-    _ensure_account(
+    daily_rewards_card = _ensure_account(
         db,
         user,
         "Daily Rewards Card",
@@ -512,6 +550,16 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
     )
     for seeded in seeded_accounts:
         _ensure_history_seed(db, user, seeded)
+    _ensure_queued_credit_card_payment(
+        db,
+        user,
+        daily_rewards_card,
+        checking,
+        current_balance_cents=149200,
+        pending_balance_cents=7500,
+        payment_cents=149200,
+        queued_at=now - timedelta(hours=12),
+    )
     _ensure_contract(
         db,
         user,

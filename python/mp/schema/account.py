@@ -213,6 +213,41 @@ class AccountValueHistory(Base):
     )
 
 
+class QueuedCreditCardPayment(Base):
+    __tablename__ = "queued_credit_card_payments"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    credit_card_account_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_account_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    current_balance_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    pending_balance_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    payment_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    applied_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class NetWorthDailySnapshot(Base):
     __tablename__ = "net_worth_daily_snapshot"
     __table_args__ = (
@@ -344,6 +379,24 @@ class AccountValueUpdateSchema(BaseModel):
     cash_bills: Optional[list[CashBillSchema]] = None
 
 
+class QueuedCreditCardPaymentSchema(BaseModel):
+    id: UUID
+    source_account_id: UUID
+    source_account_name: str
+    current_balance_cents: int
+    pending_balance_cents: int = 0
+    payment_cents: int
+    queued_at: datetime
+    effective_at: datetime
+
+
+class QueueCreditCardPaymentCreateSchema(BaseModel):
+    current_balance_cents: int
+    pending_balance_cents: int = 0
+    payment_cents: Optional[int] = None
+    source_account_id: UUID
+
+
 class AccountRankUpdateSchema(BaseModel):
     rank: float
 
@@ -394,6 +447,7 @@ class AccountSchema(AccountBaseSchema):
     rank: float
     created_at: datetime
     last_update: Optional[datetime] = None
+    queued_credit_card_payment: Optional[QueuedCreditCardPaymentSchema] = None
 
     model_config = ConfigDict(from_attributes=True)
 

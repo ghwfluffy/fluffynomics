@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -31,6 +31,7 @@ from mp.schema.account import (
     AccountStockPosition,
     AccountUpdateSchema,
     AccountValueUpdateSchema,
+    QueueCreditCardPaymentCreateSchema,
     CashBillSchema,
     IconAsset,
     IconListItemSchema,
@@ -40,6 +41,8 @@ from mp.schema.account import (
     OrganizationSuggestionSchema,
     PositionCryptoSchema,
     PositionStockSchema,
+    QueuedCreditCardPayment,
+    QueuedCreditCardPaymentSchema,
     Stock,
     StockCreateSchema,
     StockSchema,
@@ -251,6 +254,217 @@ def _upsert_daily_net_worth_snapshot(db: Session, user_id: UUID) -> None:
         set_={"value_cents": value_cents, "updated_at": datetime.utcnow()},
     )
     db.execute(stmt)
+
+
+def _account_balance_field(account_type: str) -> str | None:
+    if account_type == "crypto_exchange":
+        return "usd_balance_cents"
+    if account_type in {"cash", "crypto_wallet"}:
+        return None
+    return "balance_cents"
+
+
+def _apply_balance_delta(item: AccountSchema, delta_cents: int) -> None:
+    field = _account_balance_field(item.type)
+    if field is None or not delta_cents:
+        return
+    current = getattr(item, field) or 0
+    setattr(item, field, int(current) + int(delta_cents))
+
+
+def _build_queued_payment_schema(
+    payment: QueuedCreditCardPayment,
+    source_account_name: str,
+) -> QueuedCreditCardPaymentSchema:
+    return QueuedCreditCardPaymentSchema(
+        id=payment.id,
+        source_account_id=payment.source_account_id,
+        source_account_name=source_account_name,
+        current_balance_cents=int(payment.current_balance_cents or 0),
+        pending_balance_cents=int(payment.pending_balance_cents or 0),
+        payment_cents=int(payment.payment_cents or 0),
+        queued_at=payment.queued_at,
+        effective_at=payment.effective_at,
+    )
+
+
+def _validate_credit_card_queue_payload(
+    db: Session,
+    current_user_id: UUID,
+    credit_card: Account,
+    payload: QueueCreditCardPaymentCreateSchema,
+    *,
+    allow_zero_payment: bool = False,
+) -> tuple[Account, int, int, int]:
+    funding_account = (
+        db.query(Account)
+        .filter(
+            Account.id == payload.source_account_id,
+            Account.user_id == current_user_id,
+        )
+        .first()
+    )
+    if funding_account is None:
+        raise HTTPException(status_code=404, detail="Funding account not found")
+    if funding_account.id == credit_card.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Funding account must be different from the credit card",
+        )
+    if bool(funding_account.closed):
+        raise HTTPException(
+            status_code=400, detail="Cannot use a closed account as the funding source"
+        )
+    if funding_account.type in {
+        "credit_card",
+        "line_of_credit",
+        "loan",
+        "cash",
+        "crypto_wallet",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="Funding account must be a non-liability account with a direct balance",
+        )
+
+    current_balance_cents = max(0, int(payload.current_balance_cents or 0))
+    pending_balance_cents = max(0, int(payload.pending_balance_cents or 0))
+    payment_cents = (
+        max(0, int(payload.payment_cents or 0))
+        if payload.payment_cents is not None
+        else current_balance_cents
+    )
+    if payment_cents < 0:
+        raise HTTPException(status_code=400, detail="payment_cents cannot be negative")
+    if payment_cents == 0 and not allow_zero_payment:
+        raise HTTPException(
+            status_code=400, detail="payment_cents must be greater than 0"
+        )
+    if payment_cents > current_balance_cents + pending_balance_cents:
+        raise HTTPException(
+            status_code=400,
+            detail="payment_cents cannot exceed current balance plus pending balance",
+        )
+    return (
+        funding_account,
+        current_balance_cents,
+        pending_balance_cents,
+        payment_cents,
+    )
+
+
+def _settle_due_queued_credit_card_payments(db: Session, user_id: UUID) -> bool:
+    due_payments = (
+        db.query(QueuedCreditCardPayment)
+        .filter(
+            QueuedCreditCardPayment.user_id == user_id,
+            QueuedCreditCardPayment.applied_at.is_(None),
+            QueuedCreditCardPayment.effective_at <= datetime.utcnow(),
+        )
+        .order_by(QueuedCreditCardPayment.queued_at.asc())
+        .all()
+    )
+    if not due_payments:
+        return False
+
+    account_ids = {payment.credit_card_account_id for payment in due_payments} | {
+        payment.source_account_id for payment in due_payments
+    }
+    accounts_by_id = {
+        account.id: account
+        for account in db.query(Account)
+        .filter(Account.user_id == user_id, Account.id.in_(account_ids))
+        .all()
+    }
+    now = datetime.utcnow()
+    changed = False
+    for payment in due_payments:
+        credit_card = accounts_by_id.get(payment.credit_card_account_id)
+        source_account = accounts_by_id.get(payment.source_account_id)
+        amount = int(payment.payment_cents or 0)
+        if credit_card is None or source_account is None or amount <= 0:
+            payment.applied_at = now
+            changed = True
+            continue
+        credit_card.balance_cents = int(credit_card.balance_cents or 0) - amount
+        source_balance_field = _account_balance_field(source_account.type)
+        if source_balance_field is None:
+            payment.applied_at = now
+            changed = True
+            continue
+        setattr(
+            source_account,
+            source_balance_field,
+            int(getattr(source_account, source_balance_field) or 0) - amount,
+        )
+        credit_card.last_update = now
+        source_account.last_update = now
+        payment.applied_at = now
+        _record_account_value_history(db, credit_card)
+        _record_account_value_history(db, source_account)
+        changed = True
+    return changed
+
+
+def _apply_active_queued_credit_card_payments(
+    db: Session,
+    user_id: UUID,
+    accounts: list[AccountSchema],
+    as_of_date: date | None = None,
+) -> list[AccountSchema]:
+    payments = (
+        db.query(QueuedCreditCardPayment)
+        .filter(
+            QueuedCreditCardPayment.user_id == user_id,
+            QueuedCreditCardPayment.applied_at.is_(None),
+        )
+        .order_by(QueuedCreditCardPayment.queued_at.asc())
+        .all()
+    )
+    if as_of_date is not None:
+        payments = [
+            payment for payment in payments if payment.queued_at.date() <= as_of_date
+        ]
+    if not payments:
+        return accounts
+
+    accounts_by_id = {item.id: item for item in accounts}
+    source_names_by_id = {
+        item.id: item.name
+        for item in accounts
+        if any(payment.source_account_id == item.id for payment in payments)
+    }
+    if len(source_names_by_id) < len(
+        {payment.source_account_id for payment in payments}
+    ):
+        db_source_names = (
+            db.query(Account.id, Account.name)
+            .filter(
+                Account.user_id == user_id,
+                Account.id.in_({payment.source_account_id for payment in payments}),
+            )
+            .all()
+        )
+        for source_id, name in db_source_names:
+            source_names_by_id[source_id] = name
+
+    for payment in payments:
+        amount = int(payment.payment_cents or 0)
+        if amount <= 0:
+            continue
+        credit_card = accounts_by_id.get(payment.credit_card_account_id)
+        if credit_card is not None:
+            _apply_balance_delta(credit_card, -amount)
+            source_name = source_names_by_id.get(
+                payment.source_account_id, "Funding account"
+            )
+            credit_card.queued_credit_card_payment = _build_queued_payment_schema(
+                payment, source_name
+            )
+        source_account = accounts_by_id.get(payment.source_account_id)
+        if source_account is not None:
+            _apply_balance_delta(source_account, -amount)
+    return accounts
 
 
 def _build_net_worth_points_from_events(
@@ -623,6 +837,8 @@ def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AccountSchema]:
+    if _settle_due_queued_credit_card_payments(db, current_user.id):
+        db.commit()
     accounts = (
         db.query(Account)
         .filter(Account.user_id == current_user.id)
@@ -643,11 +859,10 @@ def get_accounts(
             ) + expense_simulation.account_deltas.get(item.id, 0)
             if not delta:
                 continue
-            if item.type == "crypto_exchange":
-                item.usd_balance_cents = int(item.usd_balance_cents or 0) + int(delta)
-            else:
-                item.balance_cents = int(item.balance_cents or 0) + int(delta)
-    return serialized
+            _apply_balance_delta(item, int(delta))
+    return _apply_active_queued_credit_card_payments(
+        db, current_user.id, serialized, as_of_date
+    )
 
 
 @router.get("/accounts/{account_id}", response_model=AccountSchema)
@@ -657,6 +872,8 @@ def get_account(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
+    if _settle_due_queued_credit_card_payments(db, current_user.id):
+        db.commit()
     account = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -676,15 +893,10 @@ def get_account(
             serialized.id, 0
         ) + expense_simulation.account_deltas.get(serialized.id, 0)
         if delta:
-            if serialized.type == "crypto_exchange":
-                serialized.usd_balance_cents = int(
-                    serialized.usd_balance_cents or 0
-                ) + int(delta)
-            else:
-                serialized.balance_cents = int(serialized.balance_cents or 0) + int(
-                    delta
-                )
-    return serialized
+            _apply_balance_delta(serialized, int(delta))
+    return _apply_active_queued_credit_card_payments(
+        db, current_user.id, [serialized], as_of_date
+    )[0]
 
 
 @router.get(
@@ -694,6 +906,8 @@ def get_net_worth_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[NetWorthHistoryPointSchema]:
+    if _settle_due_queued_credit_card_payments(db, current_user.id):
+        db.commit()
     rows = (
         db.query(NetWorthDailySnapshot)
         .filter(NetWorthDailySnapshot.user_id == current_user.id)
@@ -719,6 +933,8 @@ def get_net_worth_forecast(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[NetWorthForecastPointSchema]:
+    if _settle_due_queued_credit_card_payments(db, current_user.id):
+        db.commit()
     return _forecast_net_worth_points(db, current_user.id, through_date)
 
 
@@ -730,6 +946,8 @@ def get_account_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AccountValueHistorySchema]:
+    if _settle_due_queued_credit_card_payments(db, current_user.id):
+        db.commit()
     account = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -1283,6 +1501,7 @@ def update_account_value(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
+    _settle_due_queued_credit_card_payments(db, current_user.id)
     account = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -1294,6 +1513,22 @@ def update_account_value(
     data = payload.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status_code=400, detail="No value updates provided")
+    if account.type == "credit_card":
+        has_active_queue = (
+            db.query(QueuedCreditCardPayment)
+            .filter(
+                QueuedCreditCardPayment.user_id == current_user.id,
+                QueuedCreditCardPayment.credit_card_account_id == account.id,
+                QueuedCreditCardPayment.applied_at.is_(None),
+            )
+            .first()
+            is not None
+        )
+        if has_active_queue and "balance_cents" in data:
+            raise HTTPException(
+                status_code=409,
+                detail="Credit card already has a queued payment awaiting settlement",
+            )
 
     if "balance_cents" in data and account.type != "cash":
         account.balance_cents = data["balance_cents"]
@@ -1323,7 +1558,156 @@ def update_account_value(
     _record_account_value_history(db, account)
     db.commit()
     db.refresh(account)
-    return _serialize_account(db, account)
+    return _apply_active_queued_credit_card_payments(
+        db, current_user.id, [_serialize_account(db, account)]
+    )[0]
+
+
+@router.post(
+    "/accounts/{account_id}/queue-credit-card-payment",
+    response_model=AccountSchema,
+)
+def queue_credit_card_payment(
+    account_id: UUID,
+    payload: QueueCreditCardPaymentCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    _settle_due_queued_credit_card_payments(db, current_user.id)
+    credit_card = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if credit_card is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if credit_card.type != "credit_card":
+        raise HTTPException(
+            status_code=400,
+            detail="Queued payments are only supported for credit cards",
+        )
+    if bool(credit_card.closed):
+        raise HTTPException(
+            status_code=400, detail="Cannot queue payment for closed account"
+        )
+    active_existing = (
+        db.query(QueuedCreditCardPayment)
+        .filter(
+            QueuedCreditCardPayment.user_id == current_user.id,
+            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
+            QueuedCreditCardPayment.applied_at.is_(None),
+        )
+        .first()
+    )
+    if active_existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Credit card already has a queued payment awaiting settlement",
+        )
+
+    (
+        funding_account,
+        current_balance_cents,
+        pending_balance_cents,
+        payment_cents,
+    ) = _validate_credit_card_queue_payload(db, current_user.id, credit_card, payload)
+
+    credit_card.balance_cents = current_balance_cents + pending_balance_cents
+    credit_card.last_update = datetime.utcnow()
+    queued_at = datetime.utcnow()
+    effective_at = queued_at + timedelta(hours=24)
+    db.add(
+        QueuedCreditCardPayment(
+            user_id=current_user.id,
+            credit_card_account_id=credit_card.id,
+            source_account_id=funding_account.id,
+            current_balance_cents=current_balance_cents,
+            pending_balance_cents=pending_balance_cents,
+            payment_cents=payment_cents,
+            queued_at=queued_at,
+            effective_at=effective_at,
+        )
+    )
+    _record_account_value_history(db, credit_card)
+    db.commit()
+    db.refresh(credit_card)
+    return _apply_active_queued_credit_card_payments(
+        db, current_user.id, [_serialize_account(db, credit_card)]
+    )[0]
+
+
+@router.put(
+    "/accounts/{account_id}/queue-credit-card-payment",
+    response_model=AccountSchema,
+)
+def update_queued_credit_card_payment(
+    account_id: UUID,
+    payload: QueueCreditCardPaymentCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    _settle_due_queued_credit_card_payments(db, current_user.id)
+    credit_card = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if credit_card is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if credit_card.type != "credit_card":
+        raise HTTPException(
+            status_code=400,
+            detail="Queued payments are only supported for credit cards",
+        )
+    active_existing = (
+        db.query(QueuedCreditCardPayment)
+        .filter(
+            QueuedCreditCardPayment.user_id == current_user.id,
+            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
+            QueuedCreditCardPayment.applied_at.is_(None),
+        )
+        .first()
+    )
+    if active_existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No active queued payment found for this credit card",
+        )
+
+    (
+        funding_account,
+        current_balance_cents,
+        pending_balance_cents,
+        payment_cents,
+    ) = _validate_credit_card_queue_payload(
+        db,
+        current_user.id,
+        credit_card,
+        payload,
+        allow_zero_payment=True,
+    )
+
+    now = datetime.utcnow()
+    credit_card.balance_cents = current_balance_cents + pending_balance_cents
+    credit_card.last_update = now
+    if payment_cents == 0:
+        db.delete(active_existing)
+        _record_account_value_history(db, credit_card)
+        db.commit()
+        db.refresh(credit_card)
+        return _serialize_account(db, credit_card)
+    active_existing.source_account_id = funding_account.id
+    active_existing.current_balance_cents = current_balance_cents
+    active_existing.pending_balance_cents = pending_balance_cents
+    active_existing.payment_cents = payment_cents
+    active_existing.queued_at = now
+    active_existing.effective_at = now + timedelta(hours=24)
+    _record_account_value_history(db, credit_card)
+    db.commit()
+    db.refresh(credit_card)
+    return _apply_active_queued_credit_card_payments(
+        db, current_user.id, [_serialize_account(db, credit_card)]
+    )[0]
 
 
 @router.delete("/accounts/{account_id}", status_code=204)
