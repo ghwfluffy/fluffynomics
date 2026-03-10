@@ -87,6 +87,9 @@ Trend widget behavior:
 - Endpoint returns daily snapshots; frontend rolls to month-level points for readability.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
+- Overview trend header shows both `Current Net Worth` and `Prorated Net Worth`.
+- `Prorated Net Worth` starts from the displayed net worth and adds an in-progress linear accrual for each recurring contract and recurring expense over its current cycle.
+- In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
 - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow from contracts + expenses (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),

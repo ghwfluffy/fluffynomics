@@ -145,9 +145,15 @@
         <article class="widget-slot widget-card widget-card--wide">
           <div class="widget-trend-head">
             <h3 class="widget-trend-title">
-              <span class="widget-trend-summary">
-                <span class="widget-trend-summary-label">Current Net Worth:</span>
-                <span class="widget-trend-summary-value">{{ cents(currentNetWorthCents) }}</span>
+              <span class="widget-trend-summary-list">
+                <span class="widget-trend-summary">
+                  <span class="widget-trend-summary-label">Current Net Worth:</span>
+                  <span class="widget-trend-summary-value">{{ cents(currentNetWorthCents) }}</span>
+                </span>
+                <span class="widget-trend-summary">
+                  <span class="widget-trend-summary-label">Prorated Net Worth:</span>
+                  <span class="widget-trend-summary-value" :class="proratedNetWorthFlashClass">{{ cents(proratedNetWorthCents) }}</span>
+                </span>
               </span>
               <span v-if="widgetLoading" class="widget-trend-status">Updating…</span>
             </h3>
@@ -940,6 +946,7 @@ interface ContractCalendarPayload {
   linked_account_id?: string
   linked_wallet?: 'paypal' | 'google_pay'
   source_account_id?: string
+  last_payment_date?: string
   payment_period?: string
   payment_day?: number
   expiration_date?: string
@@ -951,7 +958,9 @@ interface ExpenseCalendarPayload {
   estimated_amount_cents: number
   enabled?: boolean
   general_frequency?: string
+  last_expensed_date?: string
   next_expensed_date?: string
+  next_date_is_static?: boolean
 }
 
 interface ContractRunPostingPayload {
@@ -1131,6 +1140,8 @@ const projectedNetWorthDailyRateCents = ref(0)
 const historicalNetWorthDailyRateCents = ref(0)
 const historicalAccelerationCentsPerMonth2 = ref(0)
 const historicalWindowWeeks = ref(0)
+const proratedNowMs = ref(Date.now())
+const proratedNetWorthFlashClass = ref<'widget-trend-summary-value--flash-up' | 'widget-trend-summary-value--flash-down' | ''>('')
 let widgetRequestToken = 0
 const accountsTableFilter = ref('')
 const accountsSortKey = ref<'section' | 'name' | 'organization' | 'last4' | 'type' | 'balance' | 'last_update'>('section')
@@ -1425,6 +1436,19 @@ const netWorthContributionCents = (account: AccountPayload) => {
 const currentNetWorthCents = computed(() =>
   accounts.value.reduce((sum, account) => sum + netWorthContributionCents(account), 0),
 )
+const proratedNetWorthAdjustmentCents = computed(() => {
+  const referenceTime = proratedReferenceTime.value
+  const contractContribution = calendarContracts.value.reduce(
+    (sum, contract) => sum + contractProratedContributionCents(contract, referenceTime),
+    0,
+  )
+  const expenseContribution = calendarExpenses.value.reduce(
+    (sum, expense) => sum + expenseProratedContributionCents(expense, referenceTime),
+    0,
+  )
+  return contractContribution + expenseContribution
+})
+const proratedNetWorthCents = computed(() => currentNetWorthCents.value + proratedNetWorthAdjustmentCents.value)
 const netChangePast30 = computed(() => netWorthAnchorCents.value - netWorthPast30Cents.value)
 const netChangeNext30 = computed(() => netWorthNext30Cents.value - netWorthAnchorCents.value)
 
@@ -1432,6 +1456,12 @@ const widgetAnchorDate = computed(() => parseDateOnly(forecastDate.value) || new
 const widgetAnchorLabel = computed(() =>
   widgetAnchorDate.value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
 )
+const proratedReferenceTime = computed(() => {
+  if (forecastDate.value) {
+    return parseDateOnly(forecastDate.value) || new Date(proratedNowMs.value)
+  }
+  return new Date(proratedNowMs.value)
+})
 
 const mixPalette = ['#1f77b4', '#d62728', '#2ca02c', '#ff7f0e', '#9467bd', '#17becf', '#e377c2', '#bcbd22', '#8c564b', '#7f7f7f', '#3366cc']
 
@@ -2134,6 +2164,8 @@ const loadWidgets = async () => {
       ? intOrZero(next30ForecastSeries[next30ForecastSeries.length - 1].value_cents)
       : netWorthAnchorCents.value
     next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
+    calendarContracts.value = contracts
+    calendarExpenses.value = expenses
     netWorthProjectionPoints.value = [
       { key: 'current', label: 'Current', value_cents: currentNetWorthCents.value },
       { key: '1y', label: '1 Year', value_cents: lookupProjectionAsOf(addYears(anchor, 1)) },
@@ -2529,6 +2561,186 @@ const recurringNext = (
   payload: Record<string, unknown> | null,
   fallbackDay: number,
 ) => recurringOnOrAfter(addDays(current, 1), kind, payload, fallbackDay)
+
+const previousOccurrenceBefore = (
+  value: Date,
+  kind: string,
+  payload: Record<string, unknown> | null,
+  fallbackDay: number,
+) => {
+  const current = startOfDay(value)
+  const safeDay = Number(payload?.day ?? (fallbackDay || 1))
+  if (kind === 'monthly_day') {
+    return monthlyRecurringDate(current.getFullYear(), current.getMonth() - 1, safeDay)
+  }
+  if (kind === 'monthly_last_day') {
+    return monthlyRecurringDate(current.getFullYear(), current.getMonth() - 1, 31)
+  }
+  if (kind === 'twice_monthly') {
+    const firstDay = Number(payload?.day_1 ?? 1)
+    const secondDay = Number(payload?.day_2 ?? 15)
+    const [low, high] = [firstDay, secondDay].sort((a, b) => a - b)
+    const currentMonthHigh = monthlyRecurringDate(current.getFullYear(), current.getMonth(), high)
+    if (current.getDate() === currentMonthHigh.getDate()) {
+      return monthlyRecurringDate(current.getFullYear(), current.getMonth(), low)
+    }
+    return monthlyRecurringDate(current.getFullYear(), current.getMonth() - 1, high)
+  }
+  if (kind === 'yearly_month_day') {
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    return monthlyRecurringDate(current.getFullYear() - 1, month, safeDay)
+  }
+  if (kind === 'every_n_months_day') {
+    const intervalMonths = Math.max(1, Number(payload?.interval_months ?? 1))
+    return addMonthsRecurring(current, -intervalMonths, safeDay)
+  }
+  if (kind === 'every_n_years_month_day') {
+    const intervalYears = Math.max(1, Number(payload?.interval_years ?? 1))
+    const month = Math.max(1, Math.min(12, Number(payload?.month ?? 1))) - 1
+    return monthlyRecurringDate(current.getFullYear() - intervalYears, month, safeDay)
+  }
+  if (kind === 'daily_weekdays') {
+    const weekdays = Array.isArray(payload?.weekdays) && payload?.weekdays.length ? (payload.weekdays as number[]) : [0, 1, 2, 3, 4]
+    const allowed = new Set(weekdays)
+    const probe = new Date(current)
+    probe.setDate(probe.getDate() - 1)
+    while (!allowed.has(probe.getDay() === 0 ? 6 : probe.getDay() - 1)) {
+      probe.setDate(probe.getDate() - 1)
+    }
+    probe.setHours(0, 0, 0, 0)
+    return probe
+  }
+  if (kind === 'weekly_weekday') {
+    return addDays(current, -7)
+  }
+  if (kind === 'biweekly_weekday') {
+    return addDays(current, -14)
+  }
+  if (kind === 'every_n_weeks_weekday') {
+    const intervalWeeks = Math.max(1, Number(payload?.interval_weeks ?? 1))
+    return addDays(current, -(intervalWeeks * 7))
+  }
+  return addDays(current, -1)
+}
+
+const weekdayPayloadIndex = (value: Date) => (value.getDay() === 0 ? 6 : value.getDay() - 1)
+
+const recurringSpecFromRaw = (
+  raw?: string,
+  fallbackDay?: number,
+  referenceDate?: Date,
+): { kind: string; payload: Record<string, unknown> | null } | null => {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) {
+    return fallbackDay ? { kind: 'monthly_day', payload: { day: fallbackDay } } : null
+  }
+  if (trimmed.startsWith('{')) {
+    const payload = parseRecurringPayload(trimmed)
+    const kind = String(payload?.kind || (fallbackDay ? 'monthly_day' : ''))
+    return kind ? { kind, payload } : null
+  }
+  const legacy = trimmed.toLowerCase()
+  const ref = referenceDate || new Date()
+  if (legacy === 'daily') {
+    return { kind: 'daily', payload: null }
+  }
+  if (legacy === 'weekly') {
+    return { kind: 'weekly_weekday', payload: { weekday: weekdayPayloadIndex(ref) } }
+  }
+  if (legacy === 'biweekly') {
+    return { kind: 'biweekly_weekday', payload: { weekday: weekdayPayloadIndex(ref) } }
+  }
+  if (legacy === 'monthly') {
+    return { kind: 'monthly_day', payload: { day: fallbackDay || ref.getDate() } }
+  }
+  if (legacy === 'yearly') {
+    return {
+      kind: 'yearly_month_day',
+      payload: { month: ref.getMonth() + 1, day: fallbackDay || ref.getDate() },
+    }
+  }
+  return fallbackDay ? { kind: 'monthly_day', payload: { day: fallbackDay } } : null
+}
+
+const proratedCycleFraction = (referenceTime: Date, previous: Date, next: Date) => {
+  const spanMs = next.getTime() - previous.getTime()
+  if (spanMs <= 0) {
+    return 0
+  }
+  const elapsedMs = referenceTime.getTime() - previous.getTime()
+  return Math.max(0, Math.min(1, elapsedMs / spanMs))
+}
+
+const contractProratedContributionCents = (contract: ContractCalendarPayload, referenceTime: Date) => {
+  if (contract.type === 'transfer') {
+    return 0
+  }
+  const spec = recurringSpecFromRaw(contract.payment_period, contract.payment_day || 1, referenceTime)
+  if (!spec?.kind) {
+    return 0
+  }
+  if (spec.kind === 'daily') {
+    const dayStart = startOfDay(referenceTime)
+    const next = addDays(dayStart, 1)
+    const fraction = proratedCycleFraction(referenceTime, dayStart, next)
+    const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
+    return Math.round(signedAmount * fraction)
+  }
+  let next = recurringOnOrAfter(referenceTime, spec.kind, spec.payload, contract.payment_day || 1)
+  if (!next) {
+    return 0
+  }
+  if (contract.last_payment_date) {
+    const paidDate = parseDateOnly(contract.last_payment_date)
+    const expectedLast = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+    if (paidDate && expectedLast && paidDate > expectedLast && paidDate < next) {
+      next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1) || next
+    }
+  }
+  const nextIso = formatCalendarDateIso(next)
+  if (contract.expiration_date && contract.expiration_date.slice(0, 10) < nextIso) {
+    return 0
+  }
+  const startRaw = String(spec.payload?.start_date || '')
+  if (startRaw) {
+    const startDate = startOfDay(new Date(`${startRaw}T00:00:00`))
+    const firstOccurrence = recurringOnOrAfter(startDate, spec.kind, spec.payload, contract.payment_day || 1)
+    if (firstOccurrence && referenceTime < firstOccurrence) {
+      return 0
+    }
+  }
+  const previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+  const fraction = proratedCycleFraction(referenceTime, previous, next)
+  const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
+  return Math.round(signedAmount * fraction)
+}
+
+const expenseProratedContributionCents = (expense: ExpenseCalendarPayload, referenceTime: Date) => {
+  if (expense.enabled === false || expense.next_date_is_static) {
+    return 0
+  }
+  const next = parseDateOnly(expense.next_expensed_date)
+  if (!next) {
+    return 0
+  }
+  let previous = parseDateOnly(expense.last_expensed_date)
+  if (!previous || previous >= next) {
+    const spec = recurringSpecFromRaw(expense.general_frequency, undefined, next)
+    if (!spec?.kind) {
+      return 0
+    }
+    if (spec.kind === 'daily') {
+      previous = addDays(next, -1)
+    } else {
+      previous = previousOccurrenceBefore(next, spec.kind, spec.payload, next.getDate())
+    }
+  }
+  if (!previous || previous >= next) {
+    return 0
+  }
+  const fraction = proratedCycleFraction(referenceTime, previous, next)
+  return -Math.round(Math.abs(expense.estimated_amount_cents || 0) * fraction)
+}
 
 const recurringOccurrencesInMonth = (
   monthStart: Date,
@@ -3480,14 +3692,44 @@ onMounted(loadAccounts)
 onMounted(loadOrganizations)
 onMounted(loadIcons)
 onMounted(loadCalendarSources)
+let proratedTickerId: number | null = null
+let proratedFlashTimeoutId: number | null = null
+onMounted(() => {
+  proratedTickerId = window.setInterval(() => {
+    proratedNowMs.value = Date.now()
+  }, 5000)
+})
 onMounted(async () => {
   window.addEventListener('click', onWindowClick)
   window.addEventListener('keydown', onWindowKeyDown)
 })
 onUnmounted(() => {
+  if (proratedTickerId !== null) {
+    window.clearInterval(proratedTickerId)
+  }
+  if (proratedFlashTimeoutId !== null) {
+    window.clearTimeout(proratedFlashTimeoutId)
+  }
   window.removeEventListener('click', onWindowClick)
   window.removeEventListener('keydown', onWindowKeyDown)
 })
+
+watch(
+  () => proratedNetWorthCents.value,
+  (next, previous) => {
+    if (previous === undefined || next === previous) {
+      return
+    }
+    proratedNetWorthFlashClass.value = next > previous ? 'widget-trend-summary-value--flash-up' : 'widget-trend-summary-value--flash-down'
+    if (proratedFlashTimeoutId !== null) {
+      window.clearTimeout(proratedFlashTimeoutId)
+    }
+    proratedFlashTimeoutId = window.setTimeout(() => {
+      proratedNetWorthFlashClass.value = ''
+      proratedFlashTimeoutId = null
+    }, 1000)
+  },
+)
 
 watch(
   () => forecastDate.value,
@@ -3721,6 +3963,13 @@ watch(
   gap: 10px;
 }
 
+.widget-trend-summary-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.8rem 1.1rem;
+}
+
 .widget-trend-summary {
   display: inline-flex;
   align-items: flex-end;
@@ -3735,6 +3984,48 @@ watch(
   font-size: 1.2rem;
   font-weight: 700;
   line-height: 1;
+}
+
+.widget-trend-summary-value--flash-up {
+  animation: widget-trend-flash-up 1s ease-out;
+}
+
+.widget-trend-summary-value--flash-down {
+  animation: widget-trend-flash-down 1s ease-out;
+}
+
+@keyframes widget-trend-flash-up {
+  0% {
+    color: #166534;
+    text-shadow: 0 0 0 rgba(22, 101, 52, 0);
+  }
+
+  30% {
+    color: #166534;
+    text-shadow: 0 0 10px rgba(34, 197, 94, 0.28);
+  }
+
+  100% {
+    color: inherit;
+    text-shadow: 0 0 0 rgba(22, 101, 52, 0);
+  }
+}
+
+@keyframes widget-trend-flash-down {
+  0% {
+    color: #991b1b;
+    text-shadow: 0 0 0 rgba(153, 27, 27, 0);
+  }
+
+  30% {
+    color: #991b1b;
+    text-shadow: 0 0 10px rgba(239, 68, 68, 0.26);
+  }
+
+  100% {
+    color: inherit;
+    text-shadow: 0 0 0 rgba(153, 27, 27, 0);
+  }
 }
 
 .widget-trend-status {
