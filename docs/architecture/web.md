@@ -91,6 +91,8 @@ Trend widget behavior:
   - projected net-worth flow from contracts + expenses (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
   - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
+  - a net-worth projection bar chart for `Current`, `1 Year`, `5 Years`, and `10 Years`.
+  - projection bars stay in chronological order, but their green fill shades are assigned by relative value from lightest (least value) to darkest (greatest value).
   - historical-widget labels should show the actual week window used for the calculation.
 
 ### Architecture Decision: Trend Merge Semantics

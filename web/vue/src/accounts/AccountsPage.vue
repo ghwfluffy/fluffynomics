@@ -145,7 +145,10 @@
         <article class="widget-slot widget-card widget-card--wide">
           <div class="widget-trend-head">
             <h3 class="widget-trend-title">
-              <span>Current Net Worth: {{ cents(currentNetWorthCents) }}</span>
+              <span class="widget-trend-summary">
+                <span class="widget-trend-summary-label">Current Net Worth:</span>
+                <span class="widget-trend-summary-value">{{ cents(currentNetWorthCents) }}</span>
+              </span>
               <span v-if="widgetLoading" class="widget-trend-status">Updating…</span>
             </h3>
           </div>
@@ -179,6 +182,10 @@
           <div class="widget-kpi" :class="deltaClass(historicalAccelerationCentsPerMonth2)">
             {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
           </div>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Net-Worth Projection</h3>
+          <VChart class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
         </article>
       </div>
     </section>
@@ -866,12 +873,12 @@ import ContractsTab from '@/accounts/ContractsTab.vue'
 import ExpensesTab from '@/accounts/ExpensesTab.vue'
 import VChart, { THEME_KEY } from 'vue-echarts'
 import { use } from 'echarts/core'
-import { LineChart, PieChart } from 'echarts/charts'
+import { BarChart, LineChart, PieChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { provide } from 'vue'
 
-use([PieChart, LineChart, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+use([PieChart, LineChart, BarChart, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
 provide(THEME_KEY, 'light')
 
 type AccountType =
@@ -1119,6 +1126,7 @@ const netWorthAnchorCents = ref(0)
 const netWorthPast30Cents = ref(0)
 const netWorthNext30Cents = ref(0)
 const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
+const netWorthProjectionPoints = ref<Array<{ key: string; label: string; value_cents: number }>>([])
 const projectedNetWorthDailyRateCents = ref(0)
 const historicalNetWorthDailyRateCents = ref(0)
 const historicalAccelerationCentsPerMonth2 = ref(0)
@@ -1541,6 +1549,69 @@ const trendChartOption = computed(() => {
   }
 })
 
+const netWorthProjectionBars = computed(() => {
+  const palette = ['#bbf7d0', '#86efac', '#4ade80', '#15803d']
+  const ranked = [...netWorthProjectionPoints.value].sort((a, b) => a.value_cents - b.value_cents)
+  const colorByKey = new Map(ranked.map((item, index) => [item.key, palette[Math.min(index, palette.length - 1)]]))
+  return netWorthProjectionPoints.value.map((item) => ({
+    ...item,
+    color: colorByKey.get(item.key) || palette[0],
+  }))
+})
+
+const netWorthProjectionChartOption = computed(() => ({
+  grid: { left: 56, right: 12, top: 24, bottom: 28 },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'shadow' },
+    formatter: (params: Array<{ axisValue: string; data: number }>) => {
+      const first = params?.[0]
+      if (!first) {
+        return ''
+      }
+      return `${first.axisValue}<br/>Net Worth: ${cents(Math.round(first.data * 100))}`
+    },
+  },
+  xAxis: {
+    type: 'category',
+    data: netWorthProjectionBars.value.map((item) => item.label),
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: '#94a3b8' } },
+    axisLabel: { color: '#64748b', fontSize: 10 },
+  },
+  yAxis: {
+    type: 'value',
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: '#94a3b8' } },
+    splitLine: { lineStyle: { color: '#e2e8f0' } },
+    axisLabel: {
+      color: '#64748b',
+      fontSize: 9,
+      formatter: (value: number) => formatDollarInteger(Math.round(value * 100)),
+    },
+  },
+  series: [
+    {
+      type: 'bar',
+      barMaxWidth: 42,
+      label: {
+        show: true,
+        position: 'top',
+        color: '#334155',
+        fontSize: 10,
+        formatter: (params: { value: number }) => formatDollarInteger(Math.round(Number(params.value) * 100)),
+      },
+      data: netWorthProjectionBars.value.map((item) => ({
+        value: item.value_cents / 100,
+        itemStyle: {
+          color: item.color,
+          borderRadius: [6, 6, 0, 0],
+        },
+      })),
+    },
+  ],
+}))
+
 const selectedTypeLabel = computed(() => accountTypes.find((item) => item.value === createForm.value.type)?.label)
 const modalTitle = computed(() => (editingAccountId.value ? 'Edit' : 'Create'))
 const submitLabel = computed(() => (editingAccountId.value ? 'Save Changes' : 'Create'))
@@ -1892,6 +1963,12 @@ const shiftDays = (base: Date, days: number) => {
   return moved
 }
 
+const addYears = (value: Date, years: number) => {
+  const next = new Date(value)
+  next.setFullYear(next.getFullYear() + years)
+  return next
+}
+
 const getNetWorthAsOf = async (asOf: Date) => {
   const snapshot = await request.get<AccountPayload[]>('/accounts', { params: { as_of_date: localIsoDate(asOf) } })
   return snapshot.reduce((sum, account) => sum + netWorthContributionCents(account), 0)
@@ -1988,7 +2065,8 @@ const loadWidgets = async () => {
   try {
     const anchor = parseDateOnly(forecastDate.value) || new Date()
     const next30Target = shiftDays(anchor, 30)
-    const [netWorthHistory, contracts, expenses, next30Preview, next30ForecastSeries] = await Promise.all([
+    const projectionTarget = addYears(anchor, 10)
+    const [netWorthHistory, contracts, expenses, next30Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
       request.get<ContractCalendarPayload[]>('/contracts'),
       request.get<ExpenseCalendarPayload[]>('/expenses'),
@@ -1998,6 +2076,11 @@ const loadWidgets = async () => {
       request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
         params: { through_date: localIsoDate(next30Target) },
       }),
+      projectionTarget.getTime() > Date.now()
+        ? request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
+            params: { through_date: localIsoDate(projectionTarget) },
+          })
+        : Promise.resolve([] as NetWorthForecastPoint[]),
     ])
     const forecastSeries =
       anchor.getTime() > Date.now()
@@ -2023,6 +2106,24 @@ const loadWidgets = async () => {
       }
       return found
     }
+    const projectionPoints = [...projectionForecastSeries]
+      .map((item) => ({ at: parseDateOnly(item.snapshot_date), value: intOrZero(item.value_cents) }))
+      .filter((item): item is { at: Date; value: number } => item.at !== null)
+      .sort((a, b) => a.at.getTime() - b.at.getTime())
+    const lookupProjectionAsOf = (target: Date) => {
+      if (target.getTime() <= Date.now()) {
+        return lookupHistoryAsOf(target) ?? currentNetWorthCents.value
+      }
+      let found: number | null = null
+      for (const point of projectionPoints) {
+        if (point.at.getTime() <= target.getTime()) {
+          found = point.value
+        } else {
+          break
+        }
+      }
+      return found ?? lookupHistoryAsOf(target) ?? currentNetWorthCents.value
+    }
     const anchorFromHistory = lookupHistoryAsOf(anchor)
     const pastAnchorFromHistory = lookupHistoryAsOf(shiftDays(anchor, -30))
 
@@ -2033,6 +2134,12 @@ const loadWidgets = async () => {
       ? intOrZero(next30ForecastSeries[next30ForecastSeries.length - 1].value_cents)
       : netWorthAnchorCents.value
     next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
+    netWorthProjectionPoints.value = [
+      { key: 'current', label: 'Current', value_cents: currentNetWorthCents.value },
+      { key: '1y', label: '1 Year', value_cents: lookupProjectionAsOf(addYears(anchor, 1)) },
+      { key: '5y', label: '5 Years', value_cents: lookupProjectionAsOf(addYears(anchor, 5)) },
+      { key: '10y', label: '10 Years', value_cents: lookupProjectionAsOf(addYears(anchor, 10)) },
+    ]
 
     const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
     const resolveContractLinkedType = (contract: ContractCalendarPayload) => {
@@ -3614,6 +3721,26 @@ watch(
   gap: 10px;
 }
 
+.widget-trend-summary {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.widget-trend-summary-label {
+  line-height: 1.1;
+}
+
+.widget-trend-summary-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.widget-trend-status {
+  flex-shrink: 0;
+}
+
 .widget-card--wide {
   padding-bottom: 0.55rem;
 }
@@ -3621,6 +3748,12 @@ watch(
 .widget-trend-echart {
   width: 100%;
   height: 190px;
+}
+
+.widget-projection-echart {
+  width: 100%;
+  height: 190px;
+  margin-top: 0.25rem;
 }
 
 .widget-trend-status {
@@ -3688,7 +3821,7 @@ watch(
 .widget-derived-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
