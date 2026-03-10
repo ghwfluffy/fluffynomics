@@ -101,6 +101,30 @@
       </div>
       <div class="widget-grid">
         <article class="widget-slot widget-card">
+          <div class="widget-trend-head">
+            <h3 class="widget-trend-title">
+              <span class="widget-trend-summary">
+                <span class="widget-trend-summary-label">Net Worth:</span>
+                <span
+                  class="widget-kpi-hover-wrap widget-kpi-hover-wrap--inline"
+                  @mouseenter="showCurrentNetWorthPopup = true"
+                  @mouseleave="showCurrentNetWorthPopup = false"
+                  @focusin="showCurrentNetWorthPopup = true"
+                  @focusout="showCurrentNetWorthPopup = false"
+                >
+                  <span class="widget-trend-summary-value" :class="proratedNetWorthFlashClass" tabindex="0">{{ cents(proratedNetWorthCents) }}</span>
+                  <div v-if="showCurrentNetWorthPopup" class="widget-kpi-popout widget-kpi-popout--summary">
+                    <div class="widget-kpi-popout-title">{{ widgetAnchorFullLabel }}</div>
+                    <div class="widget-kpi-popout-value">{{ cents(currentNetWorthCents) }}</div>
+                  </div>
+                </span>
+              </span>
+              <span v-if="widgetLoading" class="widget-trend-status">Updating…</span>
+            </h3>
+          </div>
+          <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
+        </article>
+        <article class="widget-slot widget-card">
           <div class="widget-card-head">
             <h3>Portfolio Mix</h3>
             <span class="widget-card-hint">Hover slices for type and percent</span>
@@ -110,11 +134,8 @@
           </div>
         </article>
         <article class="widget-slot widget-card">
-          <h3>Net Change (Last 30 Days)</h3>
-          <div class="widget-kpi" :class="hasPast30SnapshotData ? deltaClass(netChangePast30) : 'delta-muted'">
-            {{ hasPast30SnapshotData ? signedCents(netChangePast30) : 'No data' }}
-          </div>
-          <p class="widget-subtext">Compared to 30 days before {{ widgetAnchorLabel }}</p>
+          <h3>Net-Worth Projection</h3>
+          <VChart class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
         </article>
         <article class="widget-slot widget-card">
           <h3>Net Change (Next 30 Days)</h3>
@@ -139,26 +160,12 @@
             </div>
           </div>
           <p class="widget-subtext">Forecast from {{ widgetAnchorLabel }} using automatic contracts</p>
-        </article>
-      </div>
-      <div class="widget-trend">
-        <article class="widget-slot widget-card widget-card--wide">
-          <div class="widget-trend-head">
-            <h3 class="widget-trend-title">
-              <span class="widget-trend-summary-list">
-                <span class="widget-trend-summary">
-                  <span class="widget-trend-summary-label">Current Net Worth:</span>
-                  <span class="widget-trend-summary-value">{{ cents(currentNetWorthCents) }}</span>
-                </span>
-                <span class="widget-trend-summary">
-                  <span class="widget-trend-summary-label">Prorated Net Worth:</span>
-                  <span class="widget-trend-summary-value" :class="proratedNetWorthFlashClass">{{ cents(proratedNetWorthCents) }}</span>
-                </span>
-              </span>
-              <span v-if="widgetLoading" class="widget-trend-status">Updating…</span>
-            </h3>
+          <div class="widget-change-stack-divider"></div>
+          <h3>Net Change (Last 30 Days)</h3>
+          <div class="widget-kpi" :class="hasPast30SnapshotData ? deltaClass(netChangePast30) : 'delta-muted'">
+            {{ hasPast30SnapshotData ? signedCents(netChangePast30) : 'No data' }}
           </div>
-          <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
+          <p class="widget-subtext">Compared to 30 days before {{ widgetAnchorLabel }}</p>
         </article>
       </div>
       <div class="widget-derived-grid">
@@ -189,10 +196,7 @@
             {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
           </div>
         </article>
-        <article class="widget-slot widget-card">
-          <h3>Net-Worth Projection</h3>
-          <VChart class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
-        </article>
+        <article class="widget-slot widget-card widget-card--blank" aria-hidden="true"></article>
       </div>
     </section>
 
@@ -1129,18 +1133,20 @@ const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
 const widgetLoading = ref(false)
 const next30BreakdownBusy = ref(false)
 const showNext30Breakdown = ref(false)
+const showCurrentNetWorthPopup = ref(false)
 const next30BreakdownItems = ref<NetChangeBreakdownItem[]>([])
 const hasPast30SnapshotData = ref(false)
 const netWorthAnchorCents = ref(0)
 const netWorthPast30Cents = ref(0)
 const netWorthNext30Cents = ref(0)
 const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
-const netWorthProjectionPoints = ref<Array<{ key: string; label: string; value_cents: number }>>([])
+const netWorthProjectionPoints = ref<Array<{ key: string; label: string; value_cents: number; snapshot_date: string }>>([])
 const projectedNetWorthDailyRateCents = ref(0)
 const historicalNetWorthDailyRateCents = ref(0)
 const historicalAccelerationCentsPerMonth2 = ref(0)
 const historicalWindowWeeks = ref(0)
 const proratedNowMs = ref(Date.now())
+const suppressProratedNetWorthFlash = ref(false)
 const proratedNetWorthFlashClass = ref<'widget-trend-summary-value--flash-up' | 'widget-trend-summary-value--flash-down' | ''>('')
 let widgetRequestToken = 0
 const accountsTableFilter = ref('')
@@ -1456,6 +1462,9 @@ const widgetAnchorDate = computed(() => parseDateOnly(forecastDate.value) || new
 const widgetAnchorLabel = computed(() =>
   widgetAnchorDate.value.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
 )
+const widgetAnchorFullLabel = computed(() =>
+  widgetAnchorDate.value.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+)
 const proratedReferenceTime = computed(() => {
   if (forecastDate.value) {
     return parseDateOnly(forecastDate.value) || new Date(proratedNowMs.value)
@@ -1594,12 +1603,17 @@ const netWorthProjectionChartOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
-    formatter: (params: Array<{ axisValue: string; data: number }>) => {
+    formatter: (params: Array<{ axisValue: string; value?: number | string | Array<number | string>; dataIndex?: number }>) => {
       const first = params?.[0]
       if (!first) {
         return ''
       }
-      return `${first.axisValue}<br/>Net Worth: ${cents(Math.round(first.data * 100))}`
+      const point = typeof first.dataIndex === 'number' ? netWorthProjectionBars.value[first.dataIndex] : null
+      const rawValue = Array.isArray(first.value) ? Number(first.value[1] || 0) : Number(first.value || 0)
+      const title = point?.snapshot_date
+        ? new Date(`${point.snapshot_date}T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        : first.axisValue
+      return `${title}<br/>Net Worth: ${cents(Math.round(rawValue * 100))}`
     },
   },
   xAxis: {
@@ -2166,11 +2180,35 @@ const loadWidgets = async () => {
     next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
     calendarContracts.value = contracts
     calendarExpenses.value = expenses
+    const projectionCurrentDate = anchor
+    const projection1yDate = addYears(anchor, 1)
+    const projection5yDate = addYears(anchor, 5)
+    const projection10yDate = addYears(anchor, 10)
     netWorthProjectionPoints.value = [
-      { key: 'current', label: 'Current', value_cents: currentNetWorthCents.value },
-      { key: '1y', label: '1 Year', value_cents: lookupProjectionAsOf(addYears(anchor, 1)) },
-      { key: '5y', label: '5 Years', value_cents: lookupProjectionAsOf(addYears(anchor, 5)) },
-      { key: '10y', label: '10 Years', value_cents: lookupProjectionAsOf(addYears(anchor, 10)) },
+      {
+        key: 'current',
+        label: projectionCurrentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        value_cents: currentNetWorthCents.value,
+        snapshot_date: localIsoDate(projectionCurrentDate),
+      },
+      {
+        key: '1y',
+        label: projection1yDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        value_cents: lookupProjectionAsOf(projection1yDate),
+        snapshot_date: localIsoDate(projection1yDate),
+      },
+      {
+        key: '5y',
+        label: projection5yDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        value_cents: lookupProjectionAsOf(projection5yDate),
+        snapshot_date: localIsoDate(projection5yDate),
+      },
+      {
+        key: '10y',
+        label: projection10yDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        value_cents: lookupProjectionAsOf(projection10yDate),
+        snapshot_date: localIsoDate(projection10yDate),
+      },
     ]
 
     const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
@@ -3717,7 +3755,7 @@ onUnmounted(() => {
 watch(
   () => proratedNetWorthCents.value,
   (next, previous) => {
-    if (previous === undefined || next === previous) {
+    if (previous === undefined || next === previous || suppressProratedNetWorthFlash.value || widgetLoading.value) {
       return
     }
     proratedNetWorthFlashClass.value = next > previous ? 'widget-trend-summary-value--flash-up' : 'widget-trend-summary-value--flash-down'
@@ -3734,9 +3772,19 @@ watch(
 watch(
   () => forecastDate.value,
   async () => {
+    suppressProratedNetWorthFlash.value = true
+    proratedNetWorthFlashClass.value = ''
+    if (proratedFlashTimeoutId !== null) {
+      window.clearTimeout(proratedFlashTimeoutId)
+      proratedFlashTimeoutId = null
+    }
     const anchor = parseDateOnly(forecastDate.value) || new Date()
     calendarMonthAnchor.value = startOfMonth(anchor)
     await loadAccounts()
+    await nextTick()
+    window.requestAnimationFrame(() => {
+      suppressProratedNetWorthFlash.value = false
+    })
   },
 )
 
@@ -3922,6 +3970,11 @@ watch(
   font-weight: 700;
 }
 
+.widget-change-stack-divider {
+  margin: 2.15rem 0 1.8rem;
+  border-top: 1px solid var(--cds-border-subtle-01);
+}
+
 .delta-positive {
   color: #047857;
 }
@@ -3947,10 +4000,6 @@ watch(
   height: 146px;
 }
 
-.widget-trend {
-  margin-top: 12px;
-}
-
 .widget-trend-head {
   margin-bottom: 2px;
 }
@@ -3961,13 +4010,6 @@ watch(
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-}
-
-.widget-trend-summary-list {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 0.8rem 1.1rem;
 }
 
 .widget-trend-summary {
@@ -4032,10 +4074,6 @@ watch(
   flex-shrink: 0;
 }
 
-.widget-card--wide {
-  padding-bottom: 0.55rem;
-}
-
 .widget-trend-echart {
   width: 100%;
   height: 190px;
@@ -4059,6 +4097,10 @@ watch(
   display: inline-block;
 }
 
+.widget-kpi-hover-wrap--inline {
+  vertical-align: baseline;
+}
+
 .widget-kpi-popout {
   position: absolute;
   left: 0;
@@ -4074,11 +4116,22 @@ watch(
   z-index: 18;
 }
 
+.widget-kpi-popout--summary {
+  width: max-content;
+  min-width: 180px;
+}
+
 .widget-kpi-popout-title {
   font-size: 0.74rem;
   font-weight: 700;
   margin-bottom: 5px;
   color: var(--cds-text-secondary);
+}
+
+.widget-kpi-popout-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #334155;
 }
 
 .widget-kpi-popout-empty {
@@ -4122,6 +4175,10 @@ watch(
   padding: 0;
   display: grid;
   gap: 6px;
+}
+
+.widget-card--blank {
+  background: #fff;
 }
 
 .widget-rate-list li {

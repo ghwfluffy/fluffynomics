@@ -87,14 +87,16 @@ Trend widget behavior:
 - Endpoint returns daily snapshots; frontend rolls to month-level points for readability.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
-- Overview trend header shows both `Current Net Worth` and `Prorated Net Worth`.
-- `Prorated Net Worth` starts from the displayed net worth and adds an in-progress linear accrual for each recurring contract and recurring expense over its current cycle.
+- On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, followed by portfolio mix, last-30 change, and next-30 change.
+- Overview trend header shows only the prorated `Net Worth` value.
+- Hovering or focusing that net-worth value reveals a popover with `Current Net Worth`.
+- Displayed `Net Worth` starts from the actual current net worth and adds an in-progress linear accrual for each recurring contract and recurring expense over its current cycle.
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
 - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow from contracts + expenses (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
   - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
-  - a net-worth projection bar chart for `Current`, `1 Year`, `5 Years`, and `10 Years`.
+  - a net-worth projection bar chart for the anchor month/year plus the calculated `+1 year`, `+5 year`, and `+10 year` month/year targets.
   - projection bars stay in chronological order, but their green fill shades are assigned by relative value from lightest (least value) to darkest (greatest value).
   - historical-widget labels should show the actual week window used for the calculation.
 
