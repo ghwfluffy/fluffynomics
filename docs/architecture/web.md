@@ -90,13 +90,16 @@ Trend widget behavior:
 - On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, followed by portfolio mix, last-30 change, and next-30 change.
 - Overview trend header shows only the prorated `Net Worth` value.
 - Hovering or focusing that net-worth value reveals a popover with `Current Net Worth`.
-- Displayed `Net Worth` starts from the actual current net worth and adds an in-progress linear accrual for each recurring contract and recurring expense over its current cycle.
+- `Current Net Worth` starts from account balances and includes in-progress accrual for non-automatic recurring contracts plus recurring expenses over their current cycles.
+- Displayed `Net Worth` adds automatic recurring contract accrual on top of that current-net-worth baseline.
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
 - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow from contracts + expenses (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
   - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
   - a net-worth projection bar chart for the anchor month/year plus the calculated `+1 year`, `+5 year`, and `+10 year` month/year targets.
+  - a 60-day biggest-changes widget showing the first two positive events and first two negative events whose absolute value is at least `$1,000`, with each pair displayed in chronological order.
+  - upcoming-change widgets merge simulation output with locally derived non-automatic recurring contract occurrences so manual contracts appear in both the 30-day breakdown and the 60-day biggest-changes card.
   - projection bars stay in chronological order, but their green fill shades are assigned by relative value from lightest (least value) to darkest (greatest value).
   - historical-widget labels should show the actual week window used for the calculation.
 
@@ -217,6 +220,7 @@ Contracts intentionally mirror account tile UX:
 - left/right rank arrows,
 - icon + organization + last4 identity rows,
 - link icon and update-age clock badge,
+- next-payment countdown text on tiles/tables should expose the exact scheduled date on hover,
 - bottom-right three-dot menu for edit/delete.
 - `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
 - Update modal exposes an `Expired` checkbox; this is the supported manual-expiration control.

@@ -159,7 +159,7 @@
               </ul>
             </div>
           </div>
-          <p class="widget-subtext">Forecast from {{ widgetAnchorLabel }} using automatic contracts</p>
+          <p class="widget-subtext">Forecast from {{ widgetAnchorLabel }} using contracts and expenses</p>
           <div class="widget-change-stack-divider"></div>
           <h3>Net Change (Last 30 Days)</h3>
           <div class="widget-kpi" :class="hasPast30SnapshotData ? deltaClass(netChangePast30) : 'delta-muted'">
@@ -196,7 +196,33 @@
             {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
           </div>
         </article>
-        <article class="widget-slot widget-card widget-card--blank" aria-hidden="true"></article>
+        <article class="widget-slot widget-card">
+          <h3>Biggest Changes (Next 60 Days)</h3>
+          <div class="widget-extreme-list">
+            <div class="widget-extreme-item">
+              <div class="widget-extreme-heading">Pluses Over $1,000</div>
+              <div v-if="biggestPositive60DayItems.length" class="widget-extreme-grid">
+                <div v-for="item in biggestPositive60DayItems" :key="item.key" class="widget-extreme-card">
+                  <div class="widget-extreme-meta">{{ item.dateLabel }}</div>
+                  <div class="widget-extreme-name">{{ item.label }}</div>
+                  <div class="widget-extreme-value delta-positive">{{ signedCents(item.netDeltaCents) }}</div>
+                </div>
+              </div>
+              <div v-else class="widget-extreme-empty">No positive events over $1,000</div>
+            </div>
+            <div class="widget-extreme-item">
+              <div class="widget-extreme-heading">Minuses Over $1,000</div>
+              <div v-if="biggestNegative60DayItems.length" class="widget-extreme-grid">
+                <div v-for="item in biggestNegative60DayItems" :key="item.key" class="widget-extreme-card">
+                  <div class="widget-extreme-meta">{{ item.dateLabel }}</div>
+                  <div class="widget-extreme-name">{{ item.label }}</div>
+                  <div class="widget-extreme-value delta-negative">{{ signedCents(item.netDeltaCents) }}</div>
+                </div>
+              </div>
+              <div v-else class="widget-extreme-empty">No negative events over $1,000</div>
+            </div>
+          </div>
+        </article>
       </div>
     </section>
 
@@ -947,6 +973,7 @@ interface ContractCalendarPayload {
   name: string
   type: 'income' | 'payment' | 'transfer'
   amount_cents: number
+  automatic?: boolean
   linked_account_id?: string
   linked_wallet?: 'paypal' | 'google_pay'
   source_account_id?: string
@@ -991,6 +1018,7 @@ interface ContractRunPreviewPayload {
 
 interface NetChangeBreakdownItem {
   key: string
+  dateIso: string
   dateLabel: string
   label: string
   netDeltaCents: number
@@ -1135,6 +1163,8 @@ const next30BreakdownBusy = ref(false)
 const showNext30Breakdown = ref(false)
 const showCurrentNetWorthPopup = ref(false)
 const next30BreakdownItems = ref<NetChangeBreakdownItem[]>([])
+const biggestPositive60DayItems = ref<NetChangeBreakdownItem[]>([])
+const biggestNegative60DayItems = ref<NetChangeBreakdownItem[]>([])
 const hasPast30SnapshotData = ref(false)
 const netWorthAnchorCents = ref(0)
 const netWorthPast30Cents = ref(0)
@@ -1439,22 +1469,35 @@ const netWorthContributionCents = (account: AccountPayload) => {
   return baseValue + rewards
 }
 
-const currentNetWorthCents = computed(() =>
+const baseNetWorthCents = computed(() =>
   accounts.value.reduce((sum, account) => sum + netWorthContributionCents(account), 0),
 )
-const proratedNetWorthAdjustmentCents = computed(() => {
+const manualContractProratedAdjustmentCents = computed(() => {
   const referenceTime = proratedReferenceTime.value
-  const contractContribution = calendarContracts.value.reduce(
-    (sum, contract) => sum + contractProratedContributionCents(contract, referenceTime),
-    0,
-  )
-  const expenseContribution = calendarExpenses.value.reduce(
-    (sum, expense) => sum + expenseProratedContributionCents(expense, referenceTime),
-    0,
-  )
-  return contractContribution + expenseContribution
+  return calendarContracts.value.reduce((sum, contract) => {
+    if (contract.automatic !== false) {
+      return sum
+    }
+    return sum + contractProratedContributionCents(contract, referenceTime)
+  }, 0)
 })
-const proratedNetWorthCents = computed(() => currentNetWorthCents.value + proratedNetWorthAdjustmentCents.value)
+const expenseProratedAdjustmentCents = computed(() => {
+  const referenceTime = proratedReferenceTime.value
+  return calendarExpenses.value.reduce((sum, expense) => sum + expenseProratedContributionCents(expense, referenceTime), 0)
+})
+const automaticContractProratedAdjustmentCents = computed(() => {
+  const referenceTime = proratedReferenceTime.value
+  return calendarContracts.value.reduce((sum, contract) => {
+    if (contract.automatic === false) {
+      return sum
+    }
+    return sum + contractProratedContributionCents(contract, referenceTime)
+  }, 0)
+})
+const currentNetWorthCents = computed(
+  () => baseNetWorthCents.value + manualContractProratedAdjustmentCents.value + expenseProratedAdjustmentCents.value,
+)
+const proratedNetWorthCents = computed(() => currentNetWorthCents.value + automaticContractProratedAdjustmentCents.value)
 const netChangePast30 = computed(() => netWorthAnchorCents.value - netWorthPast30Cents.value)
 const netChangeNext30 = computed(() => netWorthNext30Cents.value - netWorthAnchorCents.value)
 
@@ -2022,8 +2065,8 @@ const buildNext30Breakdown = (
   preview: ContractRunPreviewPayload,
   contracts: ContractCalendarPayload[],
   expenses: ExpenseCalendarPayload[],
+  startIso: string,
 ) => {
-  const todayIso = localIsoDate(new Date())
   const contractsById = new Map(contracts.map((item) => [item.id, item]))
   const expensesById = new Map(expenses.map((item) => [item.id, item]))
   const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
@@ -2050,7 +2093,7 @@ const buildNext30Breakdown = (
 
   for (const posting of preview.postings || []) {
     const dateIso = (posting.effective_date || '').slice(0, 10)
-    if (!dateIso || dateIso <= todayIso || posting.status === 'skipped') {
+    if (!dateIso || dateIso <= startIso || posting.status === 'skipped') {
       continue
     }
     const contract = contractsById.get(posting.contract_id)
@@ -2078,7 +2121,7 @@ const buildNext30Breakdown = (
 
   for (const posting of preview.expense_postings || []) {
     const dateIso = (posting.effective_date || '').slice(0, 10)
-    if (!dateIso || dateIso <= todayIso || posting.status === 'skipped') {
+    if (!dateIso || dateIso <= startIso || posting.status === 'skipped') {
       continue
     }
     const expense = expensesById.get(posting.expense_id)
@@ -2096,11 +2139,24 @@ const buildNext30Breakdown = (
   rows.sort((a, b) => (a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso)))
   return rows.map((row) => ({
     key: row.key,
+    dateIso: row.dateIso,
     dateLabel: new Date(`${row.dateIso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     label: row.label,
     netDeltaCents: row.netDeltaCents,
   }))
 }
+
+const upcomingThresholdCents = 100_000
+
+const pickThresholdEvents = (items: NetChangeBreakdownItem[], direction: 'positive' | 'negative', count: number) =>
+  items
+    .filter(
+      (item) =>
+        (direction === 'positive' ? item.netDeltaCents > 0 : item.netDeltaCents < 0) &&
+        Math.abs(item.netDeltaCents) >= upcomingThresholdCents,
+    )
+    .sort((a, b) => (a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso)))
+    .slice(0, count)
 
 const loadWidgets = async () => {
   const runToken = ++widgetRequestToken
@@ -2108,14 +2164,16 @@ const loadWidgets = async () => {
   next30BreakdownBusy.value = true
   try {
     const anchor = parseDateOnly(forecastDate.value) || new Date()
+    const anchorIso = localIsoDate(anchor)
     const next30Target = shiftDays(anchor, 30)
+    const next60Target = shiftDays(anchor, 60)
     const projectionTarget = addYears(anchor, 10)
-    const [netWorthHistory, contracts, expenses, next30Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
+    const [netWorthHistory, contracts, expenses, next60Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
       request.get<ContractCalendarPayload[]>('/contracts'),
       request.get<ExpenseCalendarPayload[]>('/expenses'),
       request.post<ContractRunPreviewPayload>('/contracts/run', undefined, {
-        params: { dry_run: true, through_date: localIsoDate(next30Target) },
+        params: { dry_run: true, through_date: localIsoDate(next60Target) },
       }),
       request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
         params: { through_date: localIsoDate(next30Target) },
@@ -2177,7 +2235,14 @@ const loadWidgets = async () => {
     netWorthNext30Cents.value = next30ForecastSeries.length
       ? intOrZero(next30ForecastSeries[next30ForecastSeries.length - 1].value_cents)
       : netWorthAnchorCents.value
-    next30BreakdownItems.value = buildNext30Breakdown(next30Preview, contracts, expenses)
+    const simulatedBreakdownItems = buildNext30Breakdown(next60Preview, contracts, expenses, anchorIso)
+    const manualContractBreakdownItems = buildManualContractBreakdown(contracts, anchor, next60Target)
+    const next60BreakdownItems = [...simulatedBreakdownItems, ...manualContractBreakdownItems].sort((a, b) =>
+      a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso),
+    )
+    next30BreakdownItems.value = next60BreakdownItems.filter((item) => item.dateIso <= localIsoDate(next30Target))
+    biggestPositive60DayItems.value = pickThresholdEvents(next60BreakdownItems, 'positive', 2)
+    biggestNegative60DayItems.value = pickThresholdEvents(next60BreakdownItems, 'negative', 2)
     calendarContracts.value = contracts
     calendarExpenses.value = expenses
     const projectionCurrentDate = anchor
@@ -2778,6 +2843,70 @@ const expenseProratedContributionCents = (expense: ExpenseCalendarPayload, refer
   }
   const fraction = proratedCycleFraction(referenceTime, previous, next)
   return -Math.round(Math.abs(expense.estimated_amount_cents || 0) * fraction)
+}
+
+const buildManualContractBreakdown = (
+  contracts: ContractCalendarPayload[],
+  startDate: Date,
+  endDate: Date,
+): NetChangeBreakdownItem[] => {
+  const rows: NetChangeBreakdownItem[] = []
+  const startDay = startOfDay(startDate)
+  const endDay = startOfDay(endDate)
+  for (const contract of contracts) {
+    if (contract.automatic !== false || contract.type === 'transfer') {
+      continue
+    }
+    const spec = recurringSpecFromRaw(contract.payment_period, contract.payment_day || 1, startDay)
+    if (!spec?.kind) {
+      continue
+    }
+    const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
+    if (spec.kind === 'daily') {
+      let next = addDays(startDay, 1)
+      while (next <= endDay) {
+        const dateIso = localIsoDate(next)
+        if (!contract.expiration_date || contract.expiration_date.slice(0, 10) >= dateIso) {
+          rows.push({
+            key: `manual-contract-${contract.id}-${dateIso}`,
+            dateIso,
+            dateLabel: next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            label: contract.name,
+            netDeltaCents: signedAmount,
+          })
+        }
+        next = addDays(next, 1)
+      }
+      continue
+    }
+    let next = recurringOnOrAfter(addDays(startDay, 1), spec.kind, spec.payload, contract.payment_day || 1)
+    if (!next) {
+      continue
+    }
+    if (contract.last_payment_date) {
+      const paidDate = parseDateOnly(contract.last_payment_date)
+      const expectedLast = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+      if (paidDate && expectedLast && paidDate > expectedLast && paidDate < next) {
+        next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1) || next
+      }
+    }
+    let guard = 0
+    while (next && next <= endDay && guard < 240) {
+      const dateIso = localIsoDate(next)
+      if (!contract.expiration_date || contract.expiration_date.slice(0, 10) >= dateIso) {
+        rows.push({
+          key: `manual-contract-${contract.id}-${dateIso}`,
+          dateIso,
+          dateLabel: next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          label: contract.name,
+          netDeltaCents: signedAmount,
+        })
+      }
+      next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1)
+      guard += 1
+    }
+  }
+  return rows.sort((a, b) => (a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso)))
 }
 
 const recurringOccurrencesInMonth = (
@@ -4177,8 +4306,59 @@ watch(
   gap: 6px;
 }
 
-.widget-card--blank {
-  background: #fff;
+.widget-extreme-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.widget-extreme-item {
+  min-width: 0;
+}
+
+.widget-extreme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.45rem;
+}
+
+.widget-extreme-card {
+  min-width: 0;
+}
+
+.widget-extreme-heading {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--cds-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.widget-extreme-meta {
+  font-size: 0.76rem;
+  color: var(--cds-text-secondary);
+}
+
+.widget-extreme-name {
+  margin-top: 0.2rem;
+  font-size: 0.88rem;
+  color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-extreme-value {
+  margin-top: 0.3rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.widget-extreme-empty {
+  margin-top: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--cds-text-secondary);
 }
 
 .widget-rate-list li {

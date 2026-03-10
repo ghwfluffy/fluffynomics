@@ -64,7 +64,7 @@
           </a>
           <div class="tile-title">{{ contract.name }}</div>
           <div class="tile-sub">{{ contract.organization || 'Unknown organization' }}</div>
-          <div class="tile-sub">{{ nextPaymentCountdownLabel(contract) }}</div>
+          <div class="tile-sub" :title="nextPaymentExactLabel(contract)">{{ nextPaymentCountdownLabel(contract) }}</div>
           <div class="tile-balance" :class="contract.type === 'income' ? 'balance-asset' : 'balance-liability'">
             {{ contract.type === 'income' ? 'Amount' : 'Payment' }} {{ cents(contract.amount_cents) }}
           </div>
@@ -130,7 +130,7 @@
               <td>{{ contract.organization || 'Unknown' }}</td>
               <td>{{ contractTypeLabel(contract.type) }}</td>
               <td>{{ cents(contract.amount_cents) }}</td>
-              <td>{{ nextPaymentCountdownLabel(contract) }}</td>
+              <td :title="nextPaymentExactLabel(contract)">{{ nextPaymentCountdownLabel(contract) }}</td>
               <td>{{ contract.automatic ? 'Automatic' : 'Manual' }}</td>
               <td class="table-actions-cell">
                 <div class="table-overflow-menu">
@@ -1003,11 +1003,11 @@ const formatPaymentDate = (value: Date | null) => {
   if (!value) {
     return 'Unknown'
   }
-  const month = value.toLocaleString('en-US', { month: 'long' })
-  return `${month} ${ordinal(value.getDate())}`
+  return value.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 const nextPaymentTooltip = (contract: ContractPayload) => `next payment: ${formatPaymentDate(nextPaymentDate(contract))}`
+const nextPaymentExactLabel = (contract: ContractPayload) => `Next payment date: ${formatPaymentDate(nextPaymentDate(contract))}`
 
 const nextPaymentCountdownLabel = (contract: ContractPayload) => {
   const days = nextPaymentDays(contract)
