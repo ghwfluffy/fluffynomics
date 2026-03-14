@@ -86,6 +86,17 @@ const onKeyDown = (event: KeyboardEvent) => {
   const caretStart = start ?? displayValue.value.length
   const caretEnd = end ?? displayValue.value.length
   const hasSelection = start !== null && end !== null && start !== end
+  const decimalIndex = displayValue.value.indexOf('.')
+
+  if (event.key === '.' && !hasSelection && decimalIndex >= 0) {
+    event.preventDefault()
+    selectionEditMode.value = true
+    const nextCaret = caretStart <= decimalIndex ? decimalIndex + 1 : caretStart
+    nextTick(() => {
+      inputRef.value?.setSelectionRange(nextCaret, nextCaret)
+    })
+    return
+  }
 
   if (/^[0-9]$/.test(event.key)) {
     if (hasSelection) {
