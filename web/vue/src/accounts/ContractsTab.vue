@@ -14,8 +14,13 @@
 
     <template v-if="contractsViewMode === 'tiles'">
     <section v-for="section in sections" :key="section.key" class="section-wrap">
-      <h2 class="section-title">{{ section.title }}</h2>
-      <div v-if="section.contracts.length" class="section-grid">
+      <CollapsibleSectionHeader
+        :title="section.title"
+        :collapsed="isContractSectionCollapsed(section)"
+        :collapsible="section.key === 'expired'"
+        @toggle="toggleContractSection(section)"
+      />
+      <div v-if="!isContractSectionCollapsed(section) && section.contracts.length" class="section-grid">
         <article v-for="(contract, index) in section.contracts" :key="contract.id" class="cds--tile account-tile">
           <img v-if="contractIconUrl(contract)" :src="contractIconUrl(contract)" class="tile-icon" alt="Contract icon" />
           <div v-else class="tile-icon tile-icon--empty" />
@@ -84,7 +89,7 @@
           </div>
         </article>
       </div>
-      <div v-else class="cds--tile empty-state">No contracts yet.</div>
+      <div v-else-if="!isContractSectionCollapsed(section)" class="cds--tile empty-state">No contracts yet.</div>
     </section>
     </template>
 
@@ -289,6 +294,7 @@ import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
+import CollapsibleSectionHeader from '@/components/CollapsibleSectionHeader.vue'
 
 interface AccountSummary {
   id: string
@@ -403,6 +409,7 @@ const updatingContract = ref<ContractPayload | null>(null)
 const updateForm = ref<{ last_payment_date?: string; expiration_date?: string; expired: boolean }>({
   expired: false,
 })
+const expiredContractsSectionOpen = ref(false)
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
 const iconPickerDialog = ref(false)
@@ -479,6 +486,15 @@ const sections = computed<Section[]>(() => {
   }
   return grouped
 })
+
+const isContractSectionCollapsed = (section: Section) => section.key === 'expired' && !expiredContractsSectionOpen.value
+
+const toggleContractSection = (section: Section) => {
+  if (section.key !== 'expired') {
+    return
+  }
+  expiredContractsSectionOpen.value = !expiredContractsSectionOpen.value
+}
 
 const contractsTableRows = computed(() => {
   const needle = contractsTableFilter.value.trim().toLowerCase()

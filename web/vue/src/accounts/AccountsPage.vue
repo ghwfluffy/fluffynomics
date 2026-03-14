@@ -627,8 +627,13 @@
 
     <template v-if="activeTab === 'accounts' && dashboardViewMode === 'tiles'">
       <section v-for="section in sections" :key="section.key" class="section-wrap">
-        <h2 class="section-title">{{ section.title }}</h2>
-        <div v-if="section.accounts.length" class="section-grid">
+        <CollapsibleSectionHeader
+          :title="section.title"
+          :collapsed="isAccountSectionCollapsed(section)"
+          :collapsible="section.key === 'closed'"
+          @toggle="toggleAccountSection(section)"
+        />
+        <div v-if="!isAccountSectionCollapsed(section) && section.accounts.length" class="section-grid">
           <article v-for="(account, index) in section.accounts" :key="account.id" class="cds--tile account-tile">
             <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="tile-icon" alt="Account icon" />
             <div v-else class="tile-icon tile-icon--empty" />
@@ -696,7 +701,7 @@
             </div>
           </article>
         </div>
-        <div v-else class="cds--tile empty-state">No accounts yet.</div>
+        <div v-else-if="!isAccountSectionCollapsed(section)" class="cds--tile empty-state">No accounts yet.</div>
       </section>
     </template>
 
@@ -905,6 +910,7 @@ import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
+import CollapsibleSectionHeader from '@/components/CollapsibleSectionHeader.vue'
 import ContractsTab from '@/accounts/ContractsTab.vue'
 import ExpensesTab from '@/accounts/ExpensesTab.vue'
 import VChart, { THEME_KEY } from 'vue-echarts'
@@ -1158,6 +1164,7 @@ const activeTab = ref<DashboardTab>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
 const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
+const closedAccountsSectionOpen = ref(false)
 const widgetLoading = ref(false)
 const next30BreakdownBusy = ref(false)
 const showNext30Breakdown = ref(false)
@@ -1318,6 +1325,15 @@ const sections = computed<Section[]>(() =>
         : accounts.value.filter((account) => !account.closed && section.types.includes(account.type)),
   })),
 )
+
+const isAccountSectionCollapsed = (section: Section) => section.key === 'closed' && !closedAccountsSectionOpen.value
+
+const toggleAccountSection = (section: Section) => {
+  if (section.key !== 'closed') {
+    return
+  }
+  closedAccountsSectionOpen.value = !closedAccountsSectionOpen.value
+}
 
 const sectionTitleForAccount = (account: AccountPayload) =>
   account.closed ? 'Closed Accounts' : sectionTitleByType(account.type)

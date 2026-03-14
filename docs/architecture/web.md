@@ -76,10 +76,14 @@ Forecast-date UX:
 View mode UX:
 - Accounts/Contracts/Expenses share one table-vs-tiles mode state.
 - Toggling `Tiles`/`Table` in one tab applies to the other tab for consistency.
+- In tile mode, stale trailing sections stay collapsed by default behind `CollapsibleSectionHeader.vue`:
+  - Accounts: `Closed Accounts`
+  - Contracts: `Expired`
+  - Expenses: `Legacy`
 
 Expenses tab grouping:
 - enabled expenses stay under their normal category labels.
-- disabled expenses render separately as `Disabled <Category>` sections and sort after enabled categories.
+- disabled expenses render in a trailing `Legacy` section in tile mode.
 - the expenses table `Category` column and category sort should follow that same display grouping so tiles and table stay consistent.
 
 Trend widget behavior:
@@ -224,7 +228,7 @@ Contracts intentionally mirror account tile UX:
 - bottom-right three-dot menu for edit/delete.
 - `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
 - Update modal exposes an `Expired` checkbox; this is the supported manual-expiration control.
-- Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections.
+- Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections, collapsed by default.
 - active contracts are grouped by `type + category` (example: `Incoming Work`, `Payment Digital`).
 
 Contract create/edit also mirrors account create/edit patterns:
@@ -250,6 +254,7 @@ Expenses support CRUD in `ExpensesTab.vue` with:
 
 The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.
 The create/edit expense modal must always expose linked-account selection so expense simulation can apply deltas to the intended account.
+Disabled expenses stay editable/updateable in the `Legacy` tile section, which is collapsed by default.
 
 ## Next-Payment Early-Pay Logic
 

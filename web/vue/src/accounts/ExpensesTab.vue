@@ -8,9 +8,14 @@
     </div>
 
     <template v-if="viewMode === 'tiles'">
-      <section v-for="section in sections" :key="section.label" class="section-wrap">
-        <h2 class="section-title">{{ section.label }}</h2>
-        <div v-if="section.items.length" class="section-grid">
+      <section v-for="section in sections" :key="section.key" class="section-wrap">
+        <CollapsibleSectionHeader
+          :title="section.label"
+          :collapsed="isExpenseSectionCollapsed(section)"
+          :collapsible="section.key === 'legacy'"
+          @toggle="toggleExpenseSection(section)"
+        />
+        <div v-if="!isExpenseSectionCollapsed(section) && section.items.length" class="section-grid">
           <article v-for="item in section.items" :key="item.id" class="cds--tile account-tile">
             <img v-if="expenseIconUrl(item)" :src="expenseIconUrl(item)" class="tile-icon" alt="Expense icon" />
             <div v-else class="tile-icon tile-icon--empty" />
@@ -31,7 +36,7 @@
             </div>
           </article>
         </div>
-        <div v-else class="cds--tile empty-state">No expenses yet.</div>
+        <div v-else-if="!isExpenseSectionCollapsed(section)" class="cds--tile empty-state">No expenses yet.</div>
       </section>
     </template>
 
@@ -209,6 +214,7 @@ import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
+import CollapsibleSectionHeader from '@/components/CollapsibleSectionHeader.vue'
 
 interface Expense {
   id: string
@@ -237,6 +243,12 @@ interface LinkedAccount {
   type: string
 }
 
+interface ExpenseSection {
+  key: string
+  label: string
+  items: Expense[]
+}
+
 const props = withDefaults(defineProps<{ viewMode?: 'tiles' | 'table' }>(), {
   viewMode: 'tiles',
 })
@@ -259,6 +271,7 @@ const dialogOpen = ref(false)
 const deleteId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const activeMenuId = ref<string | null>(null)
+const legacyExpensesSectionOpen = ref(false)
 const updateDialog = ref(false)
 const updatingId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
@@ -295,27 +308,43 @@ const expenseCategoryLabel = (item: Expense) => (item.enabled ? item.category : 
 
 const expenseCategorySortValue = (item: Expense) => `${item.enabled ? '0' : '1'}:${item.category.toLowerCase()}`
 
-const sections = computed(() => {
+const sections = computed<ExpenseSection[]>(() => {
   const byCat = new Map<string, Expense[]>()
+  const legacyItems: Expense[] = []
   for (const item of expenses.value) {
-    const categoryLabel = expenseCategoryLabel(item)
-    const arr = byCat.get(categoryLabel) || []
+    if (!item.enabled) {
+      legacyItems.push(item)
+      continue
+    }
+    const arr = byCat.get(item.category) || []
     arr.push(item)
-    byCat.set(categoryLabel, arr)
+    byCat.set(item.category, arr)
   }
-  return Array.from(byCat.entries())
-    .sort((a, b) => {
-      const aDisabled = a[0].startsWith('Disabled ')
-      const bDisabled = b[0].startsWith('Disabled ')
-      if (aDisabled !== bDisabled) {
-        return aDisabled ? 1 : -1
-      }
-      const aCategory = aDisabled ? a[0].slice('Disabled '.length) : a[0]
-      const bCategory = bDisabled ? b[0].slice('Disabled '.length) : b[0]
-      return aCategory.localeCompare(bCategory)
+  const grouped = Array.from(byCat.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([label, items]) => ({
+      key: label,
+      label,
+      items,
+    }))
+  if (legacyItems.length) {
+    grouped.push({
+      key: 'legacy',
+      label: 'Legacy',
+      items: legacyItems,
     })
-    .map(([label, items]) => ({ label, items }))
+  }
+  return grouped
 })
+
+const isExpenseSectionCollapsed = (section: ExpenseSection) => section.key === 'legacy' && !legacyExpensesSectionOpen.value
+
+const toggleExpenseSection = (section: ExpenseSection) => {
+  if (section.key !== 'legacy') {
+    return
+  }
+  legacyExpensesSectionOpen.value = !legacyExpensesSectionOpen.value
+}
 
 const filteredExpenses = computed(() => {
   const needle = tableFilter.value.trim().toLowerCase()
