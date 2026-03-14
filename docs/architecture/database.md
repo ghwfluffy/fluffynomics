@@ -87,8 +87,9 @@ Account timestamp semantics are intentionally split:
 - `account_value_history` stores value snapshots (`value_cents`, `recorded_at`) for account history graphs.
 - `net_worth_daily_snapshot` stores one net-worth snapshot per user per day.
   - unique key: `(user_id, snapshot_date)`
-  - on multiple same-day updates, the row is updated to latest net worth.
+  - on multiple same-day balance-changing events, the row is updated to latest net worth.
   - liability account types (`credit_card`, `line_of_credit`, `loan`) are signed negative in net-worth math.
+  - refresh this snapshot whenever persisted balances change through account updates, transfer posting/settlement, contract execution, expense execution, or statement import.
 - Hash dedupe rule: identical uploaded icon content should reuse existing `icon_assets` row.
 - SVG import rule for built-in defaults:
   - many icon sets use `stroke=\"currentColor\"`; converting without setting color can produce fully transparent PNGs.

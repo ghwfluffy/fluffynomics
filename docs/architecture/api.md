@@ -207,7 +207,7 @@ Defined in `python/mp/api/contracts.py`.
     - `dry_run` (default `true`)
     - `as_of_date` or `through_date`
   - dry-run returns planned postings without mutating balances
-  - apply mode writes postings, updates balances, and advances `last_payment_date`
+  - apply mode writes postings, updates balances, advances `last_payment_date`, records touched account value-history points, and refreshes the user’s daily net-worth snapshot
   - liability-aware balance deltas:
     - for linked liability accounts (`credit_card`, `line_of_credit`, `loan`), non-transfer contract deltas are inverted at balance layer
     - this means `payment` contracts increase liability balances (more owed), while `income` contracts decrease liability balances
@@ -260,6 +260,7 @@ Forecast/as-of behavior:
 - `GET /accounts/net-worth/forecast` includes future deltas from both contracts and expenses.
 - `POST /contracts/run` now executes both simulations for the target date and returns both posting sets.
 - `GET /accounts`, `GET /accounts/{id}`, account history, and net-worth endpoints all lazily settle due pending transfers before responding so reads stay consistent with scheduled completion times.
+- Any balance-changing event path that mutates persisted account values (manual account update, transfer settlement/instant-deposit posting, contract apply, expense apply, statement import) must also refresh the user’s daily net-worth snapshot; the snapshot table keeps only the latest value for a given day.
 
 Update-modal ownership:
 - UI intentionally edits `last_payment_date` and `expiration_date` through contract `Update` flow (not the full editor), but API continues to accept either update path.

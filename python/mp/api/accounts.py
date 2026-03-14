@@ -4,11 +4,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from mp.db import get_db
+from mp.db.account_history import (
+    compute_account_value_cents as _compute_account_value_cents,
+    compute_user_net_worth_cents as _compute_user_net_worth_cents,
+    record_account_value_history as _record_account_value_history,
+)
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.expenses.engine import run_expense_simulation
@@ -178,41 +182,6 @@ def _hydrate_nested_positions(db: Session, account: Account) -> tuple[list, list
     return stock_positions, crypto_positions, cash_bills
 
 
-def _compute_account_value_cents(db: Session, account: Account) -> int:
-    stock_positions, crypto_positions, cash_bills = _hydrate_nested_positions(
-        db, account
-    )
-    if account.type == "cash":
-        return int(
-            sum(
-                int(position.denomination_cents) * int(position.quantity)
-                for position in cash_bills
-            )
-        )
-    if account.type in {"crypto_wallet", "crypto_exchange"}:
-        crypto_total = sum(
-            int(round(float(position.quantity) * int(position.exchange_rate_cents)))
-            for position in crypto_positions
-        )
-        if account.type == "crypto_exchange":
-            return int(account.usd_balance_cents or 0) + int(crypto_total)
-        return int(crypto_total)
-    if account.type == "stocks_account":
-        stock_ids = [position.stock_id for position in stock_positions]
-        prices_by_id: dict[UUID, int] = {}
-        if stock_ids:
-            for stock in db.query(Stock).filter(Stock.id.in_(stock_ids)).all():
-                prices_by_id[stock.id] = int(stock.last_price_cents or 0)
-        stock_total = sum(
-            int(
-                round(float(position.quantity) * prices_by_id.get(position.stock_id, 0))
-            )
-            for position in stock_positions
-        )
-        return int(account.balance_cents or 0) + int(stock_total)
-    return int(account.balance_cents or 0)
-
-
 def _account_rewards_cents(account: Account) -> int:
     return max(0, int(account.rewards_balance_cents or 0))
 
@@ -229,38 +198,6 @@ def _net_worth_contribution_cents(db: Session, account: Account) -> int:
     if account.type in {"credit_card", "line_of_credit", "loan"}:
         return (-base_value) + rewards_value
     return base_value + rewards_value
-
-
-def _record_account_value_history(db: Session, account: Account) -> None:
-    db.add(
-        AccountValueHistory(
-            account_id=account.id,
-            user_id=account.user_id,
-            value_cents=_compute_account_value_cents(db, account),
-        )
-    )
-    _upsert_daily_net_worth_snapshot(db, account.user_id)
-
-
-def _compute_user_net_worth_cents(db: Session, user_id: UUID) -> int:
-    user_accounts = db.query(Account).filter(Account.user_id == user_id).all()
-    return int(sum(_net_worth_contribution_cents(db, item) for item in user_accounts))
-
-
-def _upsert_daily_net_worth_snapshot(db: Session, user_id: UUID) -> None:
-    today = datetime.utcnow().date()
-    value_cents = _compute_user_net_worth_cents(db, user_id)
-    stmt = pg_insert(NetWorthDailySnapshot).values(
-        user_id=user_id,
-        snapshot_date=today,
-        value_cents=value_cents,
-        updated_at=datetime.utcnow(),
-    )
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_net_worth_daily_snapshot_user_day",
-        set_={"value_cents": value_cents, "updated_at": datetime.utcnow()},
-    )
-    db.execute(stmt)
 
 
 def _account_balance_field(account_type: str) -> str | None:

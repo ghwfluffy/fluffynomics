@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from mp.db.account_history import record_account_value_history
 from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import Account
 from mp.schema.expense import Expense
@@ -168,6 +169,7 @@ def run_expense_simulation(
             account_deltas[account.id] = account_deltas.get(account.id, 0) + delta
             if apply:
                 setattr(account, field, int(getattr(account, field) or 0) + delta)
+                record_account_value_history(db, account, recorded_at=now)
 
         if apply:
             last_due = due_dates[-1]

@@ -8,13 +8,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from mp.db.account_history import record_account_value_history
 from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import (
     Account,
-    AccountCashDenomination,
-    AccountCryptoPosition,
-    AccountStockPosition,
-    Stock,
 )
 from mp.schema.contract import Contract, ContractPosting
 from mp.schema.user import User
@@ -136,44 +133,6 @@ def _delta_for_contract(
     }:
         return -delta
     return delta
-
-
-def _compute_account_value_cents(db: Session, account: Account) -> int:
-    if account.type == "cash":
-        denoms = (
-            db.query(AccountCashDenomination).filter_by(account_id=account.id).all()
-        )
-        return int(sum(d.denomination_cents * d.quantity for d in denoms))
-    if account.type in {"crypto_wallet", "crypto_exchange"}:
-        crypto_positions = (
-            db.query(AccountCryptoPosition).filter_by(account_id=account.id).all()
-        )
-        total = int(
-            sum(
-                int(round(float(p.quantity) * int(p.exchange_rate_cents or 0)))
-                for p in crypto_positions
-            )
-        )
-        if account.type == "crypto_exchange":
-            total += int(account.usd_balance_cents or 0)
-        return total
-    if account.type == "stocks_account":
-        stock_positions = (
-            db.query(AccountStockPosition).filter_by(account_id=account.id).all()
-        )
-        stock_ids = [p.stock_id for p in stock_positions]
-        prices = {
-            s.id: int(s.last_price_cents or 0)
-            for s in db.query(Stock).filter(Stock.id.in_(stock_ids)).all()
-        }
-        total = int(
-            sum(
-                int(round(float(p.quantity) * prices.get(p.stock_id, 0)))
-                for p in stock_positions
-            )
-        )
-        return total + int(account.balance_cents or 0)
-    return int(account.balance_cents or 0)
 
 
 def run_contract_simulation(
@@ -375,6 +334,10 @@ def run_contract_simulation(
                         applied_at=now,
                     )
                 )
+                if contract.type == "transfer":
+                    assert source is not None
+                    record_account_value_history(db, source, recorded_at=now)
+                record_account_value_history(db, linked, recorded_at=now)
 
         if apply and contract.id in projected_last_payment:
             contract.last_payment_date = projected_last_payment[contract.id]

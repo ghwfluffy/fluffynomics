@@ -129,6 +129,16 @@
                   <div v-if="showCurrentNetWorthPopup" class="widget-kpi-popout widget-kpi-popout--summary">
                     <div class="widget-kpi-popout-title">{{ widgetAnchorFullLabel }}</div>
                     <div class="widget-kpi-popout-value">{{ cents(currentNetWorthCents) }}</div>
+                    <div class="widget-kpi-popout-subtitle">Live Proration Drivers</div>
+                    <div v-if="currentNetWorthDailyDriverItems.length === 0" class="widget-kpi-popout-empty">
+                      No live recurring drivers.
+                    </div>
+                    <ul v-else class="widget-kpi-popout-list widget-kpi-popout-list--drivers">
+                      <li v-for="item in currentNetWorthDailyDriverItems" :key="item.key">
+                        <span>{{ item.label }}</span>
+                        <strong :class="deltaClass(item.dailyRateCents)">{{ signedCents(item.dailyRateCents) }}/day</strong>
+                      </li>
+                    </ul>
                   </div>
                 </span>
               </span>
@@ -1289,6 +1299,12 @@ interface NetChangeBreakdownItem {
   netDeltaCents: number
 }
 
+interface DailyDriverItem {
+  key: string
+  label: string
+  dailyRateCents: number
+}
+
 type RateRow = {
   key: string
   label: string
@@ -1792,6 +1808,10 @@ const expenseProratedAdjustmentCents = computed(() => {
   const referenceTime = proratedReferenceTime.value
   return calendarExpenses.value.reduce((sum, expense) => sum + expenseProratedContributionCents(expense, referenceTime), 0)
 })
+const feeProratedAdjustmentCents = computed(() => {
+  const referenceTime = proratedReferenceTime.value
+  return accounts.value.reduce((sum, account) => sum + feeProratedContributionCents(account, referenceTime), 0)
+})
 const automaticContractProratedAdjustmentCents = computed(() => {
   const referenceTime = proratedReferenceTime.value
   return calendarContracts.value.reduce((sum, contract) => {
@@ -1802,9 +1822,19 @@ const automaticContractProratedAdjustmentCents = computed(() => {
   }, 0)
 })
 const currentNetWorthCents = computed(
-  () => baseNetWorthCents.value + manualContractProratedAdjustmentCents.value + expenseProratedAdjustmentCents.value,
+  () =>
+    Math.round(
+      (
+    baseNetWorthCents.value +
+    manualContractProratedAdjustmentCents.value +
+    expenseProratedAdjustmentCents.value +
+    feeProratedAdjustmentCents.value
+      ),
+    ),
 )
-const proratedNetWorthCents = computed(() => currentNetWorthCents.value + automaticContractProratedAdjustmentCents.value)
+const proratedNetWorthCents = computed(() =>
+  Math.round(currentNetWorthCents.value + automaticContractProratedAdjustmentCents.value),
+)
 const netChangePast30 = computed(() => netWorthAnchorCents.value - netWorthPast30Cents.value)
 const netChangeNext30 = computed(() => netWorthNext30Cents.value - netWorthAnchorCents.value)
 
@@ -2819,6 +2849,9 @@ const loadWidgets = async () => {
     }
     const projectedAnnualCents =
       contracts.reduce((sum, contract) => {
+        if (!contractIsActiveForSummary(contract, widgetAnchorDate.value)) {
+          return sum
+        }
         const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
         if (contract.type === 'transfer') {
           const amount = intOrZero(contract.amount_cents)
@@ -2835,11 +2868,19 @@ const loadWidgets = async () => {
         return sum + accountDelta * linkedSign * annualOccurrences
       }, 0) -
       expenses.reduce((sum, expense) => {
-        if (expense.enabled === false) {
+        if (!expenseIsActiveForSummary(expense)) {
           return sum
         }
         const annualOccurrences = annualOccurrencesFromRecurring(expense.general_frequency)
         return sum + expense.estimated_amount_cents * annualOccurrences
+      }, 0) -
+      accounts.value.reduce((sum, account) => {
+        const feeAmountCents = Math.abs(intOrZero(account.fee_amount_cents))
+        if (!feeIsActiveForSummary(account)) {
+          return sum
+        }
+        const annualOccurrences = annualOccurrencesFromRecurring(account.fee_period)
+        return sum + feeAmountCents * annualOccurrences
       }, 0)
     projectedNetWorthDailyRateCents.value = Math.round(projectedAnnualCents / 365)
 
@@ -2884,23 +2925,35 @@ const loadWidgets = async () => {
       historicalWindowWeeks.value = 0
     }
 
-    const byMonth = new Map<string, { date: Date; value_cents: number }>()
-    for (const point of netWorthHistory) {
-      const date = new Date(`${point.snapshot_date}T00:00:00`)
-      if (Number.isNaN(date.getTime())) {
-        continue
-      }
-      const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-      byMonth.set(monthKey, { date, value_cents: point.value_cents })
-    }
-    const historical = Array.from(byMonth.values())
-      .sort((a, b) => a.date.getTime() - b.date.getTime())
-      .map((entry) => ({
-        key: localIsoDate(entry.date),
-        label: entry.date.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
-        value_cents: entry.value_cents,
-        forecast: false,
+    const dailyHistorical = netWorthHistory
+      .map((point) => ({
+        date: new Date(`${point.snapshot_date}T00:00:00`),
+        value_cents: point.value_cents,
       }))
+      .filter((entry) => !Number.isNaN(entry.date.getTime()))
+      .sort((a, b) => a.date.getTime() - b.date.getTime())
+
+    const historical =
+      dailyHistorical.length <= 180
+        ? dailyHistorical.map((entry) => ({
+            key: localIsoDate(entry.date),
+            label: entry.date.toLocaleString('en-US', { month: 'short', day: 'numeric' }),
+            value_cents: entry.value_cents,
+            forecast: false,
+          }))
+        : Array.from(
+            dailyHistorical.reduce((byMonth, entry) => {
+              const monthKey = `${entry.date.getUTCFullYear()}-${String(entry.date.getUTCMonth() + 1).padStart(2, '0')}`
+              byMonth.set(monthKey, entry)
+              return byMonth
+            }, new Map<string, { date: Date; value_cents: number }>()),
+          )
+            .map(([, entry]) => ({
+              key: localIsoDate(entry.date),
+              label: entry.date.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+              value_cents: entry.value_cents,
+              forecast: false,
+            }))
 
     if (forecastSeries.length) {
       const byDay = new Map<string, { key: string; label: string; value_cents: number; forecast: boolean }>()
@@ -3053,6 +3106,11 @@ const rateRowsFromDailyCents = (dailyCents: number): RateRow[] => {
     label: item.label,
     valueCents: Math.round(dailyCents * item.multiplier),
   }))
+}
+
+const recurringDailyRateCents = (amountCents: number, raw?: string, fallbackDay?: number) => {
+  const annualOccurrences = annualOccurrencesFromRecurring(raw, fallbackDay)
+  return Math.round(amountCents * annualOccurrences / 365)
 }
 
 const monthLastDay = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
@@ -3299,6 +3357,9 @@ const proratedCycleFraction = (referenceTime: Date, previous: Date, next: Date) 
 }
 
 const contractProratedContributionCents = (contract: ContractCalendarPayload, referenceTime: Date) => {
+  if (!contractIsActiveForSummary(contract, referenceTime)) {
+    return 0
+  }
   if (contract.type === 'transfer') {
     return 0
   }
@@ -3311,17 +3372,19 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
     const next = addDays(dayStart, 1)
     const fraction = proratedCycleFraction(referenceTime, dayStart, next)
     const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
-    return Math.round(signedAmount * fraction)
+    return signedAmount * fraction
   }
   let next = recurringOnOrAfter(referenceTime, spec.kind, spec.payload, contract.payment_day || 1)
   if (!next) {
     return 0
   }
+  let previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
   if (contract.last_payment_date) {
     const paidDate = parseDateOnly(contract.last_payment_date)
-    const expectedLast = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+    const expectedLast = previous
     if (paidDate && expectedLast && paidDate > expectedLast && paidDate < next) {
       next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1) || next
+      previous = paidDate
     }
   }
   const nextIso = formatCalendarDateIso(next)
@@ -3336,14 +3399,16 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
       return 0
     }
   }
-  const previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+  if (!previous || previous >= next) {
+    previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+  }
   const fraction = proratedCycleFraction(referenceTime, previous, next)
   const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
-  return Math.round(signedAmount * fraction)
+  return signedAmount * fraction
 }
 
 const expenseProratedContributionCents = (expense: ExpenseCalendarPayload, referenceTime: Date) => {
-  if (expense.enabled === false || expense.next_date_is_static) {
+  if (!expenseIsActiveForSummary(expense) || expense.next_date_is_static) {
     return 0
   }
   const next = parseDateOnly(expense.next_expensed_date)
@@ -3366,7 +3431,42 @@ const expenseProratedContributionCents = (expense: ExpenseCalendarPayload, refer
     return 0
   }
   const fraction = proratedCycleFraction(referenceTime, previous, next)
-  return -Math.round(Math.abs(expense.estimated_amount_cents || 0) * fraction)
+  return -(Math.abs(expense.estimated_amount_cents || 0) * fraction)
+}
+
+const feeProratedContributionCents = (account: AccountPayload, referenceTime: Date) => {
+  const feeAmountCents = Math.abs(intOrZero(account.fee_amount_cents))
+  if (!feeAmountCents || !account.fee_period?.trim() || !feeIsActiveForSummary(account)) {
+    return 0
+  }
+  const spec = recurringSpecFromRaw(account.fee_period, undefined, referenceTime)
+  if (!spec?.kind) {
+    return 0
+  }
+  if (spec.kind === 'daily') {
+    const dayStart = startOfDay(referenceTime)
+    const next = addDays(dayStart, 1)
+    const fraction = proratedCycleFraction(referenceTime, dayStart, next)
+    return -(feeAmountCents * fraction)
+  }
+  const startRaw = String(spec.payload?.start_date || '')
+  if (startRaw) {
+    const startDate = startOfDay(new Date(`${startRaw}T00:00:00`))
+    const firstOccurrence = recurringOnOrAfter(startDate, spec.kind, spec.payload, referenceTime.getDate())
+    if (firstOccurrence && referenceTime < firstOccurrence) {
+      return 0
+    }
+  }
+  const next = recurringOnOrAfter(referenceTime, spec.kind, spec.payload, referenceTime.getDate())
+  if (!next) {
+    return 0
+  }
+  const previous = previousOccurrenceBefore(next, spec.kind, spec.payload, referenceTime.getDate())
+  if (!previous || previous >= next) {
+    return 0
+  }
+  const fraction = proratedCycleFraction(referenceTime, previous, next)
+  return -(feeAmountCents * fraction)
 }
 
 const buildManualContractBreakdown = (
@@ -3680,6 +3780,96 @@ const calendarMobileDayAriaLabel = (cell: CalendarCell) => {
 
 const projectedRateRows = computed(() => rateRowsFromDailyCents(projectedNetWorthDailyRateCents.value))
 const historicalRateRows = computed(() => rateRowsFromDailyCents(historicalNetWorthDailyRateCents.value))
+const contractIsActiveForSummary = (contract: ContractCalendarPayload, referenceTime: Date) => {
+  const expiration = parseDateOnly(contract.expiration_date)
+  if (expiration && expiration < startOfDay(referenceTime)) {
+    return false
+  }
+  return true
+}
+
+const expenseIsActiveForSummary = (expense: ExpenseCalendarPayload) => expense.enabled !== false
+
+const feeIsActiveForSummary = (account: AccountPayload) =>
+  !account.closed && Math.abs(intOrZero(account.fee_amount_cents)) > 0 && !!account.fee_period?.trim()
+
+const currentNetWorthDailyDriverItems = computed<DailyDriverItem[]>(() => {
+  const referenceTime = proratedReferenceTime.value
+  const contractItems = calendarContracts.value
+    .map((contract) => {
+      if (!contractIsActiveForSummary(contract, referenceTime)) {
+        return null
+      }
+      if (contract.type === 'transfer') {
+        return null
+      }
+      const signedAmountCents = contract.type === 'income'
+        ? Math.abs(intOrZero(contract.amount_cents))
+        : -Math.abs(intOrZero(contract.amount_cents))
+      const dailyRateCents = recurringDailyRateCents(
+        signedAmountCents,
+        contract.payment_period,
+        contract.payment_day,
+      )
+      if (!dailyRateCents) {
+        return null
+      }
+      return {
+        key: `contract:${contract.id}`,
+        label: `Contract: ${contract.name}${contract.automatic === false ? ' (manual)' : ' (auto)'}`,
+        dailyRateCents,
+      }
+    })
+    .filter((item): item is DailyDriverItem => item !== null)
+
+  const expenseItems = calendarExpenses.value
+    .map((expense) => {
+      if (!expenseIsActiveForSummary(expense)) {
+        return null
+      }
+      const dailyRateCents = recurringDailyRateCents(
+        -Math.abs(intOrZero(expense.estimated_amount_cents)),
+        expense.general_frequency,
+      )
+      if (!dailyRateCents) {
+        return null
+      }
+      return {
+        key: `expense:${expense.id}`,
+        label: `Expense: ${expense.name}`,
+        dailyRateCents,
+      }
+    })
+    .filter((item): item is DailyDriverItem => item !== null)
+
+  const feeItems = accounts.value
+    .map((account) => {
+      if (!feeIsActiveForSummary(account)) {
+        return null
+      }
+      const dailyRateCents = recurringDailyRateCents(
+        -Math.abs(intOrZero(account.fee_amount_cents)),
+        account.fee_period,
+      )
+      if (!dailyRateCents) {
+        return null
+      }
+      return {
+        key: `fee:${account.id}`,
+        label: `Fee: ${account.name}`,
+        dailyRateCents,
+      }
+    })
+    .filter((item): item is DailyDriverItem => item !== null)
+
+  return [...contractItems, ...expenseItems, ...feeItems].sort((a, b) => {
+    const magnitudeDiff = Math.abs(b.dailyRateCents) - Math.abs(a.dailyRateCents)
+    if (magnitudeDiff !== 0) {
+      return magnitudeDiff
+    }
+    return a.label.localeCompare(b.label)
+  })
+})
 const historicalWindowLabel = computed(
   () => `Using ${historicalWindowWeeks.value} week${historicalWindowWeeks.value === 1 ? '' : 's'} of history`,
 )
@@ -4982,8 +5172,8 @@ watch(
 }
 
 .widget-kpi-popout--summary {
-  width: max-content;
-  min-width: 180px;
+  width: min(420px, 78vw);
+  min-width: 240px;
 }
 
 .widget-kpi-popout-title {
@@ -4997,6 +5187,14 @@ watch(
   font-size: 1rem;
   font-weight: 700;
   color: #334155;
+}
+
+.widget-kpi-popout-subtitle {
+  margin-top: 8px;
+  margin-bottom: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--cds-text-secondary);
 }
 
 .widget-kpi-popout-empty {
@@ -5025,6 +5223,10 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.widget-kpi-popout-list--drivers {
+  margin-top: 2px;
 }
 
 .widget-derived-grid {
