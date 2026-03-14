@@ -190,6 +190,8 @@ In `AccountsPage.vue`:
   - cash balance shown on tile is derived from bill quantities
   - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate
   - crypto tile balance is derived from sum(quantity * exchange_rate)
+  - for `stocks_account` accounts whose organization is exactly `Robinhood`, the update modal also exposes a statement-PDF import action
+  - that import uploads a Robinhood PDF, replaces the stock positions from the statement, syncs brokerage/individual cash when present, and also updates the user's Robinhood crypto-exchange account when the PDF includes a `Cryptocurrencies` section
   - for `credit_card` accounts, update modal switches to a queued-payment flow:
     - inputs `Current Balance`, `Pending Balance`, `Rewards Balance`, `Amount Paying`, and `Pay From`
     - calls `POST /accounts/{id}/queue-credit-card-payment`

@@ -1,6 +1,6 @@
 <template>
   <div class="bank-field">
-    <label class="bank-label">{{ label }}</label>
+    <label v-if="!hideLabel" class="bank-label">{{ label }}</label>
 
     <textarea
       v-if="multiline"
@@ -8,6 +8,7 @@
       :value="displayValue"
       :required="required"
       :placeholder="placeholder"
+      :aria-label="hideLabel ? label : undefined"
       @input="onInput"
     />
 
@@ -16,6 +17,7 @@
       class="cds--select-input bank-input"
       :value="displayValue"
       :required="required"
+      :aria-label="hideLabel ? label : undefined"
       @change="onInput"
     >
       <option value="" disabled>Select</option>
@@ -31,6 +33,7 @@
       :value="displayValue"
       :required="required"
       :placeholder="placeholder"
+      :aria-label="hideLabel ? label : undefined"
       @input="onInput"
     />
   </div>
@@ -51,6 +54,7 @@ const props = withDefaults(
     type?: string
     required?: boolean
     multiline?: boolean
+    hideLabel?: boolean
     placeholder?: string
     options?: Option[]
   }>(),
@@ -58,6 +62,7 @@ const props = withDefaults(
     type: 'text',
     required: false,
     multiline: false,
+    hideLabel: false,
     placeholder: '',
     options: () => [],
   },

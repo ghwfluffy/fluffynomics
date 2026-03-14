@@ -574,40 +574,76 @@
             <div v-if="updatingAccount?.type === 'crypto_exchange'" class="crypto-usd-balance">
               <DollarField v-model="updateForm.amountCents" label="USD Cash Balance" />
             </div>
-            <div v-for="(position, index) in updateForm.cryptoPositions" :key="`cp-${index}`" class="crypto-position-row">
-              <BankField v-model="position.ticker" label="Ticker" />
-              <BankField v-model="position.quantity" label="Quantity" />
-              <DollarField v-model="position.exchange_rate_cents" label="Exchange Rate (USD)" />
-              <button
-                type="button"
-                class="cds--btn cds--btn--ghost crypto-remove-btn"
-                @click="removeCryptoPosition(index)"
-                :disabled="updateForm.cryptoPositions.length <= 1"
-              >
-                Remove
-              </button>
+            <div class="position-list-header" aria-hidden="true">
+              <span>Ticker</span>
+              <span>Quantity</span>
+              <span>Exchange Rate (USD)</span>
+              <span></span>
+            </div>
+            <div class="position-list-scroll">
+              <div v-for="(position, index) in updateForm.cryptoPositions" :key="`cp-${index}`" class="crypto-position-row">
+                <BankField v-model="position.ticker" label="Ticker" hide-label />
+                <BankField v-model="position.quantity" label="Quantity" hide-label />
+                <DollarField v-model="position.exchange_rate_cents" label="Exchange Rate (USD)" hide-label />
+                <button
+                  type="button"
+                  class="cds--btn cds--btn--ghost crypto-remove-btn"
+                  @click="removeCryptoPosition(index)"
+                  :disabled="updateForm.cryptoPositions.length <= 1"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
             <button type="button" class="cds--btn cds--btn--secondary crypto-add-btn" @click="addCryptoPosition">
               Add Ticker
             </button>
           </div>
           <div v-else-if="updateMode === 'stock_positions'" class="crypto-positions-editor">
+            <div v-if="showRobinhoodStatementImport" class="statement-import-panel">
+              <div class="statement-import-copy">
+                <strong>Robinhood Statement PDF</strong>
+                <span>Upload a monthly statement to replace holdings with held plus loaned securities.</span>
+              </div>
+              <button
+                type="button"
+                class="cds--btn cds--btn--secondary"
+                @click="openRobinhoodStatementPicker"
+              >
+                Import Robinhood PDF
+              </button>
+              <input
+                ref="robinhoodStatementInput"
+                class="icon-upload-input"
+                type="file"
+                accept="application/pdf,.pdf"
+                @change="uploadRobinhoodStatement"
+              />
+            </div>
             <DollarField
               v-if="updatingAccount?.type === 'stocks_account'"
               v-model="updateForm.amountCents"
               label="USD Cash Balance"
             />
-            <div v-for="(position, index) in updateForm.stockPositions" :key="`sp-${index}`" class="crypto-position-row">
-              <BankField v-model="position.ticker" label="Ticker" />
-              <BankField v-model="position.quantity" label="Quantity" />
-              <DollarField v-model="position.last_price_cents" label="Price Per Share (USD)" />
-              <button
-                type="button"
-                class="cds--btn cds--btn--ghost crypto-remove-btn"
-                @click="removeStockPosition(index)"
-              >
-                Remove
-              </button>
+            <div class="position-list-header" aria-hidden="true">
+              <span>Ticker</span>
+              <span>Quantity</span>
+              <span>Share Price</span>
+              <span></span>
+            </div>
+            <div class="position-list-scroll">
+              <div v-for="(position, index) in updateForm.stockPositions" :key="`sp-${index}`" class="crypto-position-row">
+                <BankField v-model="position.ticker" label="Ticker" hide-label />
+                <BankField v-model="position.quantity" label="Quantity" hide-label />
+                <DollarField v-model="position.last_price_cents" label="Price Per Share (USD)" hide-label />
+                <button
+                  type="button"
+                  class="cds--btn cds--btn--ghost crypto-remove-btn"
+                  @click="removeStockPosition(index)"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
             <button type="button" class="cds--btn cds--btn--secondary crypto-add-btn" @click="addStockPosition">
               Add Ticker
@@ -1442,6 +1478,7 @@ const transferForm = ref({
 })
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
+const robinhoodStatementInput = ref<HTMLInputElement | null>(null)
 const contractsTabRef = ref<ContractsTabExpose | null>(null)
 const expensesTabRef = ref<ExpensesTabExpose | null>(null)
 const iconPickerDialog = ref(false)
@@ -2011,6 +2048,11 @@ const deleteTransferDescription = computed(() => {
 
 const hasQueuedCreditCardPayment = computed(
   () => updateMode.value === 'credit_card_payment' && !!updatingAccount.value?.queued_credit_card_payment,
+)
+const showRobinhoodStatementImport = computed(
+  () =>
+    updatingAccount.value?.type === 'stocks_account' &&
+    (updatingAccount.value.organization || '').trim().toLowerCase() === 'robinhood',
 )
 
 const queuedCreditCardPaymentSummary = computed(() => {
@@ -3793,6 +3835,10 @@ const openIconUploadPicker = () => {
   iconFileInput.value?.click()
 }
 
+const openRobinhoodStatementPicker = () => {
+  robinhoodStatementInput.value?.click()
+}
+
 const openIconPickerModal = () => {
   iconPickerDraftId.value = createForm.value.icon_id
   iconPickerDraftType.value = createForm.value.icon_type || 'Icon'
@@ -3876,6 +3922,24 @@ const uploadAccountIcon = async (event: Event) => {
   iconPickerDraftType.value = 'Icon'
   await loadIcons()
   input.value = ''
+}
+
+const uploadRobinhoodStatement = async (event: Event) => {
+  if (guardMaskedMode('update accounts')) {
+    return
+  }
+  const account = updatingAccount.value
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!account || !file) {
+    return
+  }
+  const form = new FormData()
+  form.append('file', file)
+  await request.post(`/accounts/${account.id}/import-robinhood-statement`, form)
+  input.value = ''
+  closeUpdateDialog()
+  await loadAccounts()
 }
 
 const toggleTileMenu = (accountId: string) => {
@@ -5116,6 +5180,29 @@ watch(
 .crypto-positions-editor {
   display: grid;
   gap: 10px;
+  min-height: 0;
+}
+
+.position-list-header {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.85fr) minmax(120px, 0.85fr) minmax(135px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding-right: 4px;
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.position-list-scroll {
+  display: grid;
+  gap: 10px;
+  max-height: min(42vh, 28rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 
 .crypto-usd-balance {
@@ -5124,7 +5211,7 @@ watch(
 
 .crypto-position-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.1fr) minmax(260px, 1.6fr) minmax(220px, 1.2fr) auto;
+  grid-template-columns: minmax(110px, 0.85fr) minmax(120px, 0.85fr) minmax(135px, 1fr) auto;
   gap: 10px;
   align-items: end;
   min-width: 0;
@@ -5571,6 +5658,26 @@ watch(
   align-items: center;
 }
 
+.statement-import-panel {
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer-accent-01, #f8fafc);
+  padding: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.statement-import-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.statement-import-copy span {
+  color: var(--cds-text-secondary);
+  font-size: 0.82rem;
+}
+
 .account-transfer-section {
   margin-top: 1rem;
   border-top: 1px solid var(--cds-border-subtle-01);
@@ -5757,9 +5864,14 @@ watch(
   }
 
   .account-transfer-section-head,
-  .account-transfer-item {
+  .account-transfer-item,
+  .statement-import-panel {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .position-list-header {
+    display: none;
   }
 
   .account-transfer-actions,

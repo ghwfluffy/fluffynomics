@@ -97,6 +97,15 @@ Defined in `python/mp/api/accounts.py`.
   - sets `accounts.last_update = now()`
   - records an `account_value_history` point after each successful update
   - upserts one daily net-worth snapshot for the user (same day updates overwrite that day’s snapshot)
+- `POST /accounts/{account_id}/import-robinhood-statement`
+  - Robinhood-only helper for `stocks_account` update flow
+  - accepts a monthly statement PDF upload and parses it with `pdfplumber`
+  - supports both classic monthly statement PDFs and Robinhood account-summary PDFs
+  - classic statements merge `Securities Held in Account` and `Loaned Securities` by ticker
+  - account-summary PDFs parse both `Stocks` and `Cryptocurrencies` sections by symbol
+  - replaces the stock account's positions using statement quantity plus derived per-share cents from statement equity/market value
+  - updates stock-account cash from `Brokerage Cash Balance` or `Individual cash` when present
+  - if the PDF includes cryptocurrencies, backend also looks up the user's Robinhood `crypto_exchange` account and replaces its crypto positions from the statement
 - `POST /accounts/{account_id}/queue-credit-card-payment`
   - credit-card-only update flow used by the dashboard Update modal
   - payload captures `current_balance_cents`, `pending_balance_cents`, `rewards_balance_cents`, `payment_cents`, and `source_account_id`

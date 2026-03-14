@@ -13,6 +13,7 @@ from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.expenses.engine import run_expense_simulation
 from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
+from mp.robinhood_statement import parse_robinhood_statement
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import (
     Account,
@@ -506,6 +507,33 @@ def _validate_transfer_accounts(
             detail="Credit card payment transfers must target a credit card account",
         )
     return source_account, destination_account
+
+
+def _is_robinhood_account(account: Account) -> bool:
+    return (account.organization or "").strip().lower() == "robinhood"
+
+
+def _get_robinhood_crypto_exchange_account(
+    db: Session, user_id: UUID
+) -> Account | None:
+    matches = (
+        db.query(Account)
+        .filter(
+            Account.user_id == user_id,
+            Account.type == "crypto_exchange",
+            Account.organization.isnot(None),
+        )
+        .all()
+    )
+    robinhood_matches = [
+        account for account in matches if _is_robinhood_account(account)
+    ]
+    if len(robinhood_matches) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Multiple Robinhood crypto exchange accounts found",
+        )
+    return robinhood_matches[0] if robinhood_matches else None
 
 
 def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
@@ -1713,6 +1741,100 @@ def update_account_value(
         _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
     account.last_update = datetime.utcnow()
     _record_account_value_history(db, account)
+    db.commit()
+    db.refresh(account)
+    return _apply_active_account_transfers(
+        db, current_user.id, [_serialize_account(db, account)]
+    )[0]
+
+
+@router.post(
+    "/accounts/{account_id}/import-robinhood-statement",
+    response_model=AccountSchema,
+)
+async def import_robinhood_statement(
+    account_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountSchema:
+    _settle_due_account_transfers(db, current_user.id)
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if account.type != "stocks_account" or not _is_robinhood_account(account):
+        raise HTTPException(
+            status_code=400,
+            detail="Robinhood statement import is only supported for Robinhood stocks accounts",
+        )
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Statement file is empty")
+
+    try:
+        statement = parse_robinhood_statement(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stock_positions = [
+        PositionStockSchema(
+            ticker=holding.ticker,
+            quantity=holding.quantity,
+            last_price_cents=holding.price_cents,
+        )
+        for holding in statement.stock_holdings
+    ]
+    _replace_nested_positions(
+        db,
+        current_user.id,
+        account.id,
+        stock_positions,
+        None,
+        None,
+    )
+    _propagate_stock_prices_for_user(db, current_user.id, stock_positions)
+    now = datetime.utcnow()
+    if statement.stock_cash_cents is not None:
+        account.balance_cents = statement.stock_cash_cents
+    account.last_update = now
+    _record_account_value_history(db, account)
+
+    if statement.has_crypto_section:
+        crypto_account = _get_robinhood_crypto_exchange_account(db, current_user.id)
+        if crypto_account is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Robinhood PDF included cryptocurrencies, but no Robinhood "
+                    "crypto exchange account was found for this user"
+                ),
+            )
+        crypto_positions = [
+            PositionCryptoSchema(
+                ticker=holding.ticker,
+                quantity=holding.quantity,
+                exchange_rate_cents=holding.price_cents,
+            )
+            for holding in statement.crypto_holdings
+        ]
+        _replace_nested_positions(
+            db,
+            current_user.id,
+            crypto_account.id,
+            None,
+            crypto_positions,
+            None,
+        )
+        _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
+        crypto_account.usd_balance_cents = 0
+        crypto_account.last_update = now
+        _record_account_value_history(db, crypto_account)
+
     db.commit()
     db.refresh(account)
     return _apply_active_account_transfers(

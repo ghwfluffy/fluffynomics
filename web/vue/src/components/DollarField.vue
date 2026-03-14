@@ -1,6 +1,6 @@
 <template>
   <div class="dollar-field">
-    <label class="dollar-label">{{ label }}</label>
+    <label v-if="!hideLabel" class="dollar-label">{{ label }}</label>
     <div class="dollar-input-wrap">
       <span class="currency">$</span>
       <input
@@ -9,6 +9,7 @@
         type="text"
         inputmode="numeric"
         :value="displayValue"
+        :aria-label="hideLabel ? label : undefined"
         @keydown="onKeyDown"
         @input="onInput"
         @paste.prevent="onPaste"
@@ -23,6 +24,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 const props = defineProps<{
   modelValue?: number
   label: string
+  hideLabel?: boolean
 }>()
 
 const emit = defineEmits<{

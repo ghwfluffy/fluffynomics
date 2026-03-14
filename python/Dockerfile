@@ -2,14 +2,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY ./python/requirements.txt /tmp/requirements.txt
+# Install apt dependencies
 RUN \
     apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client gzip && \
-    rm -rf /var/lib/apt/lists/* && \
+    apt-get install -y --no-install-recommends \
+        gzip \
+        postgresql-client \
+        && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY ./python/requirements.txt /tmp/requirements.txt
+RUN \
     pip install --no-cache-dir -r /tmp/requirements.txt && \
-    rm -f requirements.txt
+    rm -f /tmp/requirements.txt
 
 COPY ./python/ /app/
 

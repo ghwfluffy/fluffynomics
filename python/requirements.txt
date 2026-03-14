@@ -4,6 +4,7 @@ fastapi
 flake8
 mypy
 pillow
+pdfplumber
 python-multipart
 pyyaml
 types-PyYAML
