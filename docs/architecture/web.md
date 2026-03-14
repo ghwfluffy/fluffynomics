@@ -198,6 +198,7 @@ In `AccountsPage.vue`:
   - opens custom modal
   - intended to refresh business values and drive `last_update`
   - default path calls `PUT /accounts/{id}/value`
+  - `investment_fund` is a balance-only marketable-security account type intended for pooled-investment platforms like Betterment/Acorns; it should use the plain dollar-balance update flow, not the stock-position editor
   - for `cash` accounts, update modal edits bill quantities (`$1,$2,$5,$10,$20,$50,$100`) instead of static balance input
   - cash balance shown on tile is derived from bill quantities
   - for crypto accounts, update modal supports multiple ticker rows with quantity + exchange rate

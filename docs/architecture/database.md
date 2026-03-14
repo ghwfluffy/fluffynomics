@@ -68,6 +68,8 @@ Account timestamp semantics are intentionally split:
 - `accounts.icon_id` references `icon_assets.id`.
 - `accounts.icon_type` is enum-like constrained text: `Letters`, `Gravatar`, `Icon`.
   - for `Letters`/`Gravatar`, `accounts.icon_id` is expected to be null and icon bytes are generated on demand
+- `accounts.type` includes `investment_fund` for pooled/balance-only investment platforms that should not store rows in `account_stock_positions`.
+- migration `0038_accounts_investment_fund.sql` upgrades existing Betterment/Acorns `stocks_account` rows to `investment_fund`, preserves their total value in `balance_cents`, and clears obsolete stock-position rows.
 - `accounts.last_payment_date` stores the most recently recorded payment date for payable accounts (`line_of_credit`, `credit_card`, `loan`).
 - `account_transfers` stores pending account-to-account movement, including queued credit-card payments:
   - `source_account_id`

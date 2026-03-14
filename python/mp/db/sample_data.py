@@ -459,6 +459,18 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
     _ensure_account(
         db,
         user,
+        "Betterment Core",
+        {
+            "account_number": "INV-90210",
+            "type": "investment_fund",
+            "organization": "Betterment",
+            "balance_cents": 1265000,
+            "last_update": recent,
+        },
+    )
+    _ensure_account(
+        db,
+        user,
         "Travel Rewards",
         {
             "account_number": "RW-10001",

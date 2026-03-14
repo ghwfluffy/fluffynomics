@@ -89,6 +89,7 @@ Defined in `python/mp/api/accounts.py`.
 - `PUT /accounts/{account_id}/value`
   - dedicated “value update” endpoint used by dashboard Update modal
   - updates balance/position values only
+  - `investment_fund` accounts are simple balance-based investment assets; they use `balance_cents` and do not carry per-holding stock positions
   - for `line_of_credit`/`credit_card`/`loan`, can also set `last_payment_date`
   - `credit_card` accounts with an active queued payment reject direct `balance_cents` writes until the queued payment settles
   - for `cash` accounts, accepts `cash_bills` quantities and balance is derived from denominations
@@ -111,6 +112,10 @@ Defined in `python/mp/api/accounts.py`.
   - accepts a Wells Fargo account-summary PDF and parses account last-4 plus available/outstanding balances
   - matches user-owned Wells Fargo accounts by the last 4 digits of `account_number`
   - updates every uniquely matched direct-balance account from the PDF in one import pass
+- Account-type upgrader:
+  - migration `0038_accounts_investment_fund.sql` adds `investment_fund`
+  - existing `stocks_account` rows whose organization starts with `Betterment` or `Acorns` are upgraded in place
+  - upgrader preserves current total value by rolling stock-position market value into `balance_cents`, then clearing the per-stock holdings
 - `POST /accounts/{account_id}/queue-credit-card-payment`
   - credit-card-only update flow used by the dashboard Update modal
   - payload captures `current_balance_cents`, `pending_balance_cents`, `rewards_balance_cents`, `payment_cents`, and `source_account_id`

@@ -1198,6 +1198,7 @@ type AccountType =
   | 'line_of_credit'
   | 'credit_card'
   | 'stocks_account'
+  | 'investment_fund'
   | 'crypto_exchange'
   | 'crypto_wallet'
   | 'retirement'
@@ -1581,6 +1582,7 @@ const accountTypes = [
   { label: 'Line of Credit', value: 'line_of_credit' },
   { label: 'Credit Card', value: 'credit_card' },
   { label: 'Stocks Account', value: 'stocks_account' },
+  { label: 'Investment Fund', value: 'investment_fund' },
   { label: 'Crypto Exchange', value: 'crypto_exchange' },
   { label: 'Crypto Wallet', value: 'crypto_wallet' },
   { label: 'Retirement', value: 'retirement' },
@@ -1593,7 +1595,7 @@ const sectionDefinitions: Array<Omit<Section, 'accounts'>> = [
   {
     key: 'securities',
     title: 'Marketable Securities',
-    types: ['stocks_account', 'crypto_exchange', 'crypto_wallet'],
+    types: ['stocks_account', 'investment_fund', 'crypto_exchange', 'crypto_wallet'],
   },
   { key: 'hard_assets', title: 'Hard Assets', types: ['retirement'] },
   { key: 'credit_cards', title: 'Credit Cards', types: ['credit_card'] },
@@ -1612,7 +1614,7 @@ const compoundPeriodOptions = compoundPeriods.map((value) => ({ label: value, va
 const retirementTypeOptions = retirementTypes
 
 const needsBalance = computed(() =>
-  ['checking', 'savings', 'line_of_credit', 'credit_card', 'retirement', 'loan', 'rewards_card', 'stocks_account'].includes(
+  ['checking', 'savings', 'line_of_credit', 'credit_card', 'retirement', 'loan', 'rewards_card', 'stocks_account', 'investment_fund'].includes(
     createForm.value.type,
   ),
 )
@@ -1796,6 +1798,7 @@ const accountTypeLabel = (type: AccountType) =>
     line_of_credit: 'Line of Credit',
     credit_card: 'Credit Card',
     stocks_account: 'Stocks Account',
+    investment_fund: 'Investment Fund',
     crypto_exchange: 'Crypto Exchange',
     crypto_wallet: 'Crypto Wallet',
     retirement: 'Retirement',
@@ -4280,10 +4283,16 @@ const submitCreateAccount = async () => {
   if (!validateCreateForm()) {
     return
   }
+  const payload: CreateAccountPayload = {
+    ...createForm.value,
+    stock_positions: createForm.value.type === 'stocks_account' ? createForm.value.stock_positions : [],
+    crypto_positions: ['crypto_wallet', 'crypto_exchange'].includes(createForm.value.type) ? createForm.value.crypto_positions : [],
+    cash_bills: createForm.value.type === 'cash' ? createForm.value.cash_bills : [],
+  }
   if (editingAccountId.value) {
-    await request.put(`/accounts/${editingAccountId.value}`, createForm.value)
+    await request.put(`/accounts/${editingAccountId.value}`, payload)
   } else {
-    await request.post('/accounts', createForm.value)
+    await request.post('/accounts', payload)
   }
   createDialog.value = false
   editingAccountId.value = null

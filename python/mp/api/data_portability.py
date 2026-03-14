@@ -269,6 +269,21 @@ def _dollars_to_cents(raw: Any) -> int:
 
 def _legacy_account_type(raw: str | None, *, default: str = "checking") -> str:
     value = (raw or "").strip().lower()
+    if value in {
+        "checking",
+        "savings",
+        "cash",
+        "line_of_credit",
+        "credit_card",
+        "stocks_account",
+        "investment_fund",
+        "crypto_exchange",
+        "crypto_wallet",
+        "retirement",
+        "loan",
+        "rewards_card",
+    }:
+        return value
     mapping = {
         "checking account": "checking",
         "savings account": "savings",
@@ -276,6 +291,7 @@ def _legacy_account_type(raw: str | None, *, default: str = "checking") -> str:
         "credit card": "credit_card",
         "line of credit": "line_of_credit",
         "loan": "loan",
+        "investment fund": "investment_fund",
         "retirement": "retirement",
     }
     if value in mapping:

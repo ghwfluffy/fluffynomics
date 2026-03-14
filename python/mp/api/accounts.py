@@ -69,6 +69,7 @@ ACCOUNT_TYPES = {
     "line_of_credit",
     "credit_card",
     "stocks_account",
+    "investment_fund",
     "crypto_exchange",
     "crypto_wallet",
     "retirement",
@@ -108,6 +109,28 @@ def _validate_type_requirements(
     # Type-specific fields are intentionally optional. We only enforce
     # account identity fields + a valid account type.
     return
+
+
+def _normalized_nested_positions_for_type(
+    account_type: str,
+    stock_positions: list | None,
+    crypto_positions: list | None,
+    cash_bills: list | None,
+) -> tuple[list, list, list]:
+    normalized_stock_positions = list(stock_positions or [])
+    normalized_crypto_positions = list(crypto_positions or [])
+    normalized_cash_bills = list(cash_bills or [])
+    if account_type != "stocks_account":
+        normalized_stock_positions = []
+    if account_type not in {"crypto_wallet", "crypto_exchange"}:
+        normalized_crypto_positions = []
+    if account_type != "cash":
+        normalized_cash_bills = []
+    return (
+        normalized_stock_positions,
+        normalized_crypto_positions,
+        normalized_cash_bills,
+    )
 
 
 def _validate_icon_type(icon_type: str | None) -> None:
@@ -1189,8 +1212,17 @@ def create_account(
     db.add(account)
     db.flush()
 
-    if payload.stock_positions:
-        stock_ids = [item.stock_id for item in payload.stock_positions if item.stock_id]
+    stock_positions, crypto_positions, cash_bills = (
+        _normalized_nested_positions_for_type(
+            payload.type,
+            payload.stock_positions,
+            payload.crypto_positions,
+            payload.cash_bills,
+        )
+    )
+
+    if stock_positions:
+        stock_ids = [item.stock_id for item in stock_positions if item.stock_id]
         if stock_ids:
             owned_count = (
                 db.query(Stock)
@@ -1206,14 +1238,14 @@ def create_account(
         db,
         current_user.id,
         account.id,
-        payload.stock_positions,
-        payload.crypto_positions,
-        payload.cash_bills,
+        stock_positions,
+        crypto_positions,
+        cash_bills,
     )
-    if payload.stock_positions:
-        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
-    if payload.crypto_positions:
-        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
+    if stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, stock_positions)
+    if crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     _record_account_value_history(db, account)
 
     db.commit()
@@ -1350,8 +1382,20 @@ def update_account(
     _validate_type_requirements(merged_payload)
     _validate_last_payment_date(merged_payload.last_payment_date)
 
-    if payload.stock_positions is not None and payload.stock_positions:
-        stock_ids = [item.stock_id for item in payload.stock_positions if item.stock_id]
+    stock_positions, crypto_positions, cash_bills = (
+        _normalized_nested_positions_for_type(
+            merged_payload.type,
+            merged_payload.stock_positions,
+            merged_payload.crypto_positions,
+            merged_payload.cash_bills,
+        )
+    )
+    merged_payload.stock_positions = stock_positions
+    merged_payload.crypto_positions = crypto_positions
+    merged_payload.cash_bills = cash_bills
+
+    if stock_positions:
+        stock_ids = [item.stock_id for item in stock_positions if item.stock_id]
         if stock_ids:
             owned_count = (
                 db.query(Stock)
@@ -1409,14 +1453,14 @@ def update_account(
         db,
         current_user.id,
         account_id,
-        payload.stock_positions,
-        payload.crypto_positions,
-        payload.cash_bills,
+        stock_positions,
+        crypto_positions,
+        cash_bills,
     )
-    if payload.stock_positions:
-        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
-    if payload.crypto_positions:
-        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
+    if stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, stock_positions)
+    if crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     _record_account_value_history(db, account)
 
     db.commit()
@@ -1699,18 +1743,27 @@ def update_account_value(
     if "expiration_date" in data:
         account.expiration_date = data["expiration_date"]
 
+    stock_positions, crypto_positions, cash_bills = (
+        _normalized_nested_positions_for_type(
+            account.type,
+            payload.stock_positions,
+            payload.crypto_positions,
+            payload.cash_bills,
+        )
+    )
+
     _replace_nested_positions(
         db,
         current_user.id,
         account_id,
-        payload.stock_positions,
-        payload.crypto_positions,
-        payload.cash_bills,
+        stock_positions,
+        crypto_positions,
+        cash_bills,
     )
-    if payload.stock_positions:
-        _propagate_stock_prices_for_user(db, current_user.id, payload.stock_positions)
-    if payload.crypto_positions:
-        _propagate_crypto_rates_for_user(db, current_user.id, payload.crypto_positions)
+    if stock_positions:
+        _propagate_stock_prices_for_user(db, current_user.id, stock_positions)
+    if crypto_positions:
+        _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     account.last_update = datetime.utcnow()
     _record_account_value_history(db, account)
     db.commit()
