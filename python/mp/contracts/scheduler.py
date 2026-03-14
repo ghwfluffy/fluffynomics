@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler  # type: ignor
 from mp.contracts.engine import run_contract_simulation
 from mp.db.core import SessionLocal
 from mp.expenses.engine import run_expense_simulation
+from mp.investments.engine import run_investment_simulation
 from mp.schema.user import User
 
 _scheduler: BackgroundScheduler | None = None
@@ -25,6 +26,13 @@ def _run_once() -> None:
                 lock=True,
             )
             run_expense_simulation(
+                db,
+                user_id,
+                date.today(),
+                apply=True,
+                lock=True,
+            )
+            run_investment_simulation(
                 db,
                 user_id,
                 date.today(),

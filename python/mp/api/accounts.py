@@ -1,4 +1,3 @@
-from calendar import monthrange
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from uuid import UUID
@@ -11,12 +10,12 @@ from sqlalchemy.orm import Session
 from mp.db import get_db
 from mp.db.account_history import (
     compute_account_value_cents as _compute_account_value_cents,
-    compute_user_net_worth_cents as _compute_user_net_worth_cents,
     record_account_value_history as _record_account_value_history,
 )
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.expenses.engine import run_expense_simulation
+from mp.investments.engine import run_investment_simulation
 from mp.db.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
 from mp.imports.robinhood_statement import parse_robinhood_statement
 from mp.imports.wells_fargo_statement import parse_wells_fargo_statement
@@ -59,6 +58,7 @@ from mp.schema.account import (
     StockUpdateSchema,
 )
 from mp.schema.contract import Contract
+from mp.schema.investment import Investment
 from mp.schema.user import User
 
 router = APIRouter()
@@ -388,6 +388,196 @@ def _apply_projected_account_yield(
         )
         _apply_balance_delta(account, delta_cents)
     return accounts
+
+
+def _apply_projected_account_yield_to_datetime(
+    accounts: list[AccountSchema], target_dt: datetime
+) -> list[AccountSchema]:
+    for account in accounts:
+        if bool(account.closed):
+            continue
+        anchor = account.last_update or account.created_at
+        if anchor is None:
+            continue
+        delta_cents = _project_account_yield_delta_cents(
+            principal_cents=max(0, _serialized_account_value_cents(account)),
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=_naive_utc(anchor),
+            target=target_dt,
+        )
+        _apply_balance_delta(account, delta_cents)
+        account.last_update = target_dt
+    return accounts
+
+
+def _apply_projected_account_yield_step(
+    accounts: list[AccountSchema], start_dt: datetime, end_dt: datetime
+) -> list[AccountSchema]:
+    if end_dt <= start_dt:
+        return accounts
+    for account in accounts:
+        if bool(account.closed):
+            continue
+        delta_cents = _project_account_yield_delta_cents(
+            principal_cents=max(0, _serialized_account_value_cents(account)),
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=start_dt,
+            target=end_dt,
+        )
+        _apply_balance_delta(account, delta_cents)
+        account.last_update = end_dt
+    return accounts
+
+
+def _serialized_net_worth_contribution_cents(account: AccountSchema) -> int:
+    base_value = _serialized_account_value_cents(account)
+    rewards_value = max(0, int(account.rewards_balance_cents or 0))
+    if account.type in LIABILITY_ACCOUNT_TYPES:
+        return (-base_value) + rewards_value
+    return base_value + rewards_value
+
+
+def _serialized_user_net_worth_cents(accounts: list[AccountSchema]) -> int:
+    return int(
+        sum(_serialized_net_worth_contribution_cents(account) for account in accounts)
+    )
+
+
+def _future_account_deltas_by_day(
+    db: Session, user_id: UUID, through_date: date
+) -> dict[date, dict[UUID, int]]:
+    today = date.today()
+    contract_simulation = run_contract_simulation(
+        db, user_id, through_date, apply=False
+    )
+    expense_simulation = run_expense_simulation(db, user_id, through_date, apply=False)
+    investment_simulation = run_investment_simulation(
+        db, user_id, through_date, apply=False
+    )
+    contracts = {
+        contract.id: contract
+        for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
+    }
+    investments = {
+        investment.id: investment
+        for investment in db.query(Investment)
+        .filter(Investment.user_id == user_id)
+        .all()
+    }
+    user = db.get(User, user_id)
+    by_day: dict[date, dict[UUID, int]] = {}
+
+    def add_delta(
+        effective_date: date, account_id: UUID | None, delta_cents: int
+    ) -> None:
+        if account_id is None or not delta_cents or effective_date <= today:
+            return
+        by_day.setdefault(effective_date, {})
+        by_day[effective_date][account_id] = by_day[effective_date].get(
+            account_id, 0
+        ) + int(delta_cents)
+
+    def resolve_linked_account_id(contract: Contract) -> UUID | None:
+        if contract.linked_account_id is not None:
+            return contract.linked_account_id
+        if user is None:
+            return None
+        if contract.linked_wallet == "paypal":
+            return user.paypal_account_id
+        if contract.linked_wallet == "google_pay":
+            return user.google_pay_account_id
+        return None
+
+    for posting in contract_simulation.postings:
+        if posting.status == "skipped" or posting.effective_date <= today:
+            continue
+        contract = contracts.get(posting.contract_id)
+        if contract is None:
+            continue
+        if contract.type == "transfer":
+            add_delta(
+                posting.effective_date,
+                contract.source_account_id,
+                -int(contract.amount_cents or 0),
+            )
+            add_delta(
+                posting.effective_date,
+                resolve_linked_account_id(contract),
+                int(contract.amount_cents or 0),
+            )
+            continue
+        add_delta(
+            posting.effective_date,
+            resolve_linked_account_id(contract),
+            int(posting.delta_cents or 0),
+        )
+
+    for expense_posting in expense_simulation.postings:
+        if (
+            expense_posting.status == "skipped"
+            or expense_posting.effective_date <= today
+        ):
+            continue
+        add_delta(
+            expense_posting.effective_date,
+            expense_posting.account_id,
+            int(expense_posting.delta_cents or 0),
+        )
+
+    for investment_posting in investment_simulation.postings:
+        if (
+            investment_posting.status == "skipped"
+            or investment_posting.effective_date <= today
+        ):
+            continue
+        investment = investments.get(investment_posting.investment_id)
+        if investment is None:
+            continue
+        amount_cents = int(investment_posting.amount_cents or 0)
+        add_delta(
+            investment_posting.effective_date,
+            investment.source_account_id,
+            -amount_cents,
+        )
+        add_delta(
+            investment_posting.effective_date,
+            investment.destination_account_id,
+            amount_cents,
+        )
+
+    return by_day
+
+
+def _project_serialized_accounts_to_date(
+    db: Session,
+    user_id: UUID,
+    accounts: list[AccountSchema],
+    as_of_date: date,
+) -> list[AccountSchema]:
+    if as_of_date <= date.today():
+        return accounts
+    projected = [account.model_copy(deep=True) for account in accounts]
+    projected = _apply_active_account_transfers(db, user_id, projected, None)
+    now_dt = _naive_utc(datetime.now(timezone.utc)) or datetime.utcnow()
+    _apply_projected_account_yield_to_datetime(projected, now_dt)
+    account_deltas_by_day = _future_account_deltas_by_day(db, user_id, as_of_date)
+    accounts_by_id = {account.id: account for account in projected}
+    cursor_dt = now_dt
+    day = date.today() + timedelta(days=1)
+    while day <= as_of_date:
+        day_end = datetime.combine(day, time.max)
+        _apply_projected_account_yield_step(projected, cursor_dt, day_end)
+        cursor_dt = day_end
+        for account_id, delta_cents in account_deltas_by_day.get(day, {}).items():
+            account = accounts_by_id.get(account_id)
+            if account is not None:
+                _apply_balance_delta(account, int(delta_cents))
+        day += timedelta(days=1)
+    return projected
 
 
 def _first_weekday_of_month(year: int, month: int, weekday: int) -> date:
@@ -843,180 +1033,42 @@ def _forecast_net_worth_points(
     db: Session, user_id: UUID, through_date: date
 ) -> list[NetWorthForecastPointSchema]:
     today = date.today()
-    current = _compute_user_net_worth_cents(db, user_id)
-    now = _naive_utc(datetime.now(timezone.utc)) or datetime.utcnow()
-    user_accounts = (
+    base_accounts = (
         db.query(Account)
-        .filter(Account.user_id == user_id, Account.closed.is_(False))
+        .filter(Account.user_id == user_id)
+        .order_by(Account.rank.desc(), Account.created_at.desc())
         .all()
     )
-    for account in user_accounts:
-        current += _project_account_yield_delta_cents(
-            principal_cents=max(0, _compute_account_value_cents(db, account)),
-            account_type=account.type,
-            apy_bps=account.apy_bps,
-            compound_period=account.compound_period,
-            anchor=_naive_utc(account.last_update or account.created_at),
-            target=now,
-        )
+    projected_accounts = [_serialize_account(db, account) for account in base_accounts]
+    projected_accounts = _apply_active_account_transfers(
+        db, user_id, projected_accounts, None
+    )
+    now = _naive_utc(datetime.now(timezone.utc)) or datetime.utcnow()
+    _apply_projected_account_yield_to_datetime(projected_accounts, now)
+    current = _serialized_user_net_worth_cents(projected_accounts)
     if through_date <= today:
         return [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
 
-    contract_simulation = run_contract_simulation(
-        db, user_id, through_date, apply=False
-    )
-    expense_simulation = run_expense_simulation(db, user_id, through_date, apply=False)
-    contracts = {
-        contract.id: contract
-        for contract in db.query(Contract).filter(Contract.user_id == user_id).all()
-    }
-    user = db.get(User, user_id)
-    accounts = {
-        account.id: (account.type, int(account.rewards_balance_cents or 0))
-        for account in db.query(Account.id, Account.type, Account.rewards_balance_cents)
-        .filter(Account.user_id == user_id)
-        .all()
-    }
-
-    def resolve_linked_account_id(contract: Contract) -> UUID | None:
-        if contract.linked_account_id is not None:
-            return contract.linked_account_id
-        if user is None:
-            return None
-        if contract.linked_wallet == "paypal":
-            return user.paypal_account_id
-        if contract.linked_wallet == "google_pay":
-            return user.google_pay_account_id
-        return None
-
-    deltas_by_day: dict[date, int] = {}
-    for posting in contract_simulation.postings:
-        if posting.status == "skipped":
-            continue
-        if posting.effective_date <= today:
-            continue
-        contract = contracts.get(posting.contract_id)
-        if contract is None:
-            continue
-        if contract.type == "transfer":
-            amount = int(contract.amount_cents or 0)
-            source_type = (
-                accounts.get(contract.source_account_id)
-                if contract.source_account_id is not None
-                else None
-            )
-            linked_type = (
-                accounts.get(resolve_linked_account_id(contract))
-                if resolve_linked_account_id(contract) is not None
-                else None
-            )
-            source_sign = (
-                _net_worth_sign_for_account_type(source_type[0]) if source_type else 1
-            )
-            linked_sign = (
-                _net_worth_sign_for_account_type(linked_type[0]) if linked_type else 1
-            )
-            net_delta = (-amount * source_sign) + (amount * linked_sign)
-        else:
-            linked_type = (
-                accounts.get(resolve_linked_account_id(contract))
-                if resolve_linked_account_id(contract) is not None
-                else None
-            )
-            linked_sign = (
-                _net_worth_sign_for_account_type(linked_type[0]) if linked_type else 1
-            )
-            net_delta = int(posting.delta_cents) * linked_sign
-        deltas_by_day[posting.effective_date] = (
-            deltas_by_day.get(posting.effective_date, 0) + net_delta
-        )
-    for expense_posting in expense_simulation.postings:
-        if expense_posting.status == "skipped":
-            continue
-        if expense_posting.effective_date <= today:
-            continue
-        account_type = accounts.get(expense_posting.account_id)
-        account_sign = (
-            _net_worth_sign_for_account_type(account_type[0]) if account_type else 1
-        )
-        net_delta = int(expense_posting.delta_cents) * account_sign
-        deltas_by_day[expense_posting.effective_date] = (
-            deltas_by_day.get(expense_posting.effective_date, 0) + net_delta
-        )
-
-    for account in user_accounts:
-        principal_cents = max(0, _compute_account_value_cents(db, account))
-        anchor = account.last_update or account.created_at
-        if principal_cents <= 0 or anchor is None:
-            continue
-        baseline_delta = _project_account_yield_delta_cents(
-            principal_cents=principal_cents,
-            account_type=account.type,
-            apy_bps=account.apy_bps,
-            compound_period=account.compound_period,
-            anchor=_naive_utc(anchor),
-            target=now,
-        )
-        projected_delta = _project_account_yield_delta_cents(
-            principal_cents=principal_cents,
-            account_type=account.type,
-            apy_bps=account.apy_bps,
-            compound_period=account.compound_period,
-            anchor=_naive_utc(anchor),
-            target=datetime.combine(through_date, time.max),
-        )
-        if projected_delta <= baseline_delta:
-            continue
-        settings = _account_yield_settings(
-            account.type,
-            apy_bps=account.apy_bps,
-            compound_period=account.compound_period,
-        )
-        if settings is None:
-            continue
-        _, effective_compound_period = settings
-        cursor_day = today + timedelta(days=1)
-        while cursor_day <= through_date:
-            should_emit = (
-                effective_compound_period == "daily"
-                or cursor_day == through_date
-                or cursor_day.day
-                == min(anchor.day, monthrange(cursor_day.year, cursor_day.month)[1])
-            )
-            if should_emit:
-                cumulative_delta = _project_account_yield_delta_cents(
-                    principal_cents=principal_cents,
-                    account_type=account.type,
-                    apy_bps=account.apy_bps,
-                    compound_period=account.compound_period,
-                    anchor=_naive_utc(anchor),
-                    target=datetime.combine(cursor_day, time.max),
-                )
-                incremental_delta = cumulative_delta - baseline_delta
-                if incremental_delta > 0:
-                    deltas_by_day[cursor_day] = (
-                        deltas_by_day.get(cursor_day, 0) + incremental_delta
-                    )
-                    baseline_delta = cumulative_delta
-            cursor_day += timedelta(days=1)
-
+    account_deltas_by_day = _future_account_deltas_by_day(db, user_id, through_date)
+    accounts_by_id = {account.id: account for account in projected_accounts}
     points = [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
-    running = current
-    for snapshot_day in sorted(deltas_by_day):
-        running += int(deltas_by_day[snapshot_day])
+    cursor_dt = now
+    day = today + timedelta(days=1)
+    while day <= through_date:
+        day_end = datetime.combine(day, time.max)
+        _apply_projected_account_yield_step(projected_accounts, cursor_dt, day_end)
+        cursor_dt = day_end
+        for account_id, delta_cents in account_deltas_by_day.get(day, {}).items():
+            account = accounts_by_id.get(account_id)
+            if account is not None:
+                _apply_balance_delta(account, int(delta_cents))
         points.append(
             NetWorthForecastPointSchema(
-                snapshot_date=snapshot_day,
-                value_cents=running,
+                snapshot_date=day,
+                value_cents=_serialized_user_net_worth_cents(projected_accounts),
             )
         )
-    if points[-1].snapshot_date < through_date:
-        points.append(
-            NetWorthForecastPointSchema(
-                snapshot_date=through_date,
-                value_cents=running,
-            )
-        )
+        day += timedelta(days=1)
     return points
 
 
@@ -1249,6 +1301,10 @@ def get_accounts(
         .all()
     )
     serialized = [_serialize_account(db, account) for account in accounts]
+    if as_of_date is not None and as_of_date > date.today():
+        return _project_serialized_accounts_to_date(
+            db, current_user.id, serialized, as_of_date
+        )
     if as_of_date is not None:
         contract_simulation = run_contract_simulation(
             db, current_user.id, as_of_date, apply=False
@@ -1256,10 +1312,15 @@ def get_accounts(
         expense_simulation = run_expense_simulation(
             db, current_user.id, as_of_date, apply=False
         )
+        investment_simulation = run_investment_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
         for item in serialized:
-            delta = contract_simulation.account_deltas.get(
-                item.id, 0
-            ) + expense_simulation.account_deltas.get(item.id, 0)
+            delta = (
+                contract_simulation.account_deltas.get(item.id, 0)
+                + expense_simulation.account_deltas.get(item.id, 0)
+                + investment_simulation.account_deltas.get(item.id, 0)
+            )
             if not delta:
                 continue
             _apply_balance_delta(item, int(delta))
@@ -1288,6 +1349,11 @@ def get_account(
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     serialized = _serialize_account(db, account)
+    if as_of_date is not None and as_of_date > date.today():
+        projected = _project_serialized_accounts_to_date(
+            db, current_user.id, [serialized], as_of_date
+        )
+        return projected[0]
     if as_of_date is not None:
         contract_simulation = run_contract_simulation(
             db, current_user.id, as_of_date, apply=False
@@ -1295,9 +1361,14 @@ def get_account(
         expense_simulation = run_expense_simulation(
             db, current_user.id, as_of_date, apply=False
         )
-        delta = contract_simulation.account_deltas.get(
-            serialized.id, 0
-        ) + expense_simulation.account_deltas.get(serialized.id, 0)
+        investment_simulation = run_investment_simulation(
+            db, current_user.id, as_of_date, apply=False
+        )
+        delta = (
+            contract_simulation.account_deltas.get(serialized.id, 0)
+            + expense_simulation.account_deltas.get(serialized.id, 0)
+            + investment_simulation.account_deltas.get(serialized.id, 0)
+        )
         if delta:
             _apply_balance_delta(serialized, int(delta))
     projected = _apply_active_account_transfers(

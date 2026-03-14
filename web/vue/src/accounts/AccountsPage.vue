@@ -78,6 +78,19 @@
             Expenses
           </button>
         </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'investments' }" role="presentation">
+          <button
+            id="tab-investments"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'investments'"
+            aria-controls="panel-investments"
+            @click="activeTab = 'investments'"
+          >
+            Investments
+          </button>
+        </li>
         <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'calendar' }" role="presentation">
           <button
             id="tab-calendar"
@@ -1111,6 +1124,16 @@
       @changed="refreshRecurringOverviewData"
     />
 
+    <InvestmentsTab
+      v-if="activeTab === 'investments'"
+      id="panel-investments"
+      role="tabpanel"
+      aria-labelledby="tab-investments"
+      :accounts="accounts"
+      v-model:view-mode="dashboardViewMode"
+      @changed="refreshRecurringOverviewData"
+    />
+
     <div v-if="calendarEventDialogOpen && selectedCalendarEvent" class="modal-backdrop">
       <section class="confirm-card cds--tile">
         <h3>{{ selectedCalendarEvent.title }}</h3>
@@ -1181,6 +1204,7 @@ import DataTableControls from '@/components/DataTableControls.vue'
 import CollapsibleSectionHeader from '@/components/CollapsibleSectionHeader.vue'
 import ContractsTab from '@/accounts/ContractsTab.vue'
 import ExpensesTab from '@/accounts/ExpensesTab.vue'
+import InvestmentsTab from '@/accounts/InvestmentsTab.vue'
 import VChart, { THEME_KEY } from 'vue-echarts'
 import { use } from 'echarts/core'
 import { BarChart, LineChart, PieChart } from 'echarts/charts'
@@ -1374,7 +1398,7 @@ type ExpensesTabExpose = {
   openFromCalendar: (expenseId: string, action: CalendarEventAction) => Promise<boolean>
 }
 
-type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'calendar'
+type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'investments' | 'calendar'
 
 interface Section {
   key: string
@@ -1463,6 +1487,7 @@ const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
   { value: 'transfers', label: 'Transfers' },
   { value: 'contracts', label: 'Contracts' },
   { value: 'expenses', label: 'Expenses' },
+  { value: 'investments', label: 'Investments' },
   { value: 'calendar', label: 'Calendar' },
 ]
 const activeTab = ref<DashboardTab>('overview')
@@ -4314,7 +4339,7 @@ const loadCalendarSources = async () => {
 }
 
 const refreshRecurringOverviewData = async () => {
-  await loadCalendarSources()
+  await Promise.all([loadAccounts(), loadCalendarSources()])
 }
 
 const loadOrganizations = async () => {

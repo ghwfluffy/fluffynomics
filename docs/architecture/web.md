@@ -13,6 +13,7 @@
 - Dashboard/accounts: `web/vue/src/accounts/AccountsPage.vue`
 - Dashboard/contracts: `web/vue/src/accounts/ContractsTab.vue`
 - Dashboard/expenses: `web/vue/src/accounts/ExpensesTab.vue`
+- Dashboard/investments: `web/vue/src/accounts/InvestmentsTab.vue`
 
 Dashboard top-level tabs are now:
 - `Overview` (widgets/forecast/trend)
@@ -20,6 +21,7 @@ Dashboard top-level tabs are now:
 - `Transfers`
 - `Contracts`
 - `Expenses`
+- `Investments`
 - `Calendar`
 
 `Overview` is the default tab on dashboard load.
@@ -75,10 +77,11 @@ Forecast-date UX:
 - This is read-only simulation mode; write endpoints do not use forecast date.
 
 View mode UX:
-- Accounts/Contracts/Expenses share one `Tiles` / `Icons` / `Table` mode state.
+- Accounts/Contracts/Expenses/Investments share one `Tiles` / `Icons` / `Table` mode state.
 - Toggling view mode in one tab applies to the other tabs for consistency.
 - `Icons` is the default dashboard view mode.
 - `Icons` mode shows compact icon-first cards with balance/value visible up front; clicking the icon expands that card into the same detail content/actions as the tile view.
+- Consistency rule: new dashboard tabs should follow the existing Accounts/Contracts/Expenses interaction model unless product explicitly calls for something different. That means matching tile/icon card structure, kebab-menu actions, table toolbar layout, modal layout, empty-state treatment, and collapsed legacy-section behavior rather than introducing one-off tab-specific patterns.
 - In tile mode, stale trailing sections stay collapsed by default behind `CollapsibleSectionHeader.vue`:
   - Accounts: `Closed Accounts`
   - Contracts: `Expired`
@@ -114,7 +117,7 @@ Trend widget behavior:
 - Early-payment proration rule: if a recurring contract is marked paid early for its upcoming scheduled occurrence, the next accrual cycle should begin immediately from that actual payment date rather than leaving a dead window until the old scheduled boundary.
 - Exclusion rule: expired contracts, closed fee-bearing accounts, and disabled expenses must be excluded from both the live proration math and the overview summaries/rate widgets that explain that math.
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
-- Contract and expense create/edit/update/delete actions must refresh the overview proration data immediately in-page; the user should not need a full page reload to see the net-worth summary and projected-flow widgets update.
+- Contract, expense, and investment create/edit/update/delete actions must refresh the overview proration data immediately in-page; the user should not need a full page reload to see the net-worth summary and projected-flow widgets update.
 - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow from contracts + expenses + recurring account fees + account yield (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
@@ -300,6 +303,21 @@ The tab supports both tile and table rendering and follows the same menu/modal p
 The create/edit expense modal must always expose linked-account selection so expense simulation can apply deltas to the intended account.
 Disabled expenses stay editable/updateable in the `Legacy` tile section, which is collapsed by default.
 When masked mode is active, expense amounts should render through the same fake-currency display layer and all expense mutations should stay locked.
+
+## Investments UX
+
+Recurring investments live in `InvestmentsTab.vue` after `Expenses`.
+
+- They support CRUD with:
+  - checking-only `Source Account`
+  - destination account restricted to `savings`, `stocks_account`, `crypto_exchange`, `retirement`, and `investment_fund`
+  - amount
+  - recurring frequency
+  - last/next investment dates
+  - enabled flag
+- The tab follows the same tile/icons/table patterns as Expenses.
+- Disabled investments belong in a trailing collapsed `Legacy` section in tile/icons mode.
+- Investment mutations must refresh overview widgets immediately because future investment contributions change projected balances and downstream APY growth.
 
 ## Next-Payment Early-Pay Logic
 

@@ -84,6 +84,16 @@ Account timestamp semantics are intentionally split:
   - `effective_at`
   - `applied_at`
   - partial unique rule: only one row with `transfer_kind='credit_card_payment'` and `applied_at IS NULL` may exist for a given destination credit card
+- `investments` stores user-scoped recurring transfers from checking into investment/growth accounts:
+  - `source_account_id`
+  - `destination_account_id`
+  - `amount_cents`
+  - `enabled`
+  - `general_frequency`
+  - `last_invested_date`
+  - `next_investment_date`
+  - `next_date_is_static`
+  - scheduler application mutates both linked account balances and those projected deltas must feed future-yield forecasting
 - Cash balances should be treated as derived from `account_cash_denominations` quantities (not an independently authored static `accounts.balance_cents` value).
 - `account_crypto_positions.exchange_rate_cents` stores per-ticker USD exchange rate used for derived crypto account value.
   - update flows propagate same ticker rate across all of a user's crypto holdings.
@@ -155,6 +165,7 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `contracts`
 - `contract_postings`
 - `expenses`
+- `investments`
 - `registration_codes`
 
 ### Expenses table intent
@@ -210,6 +221,7 @@ Import/restore (`POST /data/import`) is intentionally modeled as:
 
 Current replace order removes user rows from:
 - `expenses`
+- `investments`
 - `contracts`
   - cascades `contract_postings` by contract foreign key
 - `account_value_history`

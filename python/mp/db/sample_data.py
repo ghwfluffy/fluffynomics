@@ -17,6 +17,7 @@ from mp.schema.account import (
 )
 from mp.schema.contract import Contract
 from mp.schema.expense import Expense
+from mp.schema.investment import Investment
 from mp.schema.user import User
 
 
@@ -79,6 +80,24 @@ def _ensure_expense(db: Session, user: User, name: str, payload: dict) -> Expens
         db.add(expense)
         db.flush()
     return expense
+
+
+def _ensure_investment(db: Session, user: User, payload: dict) -> Investment:
+    investment = (
+        db.query(Investment)
+        .filter_by(
+            user_id=user.id,
+            source_account_id=payload.get("source_account_id"),
+            destination_account_id=payload.get("destination_account_id"),
+            amount_cents=payload.get("amount_cents", 0),
+        )
+        .first()
+    )
+    if investment is None:
+        investment = Investment(user_id=user.id, **payload)
+        db.add(investment)
+        db.flush()
+    return investment
 
 
 def _account_value_cents(db: Session, account: Account) -> int:
@@ -753,6 +772,20 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "last_expensed_date": date(date.today().year - 1, 8, 1),
             "next_expensed_date": date(date.today().year, 8, 1),
             "next_date_is_static": True,
+        },
+    )
+    _ensure_investment(
+        db,
+        user,
+        {
+            "source_account_id": checking.id,
+            "destination_account_id": emergency_savings.id,
+            "amount_cents": 25000,
+            "enabled": True,
+            "general_frequency": '{"kind":"monthly_day","day":5}',
+            "last_invested_date": date.today().replace(day=5) - timedelta(days=31),
+            "next_investment_date": date.today().replace(day=5),
+            "next_date_is_static": False,
         },
     )
 

@@ -13,6 +13,7 @@
 - `mp.api.accounts` mounted at `/`
 - `mp.api.contracts` mounted at `/`
 - `mp.api.data_portability` mounted at `/data`
+- `mp.api.investments` mounted at `/`
 - `mp.api.backups` mounted at `/backups`
 
 ## Auth + Session Model
@@ -82,9 +83,10 @@ Defined in `python/mp/api/accounts.py`.
   - used for dashboard trend charts to expand as far back as recorded history exists
 - `GET /accounts/net-worth/forecast?through_date=YYYY-MM-DD`
   - returns forecast net-worth datapoints between today and `through_date`
-  - includes intermediate contract-effective dates (not only final target date)
+  - returns daily projected points between today and `through_date`
   - liability account types are signed negative in the net-worth projection
   - also includes projected positive yield from savings APY and the implicit 5.5% monthly-compounded yield used for `stocks_account`, `investment_fund`, and `retirement`
+  - recurring investments are projected as future source/destination balance moves, so they can change later yield growth even when the immediate net-worth delta is zero
 - `POST /accounts`
 - `PUT /accounts/{account_id}`
 - `PUT /accounts/{account_id}/value`
@@ -241,6 +243,20 @@ Defined in `python/mp/api/expenses.py`.
 - `PUT /expenses/{expense_id}`
 - `DELETE /expenses/{expense_id}`
 
+## Investment API Behavior
+
+Defined in `python/mp/api/investments.py`.
+
+- `GET /investments`
+- `POST /investments`
+- `PUT /investments/{investment_id}`
+- `DELETE /investments/{investment_id}`
+- recurring investments move money from a checking source account into a destination account of type `savings`, `stocks_account`, `crypto_exchange`, `retirement`, or `investment_fund`
+- `general_frequency` uses the same recurring-period JSON conventions as expenses/contracts
+- `next_date_is_static=true` requires an explicit `next_investment_date`
+- apply-time execution is handled by the shared recurring scheduler and updates both linked account balances/history
+- future account reads and net-worth forecasts must include recurring-investment balance movement so destination-account yield can compound from those future contributions
+
 Expense semantics:
 - Fields: `name`, `category`, `notes`, `icon_id/icon_type`, `estimated_amount_cents`, `linked_account_id`, `general_frequency`, `last_expensed_date`, `next_expensed_date`, `next_date_is_static`.
 - Includes `enabled` boolean so expenses can be turned off without deletion.
@@ -330,6 +346,7 @@ Defined in `python/mp/api/data_portability.py`.
 
 - Export payload includes `schema_version`.
 - Import path must run migration steps until current `schema_version`.
+- Export/import payload now also carries `investments`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.

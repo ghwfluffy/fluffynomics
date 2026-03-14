@@ -15,9 +15,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 import yaml
 
-from mp.api.accounts import _compute_user_net_worth_cents
 from mp.api.auth import get_current_user
 from mp.db import get_db
+from mp.db.account_history import compute_user_net_worth_cents
 from mp.schema.account import (
     Account,
     AccountTransfer,
@@ -33,13 +33,14 @@ from mp.schema.account import (
 )
 from mp.schema.contract import Contract, ContractPosting
 from mp.schema.expense import Expense
+from mp.schema.investment import Investment
 from mp.schema.user import User
 
 router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 8
+PAYLOAD_SCHEMA_VERSION = 9
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -69,6 +70,7 @@ class ImportResponseSchema(BaseModel):
     imported_contracts: int
     imported_contract_postings: int
     imported_expenses: int
+    imported_investments: int
     imported_history_points: int
     imported_net_worth_snapshots: int
     imported_account_transfers: int
@@ -1563,6 +1565,7 @@ def _convert_legacy_payload_to_latest(
         "contracts": converted_contracts,
         "contract_postings": [],
         "expenses": converted_expenses,
+        "investments": [],
         "account_value_history": [],
         "net_worth_daily_snapshot": [],
         "account_transfers": [],
@@ -1605,6 +1608,16 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
         db.query(Expense)
         .filter(Expense.user_id == user_id)
         .order_by(Expense.category.asc(), Expense.name.asc(), Expense.created_at.asc())
+        .all()
+    )
+    investments = (
+        db.query(Investment)
+        .filter(Investment.user_id == user_id)
+        .order_by(
+            Investment.enabled.desc(),
+            Investment.next_investment_date.asc().nulls_last(),
+            Investment.created_at.asc(),
+        )
         .all()
     )
     history_points = (
@@ -1851,6 +1864,24 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             }
             for expense in expenses
         ],
+        "investments": [
+            {
+                "id": str(investment.id),
+                "source_account_id": str(investment.source_account_id),
+                "destination_account_id": str(investment.destination_account_id),
+                "amount_cents": int(investment.amount_cents),
+                "enabled": bool(investment.enabled),
+                "general_frequency": investment.general_frequency,
+                "last_invested_date": _serialize_date(investment.last_invested_date),
+                "next_investment_date": _serialize_date(
+                    investment.next_investment_date
+                ),
+                "next_date_is_static": bool(investment.next_date_is_static),
+                "created_at": _serialize_datetime(investment.created_at),
+                "updated_at": _serialize_datetime(investment.updated_at),
+            }
+            for investment in investments
+        ],
         "account_value_history": [
             {
                 "id": str(point.id),
@@ -2016,6 +2047,14 @@ def _upgrade_payload_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v8_to_v9(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 9
+    if "investments" not in upgraded:
+        upgraded["investments"] = []
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2025,6 +2064,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     5: _upgrade_payload_v5_to_v6,
     6: _upgrade_payload_v6_to_v7,
     7: _upgrade_payload_v7_to_v8,
+    8: _upgrade_payload_v8_to_v9,
 }
 
 
@@ -2169,6 +2209,7 @@ def _replace_user_data(
         payload.get("contract_postings", []), "contract_postings"
     )
     expenses = _required_list(payload.get("expenses"), "expenses")
+    investments = _required_list(payload.get("investments", []), "investments")
     history_points = _required_list(
         payload.get("account_value_history"), "account_value_history"
     )
@@ -2180,6 +2221,9 @@ def _replace_user_data(
     )
 
     db.query(Expense).filter(Expense.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(Investment).filter(Investment.user_id == user_id).delete(
         synchronize_session=False
     )
     db.query(Contract).filter(Contract.user_id == user_id).delete(
@@ -2685,6 +2729,56 @@ def _replace_user_data(
         db.add(expense)
         imported_expenses += 1
 
+    imported_investments = 0
+    for raw in investments:
+        item = _required_dict(raw, "investments[]")
+        old_source_account_id = _parse_uuid(
+            item.get("source_account_id"), "investments[].source_account_id"
+        )
+        old_destination_account_id = _parse_uuid(
+            item.get("destination_account_id"),
+            "investments[].destination_account_id",
+        )
+        source_account_id = account_id_map.get(old_source_account_id)
+        destination_account_id = account_id_map.get(old_destination_account_id)
+        if source_account_id is None or destination_account_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="investments[] references unknown account",
+            )
+        db.add(
+            Investment(
+                id=uuid4(),
+                user_id=user_id,
+                source_account_id=source_account_id,
+                destination_account_id=destination_account_id,
+                amount_cents=_parse_int(
+                    item.get("amount_cents"), "investments[].amount_cents"
+                ),
+                enabled=bool(item.get("enabled", True)),
+                general_frequency=str(item.get("general_frequency")).strip()
+                if item.get("general_frequency") is not None
+                else None,
+                last_invested_date=_parse_optional_date(
+                    item.get("last_invested_date"), "investments[].last_invested_date"
+                ),
+                next_investment_date=_parse_optional_date(
+                    item.get("next_investment_date"),
+                    "investments[].next_investment_date",
+                ),
+                next_date_is_static=bool(item.get("next_date_is_static", False)),
+                created_at=_parse_optional_datetime(
+                    item.get("created_at"), "investments[].created_at"
+                )
+                or datetime.now(tz=timezone.utc),
+                updated_at=_parse_optional_datetime(
+                    item.get("updated_at"), "investments[].updated_at"
+                )
+                or datetime.now(tz=timezone.utc),
+            )
+        )
+        imported_investments += 1
+
     imported_history_points = 0
     for raw in history_points:
         item = _required_dict(raw, "account_value_history[]")
@@ -2825,6 +2919,7 @@ def _replace_user_data(
         imported_contracts=imported_contracts,
         imported_contract_postings=imported_contract_postings,
         imported_expenses=imported_expenses,
+        imported_investments=imported_investments,
         imported_history_points=imported_history_points,
         imported_net_worth_snapshots=imported_snapshots,
         imported_account_transfers=imported_account_transfers,
@@ -2875,7 +2970,7 @@ def import_data(
     result = _replace_user_data(db, current_user.id, migrated_data)
     if imported_legacy_payload:
         snapshot_day = date.today()
-        snapshot_value_cents = _compute_user_net_worth_cents(db, current_user.id)
+        snapshot_value_cents = compute_user_net_worth_cents(db, current_user.id)
         stmt = pg_insert(NetWorthDailySnapshot).values(
             user_id=current_user.id,
             snapshot_date=snapshot_day,

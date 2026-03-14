@@ -26,6 +26,7 @@ for name in [
     "accounts",
     "contracts",
     "expenses",
+    "investments",
     "data_portability",
     "backups",
 ]:
