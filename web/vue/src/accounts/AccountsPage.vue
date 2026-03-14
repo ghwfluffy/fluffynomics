@@ -39,6 +39,19 @@
             Accounts
           </button>
         </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'transfers' }" role="presentation">
+          <button
+            id="tab-transfers"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'transfers'"
+            aria-controls="panel-transfers"
+            @click="activeTab = 'transfers'"
+          >
+            Transfers
+          </button>
+        </li>
         <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'contracts' }" role="presentation">
           <button
             id="tab-contracts"
@@ -618,9 +631,90 @@
           </template>
         </div>
 
+        <div class="account-transfer-section">
+          <div class="account-transfer-section-head">
+            <div>
+              <h4>Transfers</h4>
+            </div>
+            <button
+              class="cds--btn cds--btn--secondary"
+              type="button"
+              :disabled="!canCreateTransferForUpdatingAccount"
+              @click="openTransferDialog(undefined, updatingAccount || undefined)"
+            >
+              Add Transfer
+            </button>
+          </div>
+          <div v-if="!canCreateTransferForUpdatingAccount && updatingAccount" class="account-transfer-section-note">
+            This account type can show transfer activity here, but new pending transfers are only supported for accounts with direct balance fields.
+          </div>
+          <div v-if="updatingAccountTransfers.length" class="account-transfer-list">
+            <div v-for="transfer in updatingAccountTransfers" :key="transfer.id" class="account-transfer-item">
+              <div class="account-transfer-copy">
+                <strong>{{ describeTransferForAccount(transfer, updatingAccount) }}</strong>
+                <span>{{ formatTransferDateTime(transfer.effective_at) }}</span>
+              </div>
+              <div class="account-transfer-actions">
+                <button class="cds--btn cds--btn--ghost" type="button" @click="openTransferDialog(transfer, updatingAccount || undefined)">
+                  Edit
+                </button>
+                <button class="cds--btn cds--btn--ghost" type="button" @click="promptDeleteTransfer(transfer)">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-else class="account-transfer-section-note">No pending transfers for this account.</div>
+        </div>
+
         <div class="modal-actions">
           <button class="cds--btn cds--btn--ghost" type="button" @click="closeUpdateDialog">Cancel</button>
           <button class="cds--btn cds--btn--primary" type="button" @click="submitUpdateValue">Save</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="transferDialog" class="modal-backdrop">
+      <section class="confirm-card cds--tile">
+        <h3>{{ editingTransfer ? 'Edit Transfer' : 'Create Transfer' }}</h3>
+        <p>{{ transferDialogDescription }}</p>
+        <div class="form-grid form-grid--single">
+          <UnifiedDropdown
+            v-model="transferForm.sourceAccountId"
+            label="Source Account"
+            searchable
+            :options="transferAccountOptions"
+          />
+          <template v-if="editingTransfer?.transfer_kind === 'credit_card_payment'">
+            <div class="transfer-static-field">
+              <label class="bank-label">Destination Account</label>
+              <div class="transfer-static-value">{{ transferDestinationLabel }}</div>
+            </div>
+          </template>
+          <UnifiedDropdown
+            v-else
+            v-model="transferForm.destinationAccountId"
+            label="Destination Account"
+            searchable
+            :options="transferDestinationOptions"
+          />
+          <DollarField v-model="transferForm.amountCents" label="Amount" />
+          <BankField v-model="transferForm.effectiveAt" label="Completes At" type="datetime-local" />
+        </div>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" @click="closeTransferDialog">Cancel</button>
+          <button class="cds--btn cds--btn--primary" type="button" @click="submitTransfer">Save</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="transferDeleteDialog && pendingDeleteTransfer" class="modal-backdrop">
+      <section class="confirm-card cds--tile">
+        <h3>Delete Transfer</h3>
+        <p>{{ deleteTransferDescription }}</p>
+        <div class="modal-actions">
+          <button class="cds--btn cds--btn--ghost" type="button" @click="closeTransferDeleteDialog">Cancel</button>
+          <button class="cds--btn cds--btn--danger" type="button" @click="confirmDeleteTransfer">Delete</button>
         </div>
       </section>
     </div>
@@ -794,6 +888,50 @@
                   </div>
                 </div>
               </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section v-if="activeTab === 'transfers'" id="panel-transfers" class="section-wrap" role="tabpanel" aria-labelledby="tab-transfers">
+      <div class="cds--data-table-container">
+        <div class="table-toolbar-row">
+          <div class="transfers-summary">
+            <h3>Pending Transfers</h3>
+            <p>Queued credit-card payments and manual account transfers settle here.</p>
+          </div>
+          <button class="cds--btn cds--btn--primary" type="button" @click="openTransferDialog()">
+            Add Transfer
+          </button>
+        </div>
+        <table class="cds--data-table cds--data-table--md">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Destination</th>
+              <th>Amount</th>
+              <th>Completes</th>
+              <th>Type</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="transfer in transfers" :key="transfer.id">
+              <td>{{ transfer.source_account_name }}</td>
+              <td>{{ transfer.destination_account_name }}</td>
+              <td>{{ cents(transfer.amount_cents) }}</td>
+              <td>{{ formatTransferDateTime(transfer.effective_at) }}</td>
+              <td>{{ transfer.transfer_kind === 'credit_card_payment' ? 'Card payment' : 'Transfer' }}</td>
+              <td class="table-actions-cell">
+                <div class="transfer-row-actions">
+                  <button class="cds--btn cds--btn--ghost" type="button" @click="openTransferDialog(transfer)">Edit</button>
+                  <button class="cds--btn cds--btn--ghost" type="button" @click="promptDeleteTransfer(transfer)">Delete</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!transfers.length">
+              <td colspan="6" class="empty-state">No pending transfers.</td>
             </tr>
           </tbody>
         </table>
@@ -1014,6 +1152,18 @@ interface QueuedCreditCardPaymentPayload {
   effective_at: string
 }
 
+interface AccountTransferPayload {
+  id: string
+  source_account_id: string
+  source_account_name: string
+  destination_account_id: string
+  destination_account_name: string
+  amount_cents: number
+  transfer_kind: 'standard' | 'credit_card_payment'
+  queued_at: string
+  effective_at: string
+}
+
 interface ContractCalendarPayload {
   id: string
   name: string
@@ -1111,7 +1261,7 @@ type ExpensesTabExpose = {
   openFromCalendar: (expenseId: string, action: CalendarEventAction) => Promise<boolean>
 }
 
-type DashboardTab = 'overview' | 'accounts' | 'contracts' | 'expenses' | 'calendar'
+type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'calendar'
 
 interface Section {
   key: string
@@ -1193,9 +1343,11 @@ const makeCreateForm = (): CreateAccountPayload => ({
 })
 
 const accounts = ref<AccountPayload[]>([])
+const transfers = ref<AccountTransferPayload[]>([])
 const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
   { value: 'overview', label: 'Overview' },
   { value: 'accounts', label: 'Accounts' },
+  { value: 'transfers', label: 'Transfers' },
   { value: 'contracts', label: 'Contracts' },
   { value: 'expenses', label: 'Expenses' },
   { value: 'calendar', label: 'Calendar' },
@@ -1242,6 +1394,11 @@ const deleteDialog = ref(false)
 const pendingDeleteAccountId = ref<string | null>(null)
 const updateDialog = ref(false)
 const updatingAccount = ref<AccountPayload | null>(null)
+const transferDialog = ref(false)
+const editingTransfer = ref<AccountTransferPayload | null>(null)
+const pendingDeleteTransfer = ref<AccountTransferPayload | null>(null)
+const transferDeleteDialog = ref(false)
+const transferDialogAccountContextId = ref<string | null>(null)
 const historyDialog = ref(false)
 const historyAccount = ref<AccountPayload | null>(null)
 const historyItems = ref<AccountHistoryPoint[]>([])
@@ -1276,6 +1433,12 @@ const updateForm = ref({
     5000: 0,
     10000: 0,
   } as Record<number, number>,
+})
+const transferForm = ref({
+  sourceAccountId: '',
+  destinationAccountId: '',
+  amountCents: 0,
+  effectiveAt: '',
 })
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
@@ -1526,6 +1689,9 @@ const accountTypeLabel = (type: AccountType) =>
     loan: 'Loan',
     rewards_card: 'Rewards Card',
   })[type]
+
+const accountSupportsPendingTransfers = (account?: Pick<AccountPayload, 'type' | 'closed'> | null) =>
+  !!account && !account.closed && !['cash', 'crypto_wallet'].includes(account.type)
 
 const isLiabilityAccountType = (type?: string) => ['credit_card', 'line_of_credit', 'loan'].includes(String(type || ''))
 
@@ -1798,6 +1964,50 @@ const creditCardFundingAccountOptions = computed(() =>
       value: account.id,
     })),
 )
+const transferAccountOptions = computed(() =>
+  accounts.value
+    .filter((account) => accountSupportsPendingTransfers(account))
+    .map((account) => ({
+      label: `${account.name} (${account.organization || 'Unknown'})`,
+      value: account.id,
+    })),
+)
+const transferDestinationOptions = computed(() =>
+  transferAccountOptions.value.filter((account) => account.value !== transferForm.value.sourceAccountId),
+)
+const updatingAccountTransfers = computed(() => {
+  if (!updatingAccount.value) {
+    return []
+  }
+  return transfers.value
+    .filter(
+      (transfer) =>
+        transfer.source_account_id === updatingAccount.value?.id || transfer.destination_account_id === updatingAccount.value?.id,
+    )
+    .sort((a, b) => new Date(a.effective_at).getTime() - new Date(b.effective_at).getTime())
+})
+const canCreateTransferForUpdatingAccount = computed(() => accountSupportsPendingTransfers(updatingAccount.value))
+const transferDestinationLabel = computed(() => {
+  if (!editingTransfer.value) {
+    return ''
+  }
+  return editingTransfer.value.destination_account_name
+})
+const transferDialogDescription = computed(() => {
+  if (editingTransfer.value?.transfer_kind === 'credit_card_payment') {
+    return 'Edit the funding account, amount, or completion time for this queued credit-card payment.'
+  }
+  if (transferDialogAccountContextId.value) {
+    return 'Create or edit a pending transfer that keeps this account on either the source or destination side.'
+  }
+  return 'Create or edit a pending transfer between two accounts. Leave completion time blank to use the next business day at noon.'
+})
+const deleteTransferDescription = computed(() => {
+  if (!pendingDeleteTransfer.value) {
+    return ''
+  }
+  return `Delete ${cents(pendingDeleteTransfer.value.amount_cents)} from ${pendingDeleteTransfer.value.source_account_name} to ${pendingDeleteTransfer.value.destination_account_name}?`
+})
 
 const hasQueuedCreditCardPayment = computed(
   () => updateMode.value === 'credit_card_payment' && !!updatingAccount.value?.queued_credit_card_payment,
@@ -1840,9 +2050,9 @@ const updateDescription = computed(() => {
   }
   if (updateMode.value === 'credit_card_payment') {
     if (hasQueuedCreditCardPayment.value) {
-      return `${queuedCreditCardPaymentSummary.value || 'This card already has a queued payment awaiting settlement.'} Saving changes re-queues it for another 24 hours, and setting Amount Paying to $0 cancels it.`
+      return `${queuedCreditCardPaymentSummary.value || 'This card already has a queued payment awaiting settlement.'} Saving changes re-queues it for the next business day at noon, and setting Amount Paying to $0 cancels it.`
     }
-    return 'Record the website balance and queue a payment that will settle 24 hours later.'
+    return 'Record the website balance and queue a payment that will settle on the next business day at noon.'
   }
   if (updateMode.value === 'dollars') {
     return 'Update the current account balance amount.'
@@ -1858,6 +2068,133 @@ const updateDescription = computed(() => {
   }
   return 'Update the quantity for the first crypto position on this account.'
 })
+
+const observedFixedHoliday = (year: number, monthOneBased: number, day: number) => {
+  const holiday = new Date(year, monthOneBased - 1, day)
+  const weekday = holiday.getDay()
+  if (weekday === 6) {
+    holiday.setDate(holiday.getDate() - 1)
+  } else if (weekday === 0) {
+    holiday.setDate(holiday.getDate() + 1)
+  }
+  holiday.setHours(0, 0, 0, 0)
+  return holiday
+}
+
+const firstWeekdayOfMonth = (year: number, monthOneBased: number, weekday: number) => {
+  const value = new Date(year, monthOneBased - 1, 1)
+  while (value.getDay() !== weekday) {
+    value.setDate(value.getDate() + 1)
+  }
+  value.setHours(0, 0, 0, 0)
+  return value
+}
+
+const nthWeekdayOfMonth = (year: number, monthOneBased: number, weekday: number, nth: number) => {
+  const value = firstWeekdayOfMonth(year, monthOneBased, weekday)
+  value.setDate(value.getDate() + Math.max(0, nth - 1) * 7)
+  return value
+}
+
+const lastWeekdayOfMonth = (year: number, monthOneBased: number, weekday: number) => {
+  const value = new Date(year, monthOneBased, 0)
+  while (value.getDay() !== weekday) {
+    value.setDate(value.getDate() - 1)
+  }
+  value.setHours(0, 0, 0, 0)
+  return value
+}
+
+const usBankHolidayKeys = (year: number) =>
+  new Set(
+    [
+      observedFixedHoliday(year, 1, 1),
+      nthWeekdayOfMonth(year, 1, 1, 3),
+      nthWeekdayOfMonth(year, 2, 1, 3),
+      lastWeekdayOfMonth(year, 5, 1),
+      observedFixedHoliday(year, 6, 19),
+      observedFixedHoliday(year, 7, 4),
+      nthWeekdayOfMonth(year, 9, 1, 1),
+      nthWeekdayOfMonth(year, 10, 1, 2),
+      observedFixedHoliday(year, 11, 11),
+      nthWeekdayOfMonth(year, 11, 4, 4),
+      observedFixedHoliday(year, 12, 25),
+    ].map((value) => value.toDateString()),
+  )
+
+const isBusinessDay = (value: Date) => {
+  const weekday = value.getDay()
+  if (weekday === 0 || weekday === 6) {
+    return false
+  }
+  return !usBankHolidayKeys(value.getFullYear()).has(value.toDateString())
+}
+
+const nextBusinessDayNoonInputValue = () => {
+  const value = new Date()
+  value.setHours(12, 0, 0, 0)
+  value.setDate(value.getDate() + 1)
+  while (!isBusinessDay(value)) {
+    value.setDate(value.getDate() + 1)
+  }
+  return toLocalDateTimeInput(value.toISOString())
+}
+
+const toLocalDateTimeInput = (raw?: string) => {
+  if (!raw) {
+    return ''
+  }
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    return ''
+  }
+  const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
+}
+
+const fromLocalDateTimeInput = (raw: string) => {
+  const value = raw.trim()
+  if (!value) {
+    return undefined
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined
+  }
+  return parsed.toISOString()
+}
+
+const formatTransferDateTime = (raw?: string) => {
+  if (!raw) {
+    return 'Unknown'
+  }
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Unknown'
+  }
+  return parsed.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+const describeTransferForAccount = (
+  transfer: AccountTransferPayload,
+  account?: Pick<AccountPayload, 'id' | 'name'> | null,
+) => {
+  if (!account) {
+    return `${cents(transfer.amount_cents)} from ${transfer.source_account_name} to ${transfer.destination_account_name}`
+  }
+  if (transfer.source_account_id === account.id) {
+    const prefix = transfer.transfer_kind === 'credit_card_payment' ? 'Card payment' : 'Transfer'
+    return `${prefix} ${cents(transfer.amount_cents)} to ${transfer.destination_account_name}`
+  }
+  const prefix = transfer.transfer_kind === 'credit_card_payment' ? 'Card payment' : 'Transfer'
+  return `${prefix} ${cents(transfer.amount_cents)} from ${transfer.source_account_name}`
+}
 
 const HISTORY_LEFT = 50
 const HISTORY_TOP = 20
@@ -3341,7 +3678,11 @@ const lastUpdateTone = (account: AccountPayload) => {
 const loadAccounts = async () => {
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
   accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
-  await loadWidgets()
+  await Promise.all([loadWidgets(), loadTransfers()])
+}
+
+const loadTransfers = async () => {
+  transfers.value = await request.get<AccountTransferPayload[]>('/transfers')
 }
 
 const loadCalendarSources = async () => {
@@ -3637,6 +3978,113 @@ const openUpdateDialog = (account: AccountPayload) => {
 const closeUpdateDialog = () => {
   updateDialog.value = false
   updatingAccount.value = null
+}
+
+const closeTransferDialog = () => {
+  transferDialog.value = false
+  editingTransfer.value = null
+  transferDialogAccountContextId.value = null
+  transferForm.value = {
+    sourceAccountId: '',
+    destinationAccountId: '',
+    amountCents: 0,
+    effectiveAt: '',
+  }
+}
+
+const openTransferDialog = (transfer?: AccountTransferPayload, accountContext?: AccountPayload) => {
+  if (guardMaskedMode(transfer ? 'edit transfers' : 'create transfers')) {
+    return
+  }
+  const fallbackSourceId = transferAccountOptions.value[0]?.value || ''
+  const fallbackDestinationId =
+    transferAccountOptions.value.find((item) => item.value !== fallbackSourceId)?.value || ''
+  editingTransfer.value = transfer || null
+  transferDialogAccountContextId.value = accountContext?.id || null
+  transferForm.value = {
+    sourceAccountId:
+      transfer?.source_account_id || accountContext?.id || fallbackSourceId,
+    destinationAccountId:
+      transfer?.destination_account_id ||
+      (accountContext?.id === fallbackSourceId ? fallbackDestinationId : fallbackDestinationId || fallbackSourceId),
+    amountCents: transfer?.amount_cents || 0,
+    effectiveAt: transfer ? toLocalDateTimeInput(transfer.effective_at) : nextBusinessDayNoonInputValue(),
+  }
+  if (!transfer && accountContext?.id && transferForm.value.destinationAccountId === accountContext.id) {
+    transferForm.value.destinationAccountId = fallbackDestinationId
+  }
+  transferDialog.value = true
+}
+
+const promptDeleteTransfer = (transfer: AccountTransferPayload) => {
+  if (guardMaskedMode('delete transfers')) {
+    return
+  }
+  pendingDeleteTransfer.value = transfer
+  transferDeleteDialog.value = true
+}
+
+const closeTransferDeleteDialog = () => {
+  transferDeleteDialog.value = false
+  pendingDeleteTransfer.value = null
+}
+
+const submitTransfer = async () => {
+  if (guardMaskedMode(editingTransfer.value ? 'edit transfers' : 'create transfers')) {
+    return
+  }
+  if (!transferForm.value.sourceAccountId || !transferForm.value.destinationAccountId) {
+    errorMessage.value = 'Source and destination accounts are required'
+    snackbar.value = true
+    return
+  }
+  if (transferForm.value.sourceAccountId === transferForm.value.destinationAccountId) {
+    errorMessage.value = 'Source and destination accounts must be different'
+    snackbar.value = true
+    return
+  }
+  if ((transferForm.value.amountCents || 0) <= 0) {
+    errorMessage.value = 'Transfer amount must be greater than $0'
+    snackbar.value = true
+    return
+  }
+  if (
+    transferDialogAccountContextId.value &&
+    transferForm.value.sourceAccountId !== transferDialogAccountContextId.value &&
+    transferForm.value.destinationAccountId !== transferDialogAccountContextId.value
+  ) {
+    errorMessage.value = 'This transfer must keep the current account as either the source or destination'
+    snackbar.value = true
+    return
+  }
+  const payload: Record<string, unknown> = {
+    source_account_id: transferForm.value.sourceAccountId,
+    destination_account_id: transferForm.value.destinationAccountId,
+    amount_cents: Math.max(0, transferForm.value.amountCents || 0),
+  }
+  const effectiveAt = fromLocalDateTimeInput(transferForm.value.effectiveAt)
+  if (effectiveAt) {
+    payload.effective_at = effectiveAt
+  }
+  if (editingTransfer.value) {
+    await request.put(`/transfers/${editingTransfer.value.id}`, payload)
+  } else {
+    await request.post('/transfers', payload)
+  }
+  closeTransferDialog()
+  await loadAccounts()
+}
+
+const confirmDeleteTransfer = async () => {
+  if (guardMaskedMode('delete transfers')) {
+    return
+  }
+  if (!pendingDeleteTransfer.value) {
+    return
+  }
+  await request.delete(`/transfers/${pendingDeleteTransfer.value.id}`)
+  closeTransferDeleteDialog()
+  await loadAccounts()
 }
 
 const openHistoryDialog = async (account: AccountPayload) => {
@@ -3942,6 +4390,14 @@ const onWindowKeyDown = (event: KeyboardEvent) => {
     closeHistoryDialog()
     return
   }
+  if (transferDeleteDialog.value) {
+    closeTransferDeleteDialog()
+    return
+  }
+  if (transferDialog.value) {
+    closeTransferDialog()
+    return
+  }
   if (updateDialog.value) {
     closeUpdateDialog()
     return
@@ -4026,6 +4482,10 @@ watch(
   async (next) => {
     if (next === 'calendar') {
       await loadCalendarSources()
+      return
+    }
+    if (next === 'transfers') {
+      await loadTransfers()
     }
   },
 )
@@ -5077,6 +5537,96 @@ watch(
   color: var(--cds-text-secondary);
 }
 
+.transfers-summary {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.transfers-summary h3,
+.transfers-summary p {
+  margin: 0;
+}
+
+.transfers-summary p {
+  color: var(--cds-text-secondary);
+}
+
+.transfer-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.transfer-static-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.transfer-static-value {
+  min-height: 2.5rem;
+  border: 1px solid var(--cds-border-subtle-01);
+  background: var(--cds-layer);
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  align-items: center;
+}
+
+.account-transfer-section {
+  margin-top: 1rem;
+  border-top: 1px solid var(--cds-border-subtle-01);
+  padding-top: 1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.account-transfer-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.account-transfer-section-head h4,
+.account-transfer-section-head p {
+  margin: 0;
+}
+
+.account-transfer-section-head p,
+.account-transfer-section-note {
+  color: var(--cds-text-secondary);
+}
+
+.account-transfer-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.account-transfer-item {
+  border: 1px solid var(--cds-border-subtle-01);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.account-transfer-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.account-transfer-copy span {
+  color: var(--cds-text-secondary);
+  font-size: 0.82rem;
+}
+
+.account-transfer-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
 .section-wrap {
   margin-bottom: 1.25rem;
 }
@@ -5204,6 +5754,18 @@ watch(
 
   .calendar-upcoming-table-wrap {
     overflow-x: auto;
+  }
+
+  .account-transfer-section-head,
+  .account-transfer-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .account-transfer-actions,
+  .transfer-row-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 

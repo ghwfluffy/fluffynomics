@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -7,12 +7,12 @@ from sqlalchemy.orm import Session
 from mp.db.core import SessionLocal
 from mp.schema.account import (
     Account,
+    AccountTransfer,
     AccountCashDenomination,
     AccountCryptoPosition,
     AccountStockPosition,
     AccountValueHistory,
     Organization,
-    QueuedCreditCardPayment,
     Stock,
 )
 from mp.schema.contract import Contract
@@ -146,39 +146,104 @@ def _ensure_history_seed(db: Session, user: User, account: Account) -> None:
         )
 
 
-def _ensure_queued_credit_card_payment(
+def _first_weekday_of_month(year: int, month: int, weekday: int) -> date:
+    current = date(year, month, 1)
+    while current.weekday() != weekday:
+        current += timedelta(days=1)
+    return current
+
+
+def _nth_weekday_of_month(year: int, month: int, weekday: int, nth: int) -> date:
+    current = _first_weekday_of_month(year, month, weekday)
+    return current + timedelta(weeks=max(0, nth - 1))
+
+
+def _last_weekday_of_month(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        current = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        current = date(year, month + 1, 1) - timedelta(days=1)
+    while current.weekday() != weekday:
+        current -= timedelta(days=1)
+    return current
+
+
+def _observed_fixed_holiday(year: int, month: int, day: int) -> date:
+    holiday = date(year, month, day)
+    if holiday.weekday() == 5:
+        return holiday - timedelta(days=1)
+    if holiday.weekday() == 6:
+        return holiday + timedelta(days=1)
+    return holiday
+
+
+def _us_bank_holidays(year: int) -> set[date]:
+    return {
+        _observed_fixed_holiday(year, 1, 1),
+        _nth_weekday_of_month(year, 1, 0, 3),
+        _nth_weekday_of_month(year, 2, 0, 3),
+        _last_weekday_of_month(year, 5, 0),
+        _observed_fixed_holiday(year, 6, 19),
+        _observed_fixed_holiday(year, 7, 4),
+        _nth_weekday_of_month(year, 9, 0, 1),
+        _nth_weekday_of_month(year, 10, 0, 2),
+        _observed_fixed_holiday(year, 11, 11),
+        _nth_weekday_of_month(year, 11, 3, 4),
+        _observed_fixed_holiday(year, 12, 25),
+    }
+
+
+def _is_business_day(day: date) -> bool:
+    return day.weekday() < 5 and day not in _us_bank_holidays(day.year)
+
+
+def _next_business_day_noon(reference: datetime) -> datetime:
+    current_day = reference.date() + timedelta(days=1)
+    while not _is_business_day(current_day):
+        current_day += timedelta(days=1)
+    return datetime.combine(
+        current_day, time(hour=12, minute=0), tzinfo=reference.tzinfo
+    )
+
+
+def _ensure_account_transfer(
     db: Session,
     user: User,
-    credit_card: Account,
     source_account: Account,
+    destination_account: Account,
     *,
-    current_balance_cents: int,
-    pending_balance_cents: int,
-    payment_cents: int,
+    amount_cents: int,
     queued_at: datetime,
+    effective_at: datetime | None = None,
+    transfer_kind: str = "standard",
+    current_balance_cents: int | None = None,
+    pending_balance_cents: int | None = None,
 ) -> None:
     existing = (
-        db.query(QueuedCreditCardPayment)
+        db.query(AccountTransfer)
         .filter(
-            QueuedCreditCardPayment.user_id == user.id,
-            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
-            QueuedCreditCardPayment.applied_at.is_(None),
+            AccountTransfer.user_id == user.id,
+            AccountTransfer.source_account_id == source_account.id,
+            AccountTransfer.destination_account_id == destination_account.id,
+            AccountTransfer.amount_cents == amount_cents,
+            AccountTransfer.transfer_kind == transfer_kind,
+            AccountTransfer.applied_at.is_(None),
         )
         .first()
     )
     if existing is not None:
         return
-    credit_card.balance_cents = current_balance_cents + pending_balance_cents
     db.add(
-        QueuedCreditCardPayment(
+        AccountTransfer(
             user_id=user.id,
-            credit_card_account_id=credit_card.id,
             source_account_id=source_account.id,
+            destination_account_id=destination_account.id,
+            amount_cents=amount_cents,
             current_balance_cents=current_balance_cents,
             pending_balance_cents=pending_balance_cents,
-            payment_cents=payment_cents,
+            transfer_kind=transfer_kind,
             queued_at=queued_at,
-            effective_at=queued_at + timedelta(hours=24),
+            effective_at=effective_at or _next_business_day_noon(queued_at),
         )
     )
 
@@ -550,15 +615,25 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
     )
     for seeded in seeded_accounts:
         _ensure_history_seed(db, user, seeded)
-    _ensure_queued_credit_card_payment(
+    daily_rewards_card.balance_cents = 149200 + 7500
+    _ensure_account_transfer(
         db,
         user,
-        daily_rewards_card,
         checking,
+        daily_rewards_card,
+        amount_cents=149200,
+        queued_at=now - timedelta(hours=12),
+        transfer_kind="credit_card_payment",
         current_balance_cents=149200,
         pending_balance_cents=7500,
-        payment_cents=149200,
-        queued_at=now - timedelta(hours=12),
+    )
+    _ensure_account_transfer(
+        db,
+        user,
+        emergency_savings,
+        checking,
+        amount_cents=32500,
+        queued_at=now - timedelta(hours=6),
     )
     _ensure_contract(
         db,

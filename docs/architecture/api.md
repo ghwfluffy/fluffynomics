@@ -100,15 +100,27 @@ Defined in `python/mp/api/accounts.py`.
 - `POST /accounts/{account_id}/queue-credit-card-payment`
   - credit-card-only update flow used by the dashboard Update modal
   - payload captures `current_balance_cents`, `pending_balance_cents`, `rewards_balance_cents`, `payment_cents`, and `source_account_id`
-  - stores the card balance as `current + pending` immediately, then creates a queued payment with `effective_at = queued_at + 24h`
+  - stores the card balance as `current + pending` immediately, then creates a pending transfer with `effective_at = next business day at 12:00 local-API time`
+  - settlement scheduling skips weekends and observed US bank holidays
   - if `payment_cents = 0`, it updates the card balance only and does not create a queued payment
   - account reads present balances as if the payment has already reduced both the credit card and the funding account, even before settlement
   - settlement is lazy: once `effective_at` is reached, the next account read/write applies the transfer into the underlying account balances and records value history
 - `PUT /accounts/{account_id}/queue-credit-card-payment`
   - edits the active queued payment for that card using the same payload shape
   - updates the stored `current + pending` card balance immediately
-  - resets the queue timer so settlement happens 24 hours after the latest edit
+  - resets the queue timer so settlement happens on the next business day at noon after the latest edit
   - if `payment_cents = 0`, the active queued payment is canceled and removed
+- `GET /transfers`
+  - lists active pending account transfers (manual transfers plus queued credit-card payments)
+  - each row includes source account, destination account, amount, transfer kind, queued time, and completion time
+- `POST /transfers`
+  - creates a manual pending transfer between two user-owned accounts with direct balance fields
+  - default completion time is next business day at noon when `effective_at` is omitted
+- `PUT /transfers/{transfer_id}`
+  - edits an active pending transfer
+  - credit-card-payment transfers keep their destination credit card, but funding account, amount, and completion time remain editable
+- `DELETE /transfers/{transfer_id}`
+  - deletes an active pending transfer
 - `PUT /accounts/{account_id}/rank`
   - sets rank explicitly (float)
   - used by tile left/right reorder controls
@@ -231,6 +243,7 @@ Forecast/as-of behavior:
 - `GET /accounts` and `GET /accounts/{id}` with `as_of_date` apply projected deltas from both contracts and expenses.
 - `GET /accounts/net-worth/forecast` includes future deltas from both contracts and expenses.
 - `POST /contracts/run` now executes both simulations for the target date and returns both posting sets.
+- `GET /accounts`, `GET /accounts/{id}`, account history, and net-worth endpoints all lazily settle due pending transfers before responding so reads stay consistent with scheduled completion times.
 
 Update-modal ownership:
 - UI intentionally edits `last_payment_date` and `expiration_date` through contract `Update` flow (not the full editor), but API continues to accept either update path.

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -16,6 +16,10 @@ from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
 from mp.recurring_period import parse_recurring_period
 from mp.schema.account import (
     Account,
+    AccountTransfer,
+    AccountTransferCreateSchema,
+    AccountTransferSchema,
+    AccountTransferUpdateSchema,
     AccountCashDenomination,
     AccountCreateSchema,
     AccountIconType,
@@ -41,7 +45,6 @@ from mp.schema.account import (
     OrganizationSuggestionSchema,
     PositionCryptoSchema,
     PositionStockSchema,
-    QueuedCreditCardPayment,
     QueuedCreditCardPaymentSchema,
     Stock,
     StockCreateSchema,
@@ -68,6 +71,8 @@ ACCOUNT_TYPES = {
 }
 
 LEGACY_RECURRING_PERIODS = {"daily", "weekly", "biweekly", "monthly", "yearly"}
+LIABILITY_ACCOUNT_TYPES = {"credit_card", "line_of_credit", "loan"}
+TRANSFER_KINDS = {"standard", "credit_card_payment"}
 
 
 def _validate_account_type(account_type: str) -> None:
@@ -272,19 +277,121 @@ def _apply_balance_delta(item: AccountSchema, delta_cents: int) -> None:
     setattr(item, field, int(current) + int(delta_cents))
 
 
+def _first_weekday_of_month(year: int, month: int, weekday: int) -> date:
+    current = date(year, month, 1)
+    while current.weekday() != weekday:
+        current += timedelta(days=1)
+    return current
+
+
+def _nth_weekday_of_month(year: int, month: int, weekday: int, nth: int) -> date:
+    current = _first_weekday_of_month(year, month, weekday)
+    return current + timedelta(weeks=max(0, nth - 1))
+
+
+def _last_weekday_of_month(year: int, month: int, weekday: int) -> date:
+    if month == 12:
+        current = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        current = date(year, month + 1, 1) - timedelta(days=1)
+    while current.weekday() != weekday:
+        current -= timedelta(days=1)
+    return current
+
+
+def _observed_fixed_holiday(year: int, month: int, day: int) -> date:
+    holiday = date(year, month, day)
+    if holiday.weekday() == 5:
+        return holiday - timedelta(days=1)
+    if holiday.weekday() == 6:
+        return holiday + timedelta(days=1)
+    return holiday
+
+
+def _us_bank_holidays(year: int) -> set[date]:
+    return {
+        _observed_fixed_holiday(year, 1, 1),
+        _nth_weekday_of_month(year, 1, 0, 3),  # MLK Day
+        _nth_weekday_of_month(year, 2, 0, 3),  # Washington's Birthday
+        _last_weekday_of_month(year, 5, 0),  # Memorial Day
+        _observed_fixed_holiday(year, 6, 19),  # Juneteenth
+        _observed_fixed_holiday(year, 7, 4),  # Independence Day
+        _nth_weekday_of_month(year, 9, 0, 1),  # Labor Day
+        _nth_weekday_of_month(year, 10, 0, 2),  # Columbus Day
+        _observed_fixed_holiday(year, 11, 11),  # Veterans Day
+        _nth_weekday_of_month(year, 11, 3, 4),  # Thanksgiving
+        _observed_fixed_holiday(year, 12, 25),  # Christmas
+    }
+
+
+def _is_business_day(day: date) -> bool:
+    return day.weekday() < 5 and day not in _us_bank_holidays(day.year)
+
+
+def _next_business_day_noon(reference: datetime) -> datetime:
+    current_day = reference.date() + timedelta(days=1)
+    while not _is_business_day(current_day):
+        current_day += timedelta(days=1)
+    return datetime.combine(current_day, time(hour=12, minute=0))
+
+
+def _is_liability_account_type(account_type: str) -> bool:
+    return account_type in LIABILITY_ACCOUNT_TYPES
+
+
+def _incoming_transfer_delta(account_type: str, amount_cents: int) -> int:
+    return -amount_cents if _is_liability_account_type(account_type) else amount_cents
+
+
+def _outgoing_transfer_delta(account_type: str, amount_cents: int) -> int:
+    return amount_cents if _is_liability_account_type(account_type) else -amount_cents
+
+
+def _apply_transfer_delta_db(account: Account, delta_cents: int) -> bool:
+    field = _account_balance_field(account.type)
+    if field is None or not delta_cents:
+        return False
+    current = int(getattr(account, field) or 0)
+    setattr(account, field, current + int(delta_cents))
+    return True
+
+
+def _build_transfer_schema(
+    transfer: AccountTransfer,
+    source_account_name: str,
+    destination_account_name: str,
+) -> AccountTransferSchema:
+    kind = (
+        transfer.transfer_kind
+        if transfer.transfer_kind in TRANSFER_KINDS
+        else "standard"
+    )
+    return AccountTransferSchema(
+        id=transfer.id,
+        source_account_id=transfer.source_account_id,
+        source_account_name=source_account_name,
+        destination_account_id=transfer.destination_account_id,
+        destination_account_name=destination_account_name,
+        amount_cents=int(transfer.amount_cents or 0),
+        transfer_kind=kind,  # type: ignore[arg-type]
+        queued_at=transfer.queued_at,
+        effective_at=transfer.effective_at,
+    )
+
+
 def _build_queued_payment_schema(
-    payment: QueuedCreditCardPayment,
+    transfer: AccountTransfer,
     source_account_name: str,
 ) -> QueuedCreditCardPaymentSchema:
     return QueuedCreditCardPaymentSchema(
-        id=payment.id,
-        source_account_id=payment.source_account_id,
+        id=transfer.id,
+        source_account_id=transfer.source_account_id,
         source_account_name=source_account_name,
-        current_balance_cents=int(payment.current_balance_cents or 0),
-        pending_balance_cents=int(payment.pending_balance_cents or 0),
-        payment_cents=int(payment.payment_cents or 0),
-        queued_at=payment.queued_at,
-        effective_at=payment.effective_at,
+        current_balance_cents=int(transfer.current_balance_cents or 0),
+        pending_balance_cents=int(transfer.pending_balance_cents or 0),
+        payment_cents=int(transfer.amount_cents or 0),
+        queued_at=transfer.queued_at,
+        effective_at=transfer.effective_at,
     )
 
 
@@ -353,22 +460,70 @@ def _validate_credit_card_queue_payload(
     )
 
 
-def _settle_due_queued_credit_card_payments(db: Session, user_id: UUID) -> bool:
-    due_payments = (
-        db.query(QueuedCreditCardPayment)
-        .filter(
-            QueuedCreditCardPayment.user_id == user_id,
-            QueuedCreditCardPayment.applied_at.is_(None),
-            QueuedCreditCardPayment.effective_at <= datetime.utcnow(),
+def _validate_transfer_accounts(
+    db: Session,
+    current_user_id: UUID,
+    source_account_id: UUID,
+    destination_account_id: UUID,
+    *,
+    require_credit_card_destination: bool = False,
+) -> tuple[Account, Account]:
+    if source_account_id == destination_account_id:
+        raise HTTPException(
+            status_code=400, detail="Source and destination accounts must differ"
         )
-        .order_by(QueuedCreditCardPayment.queued_at.asc())
+
+    accounts = (
+        db.query(Account)
+        .filter(
+            Account.user_id == current_user_id,
+            Account.id.in_([source_account_id, destination_account_id]),
+        )
         .all()
     )
-    if not due_payments:
+    accounts_by_id = {account.id: account for account in accounts}
+    source_account = accounts_by_id.get(source_account_id)
+    destination_account = accounts_by_id.get(destination_account_id)
+    if source_account is None or destination_account is None:
+        raise HTTPException(status_code=404, detail="Transfer account not found")
+    if bool(source_account.closed) or bool(destination_account.closed):
+        raise HTTPException(
+            status_code=400, detail="Cannot transfer with closed account"
+        )
+    if _account_balance_field(source_account.type) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Source account must support direct balance transfers",
+        )
+    if _account_balance_field(destination_account.type) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Destination account must support direct balance transfers",
+        )
+    if require_credit_card_destination and destination_account.type != "credit_card":
+        raise HTTPException(
+            status_code=400,
+            detail="Credit card payment transfers must target a credit card account",
+        )
+    return source_account, destination_account
+
+
+def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
+    due_transfers = (
+        db.query(AccountTransfer)
+        .filter(
+            AccountTransfer.user_id == user_id,
+            AccountTransfer.applied_at.is_(None),
+            AccountTransfer.effective_at <= datetime.utcnow(),
+        )
+        .order_by(AccountTransfer.queued_at.asc())
+        .all()
+    )
+    if not due_transfers:
         return False
 
-    account_ids = {payment.credit_card_account_id for payment in due_payments} | {
-        payment.source_account_id for payment in due_payments
+    account_ids = {transfer.source_account_id for transfer in due_transfers} | {
+        transfer.destination_account_id for transfer in due_transfers
     }
     accounts_by_id = {
         account.id: account
@@ -378,92 +533,95 @@ def _settle_due_queued_credit_card_payments(db: Session, user_id: UUID) -> bool:
     }
     now = datetime.utcnow()
     changed = False
-    for payment in due_payments:
-        credit_card = accounts_by_id.get(payment.credit_card_account_id)
-        source_account = accounts_by_id.get(payment.source_account_id)
-        amount = int(payment.payment_cents or 0)
-        if credit_card is None or source_account is None or amount <= 0:
-            payment.applied_at = now
+    for transfer in due_transfers:
+        source_account = accounts_by_id.get(transfer.source_account_id)
+        destination_account = accounts_by_id.get(transfer.destination_account_id)
+        amount = int(transfer.amount_cents or 0)
+        if source_account is None or destination_account is None or amount <= 0:
+            transfer.applied_at = now
             changed = True
             continue
-        credit_card.balance_cents = int(credit_card.balance_cents or 0) - amount
-        source_balance_field = _account_balance_field(source_account.type)
-        if source_balance_field is None:
-            payment.applied_at = now
-            changed = True
-            continue
-        setattr(
+        source_applied = _apply_transfer_delta_db(
             source_account,
-            source_balance_field,
-            int(getattr(source_account, source_balance_field) or 0) - amount,
+            _outgoing_transfer_delta(source_account.type, amount),
         )
-        credit_card.last_update = now
+        destination_applied = _apply_transfer_delta_db(
+            destination_account,
+            _incoming_transfer_delta(destination_account.type, amount),
+        )
+        if not source_applied or not destination_applied:
+            transfer.applied_at = now
+            changed = True
+            continue
+        destination_account.last_update = now
         source_account.last_update = now
-        payment.applied_at = now
-        _record_account_value_history(db, credit_card)
+        transfer.applied_at = now
         _record_account_value_history(db, source_account)
+        _record_account_value_history(db, destination_account)
         changed = True
     return changed
 
 
-def _apply_active_queued_credit_card_payments(
+def _apply_active_account_transfers(
     db: Session,
     user_id: UUID,
     accounts: list[AccountSchema],
     as_of_date: date | None = None,
 ) -> list[AccountSchema]:
-    payments = (
-        db.query(QueuedCreditCardPayment)
+    transfers = (
+        db.query(AccountTransfer)
         .filter(
-            QueuedCreditCardPayment.user_id == user_id,
-            QueuedCreditCardPayment.applied_at.is_(None),
+            AccountTransfer.user_id == user_id,
+            AccountTransfer.applied_at.is_(None),
         )
-        .order_by(QueuedCreditCardPayment.queued_at.asc())
+        .order_by(AccountTransfer.queued_at.asc())
         .all()
     )
     if as_of_date is not None:
-        payments = [
-            payment for payment in payments if payment.queued_at.date() <= as_of_date
+        transfers = [
+            transfer
+            for transfer in transfers
+            if transfer.queued_at.date() <= as_of_date
         ]
-    if not payments:
+    if not transfers:
         return accounts
 
     accounts_by_id = {item.id: item for item in accounts}
-    source_names_by_id = {
-        item.id: item.name
-        for item in accounts
-        if any(payment.source_account_id == item.id for payment in payments)
+    referenced_ids = {transfer.source_account_id for transfer in transfers} | {
+        transfer.destination_account_id for transfer in transfers
     }
-    if len(source_names_by_id) < len(
-        {payment.source_account_id for payment in payments}
-    ):
-        db_source_names = (
+    names_by_id = {item.id: item.name for item in accounts if item.id in referenced_ids}
+    if len(names_by_id) < len(referenced_ids):
+        for account_id, name in (
             db.query(Account.id, Account.name)
-            .filter(
-                Account.user_id == user_id,
-                Account.id.in_({payment.source_account_id for payment in payments}),
-            )
+            .filter(Account.user_id == user_id, Account.id.in_(referenced_ids))
             .all()
-        )
-        for source_id, name in db_source_names:
-            source_names_by_id[source_id] = name
+        ):
+            names_by_id[account_id] = name
 
-    for payment in payments:
-        amount = int(payment.payment_cents or 0)
+    for transfer in transfers:
+        amount = int(transfer.amount_cents or 0)
         if amount <= 0:
             continue
-        credit_card = accounts_by_id.get(payment.credit_card_account_id)
-        if credit_card is not None:
-            _apply_balance_delta(credit_card, -amount)
-            source_name = source_names_by_id.get(
-                payment.source_account_id, "Funding account"
-            )
-            credit_card.queued_credit_card_payment = _build_queued_payment_schema(
-                payment, source_name
-            )
-        source_account = accounts_by_id.get(payment.source_account_id)
+        source_account = accounts_by_id.get(transfer.source_account_id)
         if source_account is not None:
-            _apply_balance_delta(source_account, -amount)
+            _apply_balance_delta(
+                source_account,
+                _outgoing_transfer_delta(source_account.type, amount),
+            )
+        destination_account = accounts_by_id.get(transfer.destination_account_id)
+        if destination_account is not None:
+            _apply_balance_delta(
+                destination_account,
+                _incoming_transfer_delta(destination_account.type, amount),
+            )
+            if transfer.transfer_kind == "credit_card_payment":
+                destination_account.queued_credit_card_payment = (
+                    _build_queued_payment_schema(
+                        transfer,
+                        names_by_id.get(transfer.source_account_id, "Funding account"),
+                    )
+                )
     return accounts
 
 
@@ -837,7 +995,7 @@ def get_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AccountSchema]:
-    if _settle_due_queued_credit_card_payments(db, current_user.id):
+    if _settle_due_account_transfers(db, current_user.id):
         db.commit()
     accounts = (
         db.query(Account)
@@ -860,9 +1018,7 @@ def get_accounts(
             if not delta:
                 continue
             _apply_balance_delta(item, int(delta))
-    return _apply_active_queued_credit_card_payments(
-        db, current_user.id, serialized, as_of_date
-    )
+    return _apply_active_account_transfers(db, current_user.id, serialized, as_of_date)
 
 
 @router.get("/accounts/{account_id}", response_model=AccountSchema)
@@ -872,7 +1028,7 @@ def get_account(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
-    if _settle_due_queued_credit_card_payments(db, current_user.id):
+    if _settle_due_account_transfers(db, current_user.id):
         db.commit()
     account = (
         db.query(Account)
@@ -894,7 +1050,7 @@ def get_account(
         ) + expense_simulation.account_deltas.get(serialized.id, 0)
         if delta:
             _apply_balance_delta(serialized, int(delta))
-    return _apply_active_queued_credit_card_payments(
+    return _apply_active_account_transfers(
         db, current_user.id, [serialized], as_of_date
     )[0]
 
@@ -906,7 +1062,7 @@ def get_net_worth_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[NetWorthHistoryPointSchema]:
-    if _settle_due_queued_credit_card_payments(db, current_user.id):
+    if _settle_due_account_transfers(db, current_user.id):
         db.commit()
     rows = (
         db.query(NetWorthDailySnapshot)
@@ -933,7 +1089,7 @@ def get_net_worth_forecast(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[NetWorthForecastPointSchema]:
-    if _settle_due_queued_credit_card_payments(db, current_user.id):
+    if _settle_due_account_transfers(db, current_user.id):
         db.commit()
     return _forecast_net_worth_points(db, current_user.id, through_date)
 
@@ -946,7 +1102,7 @@ def get_account_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AccountValueHistorySchema]:
-    if _settle_due_queued_credit_card_payments(db, current_user.id):
+    if _settle_due_account_transfers(db, current_user.id):
         db.commit()
     account = (
         db.query(Account)
@@ -1501,7 +1657,7 @@ def update_account_value(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
-    _settle_due_queued_credit_card_payments(db, current_user.id)
+    _settle_due_account_transfers(db, current_user.id)
     account = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -1515,11 +1671,12 @@ def update_account_value(
         raise HTTPException(status_code=400, detail="No value updates provided")
     if account.type == "credit_card":
         has_active_queue = (
-            db.query(QueuedCreditCardPayment)
+            db.query(AccountTransfer)
             .filter(
-                QueuedCreditCardPayment.user_id == current_user.id,
-                QueuedCreditCardPayment.credit_card_account_id == account.id,
-                QueuedCreditCardPayment.applied_at.is_(None),
+                AccountTransfer.user_id == current_user.id,
+                AccountTransfer.destination_account_id == account.id,
+                AccountTransfer.transfer_kind == "credit_card_payment",
+                AccountTransfer.applied_at.is_(None),
             )
             .first()
             is not None
@@ -1558,7 +1715,7 @@ def update_account_value(
     _record_account_value_history(db, account)
     db.commit()
     db.refresh(account)
-    return _apply_active_queued_credit_card_payments(
+    return _apply_active_account_transfers(
         db, current_user.id, [_serialize_account(db, account)]
     )[0]
 
@@ -1573,7 +1730,7 @@ def queue_credit_card_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
-    _settle_due_queued_credit_card_payments(db, current_user.id)
+    _settle_due_account_transfers(db, current_user.id)
     credit_card = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -1591,11 +1748,12 @@ def queue_credit_card_payment(
             status_code=400, detail="Cannot queue payment for closed account"
         )
     active_existing = (
-        db.query(QueuedCreditCardPayment)
+        db.query(AccountTransfer)
         .filter(
-            QueuedCreditCardPayment.user_id == current_user.id,
-            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
-            QueuedCreditCardPayment.applied_at.is_(None),
+            AccountTransfer.user_id == current_user.id,
+            AccountTransfer.destination_account_id == credit_card.id,
+            AccountTransfer.transfer_kind == "credit_card_payment",
+            AccountTransfer.applied_at.is_(None),
         )
         .first()
     )
@@ -1626,17 +1784,20 @@ def queue_credit_card_payment(
         _record_account_value_history(db, credit_card)
         db.commit()
         db.refresh(credit_card)
-        return _serialize_account(db, credit_card)
+        return _apply_active_account_transfers(
+            db, current_user.id, [_serialize_account(db, credit_card)]
+        )[0]
     queued_at = datetime.utcnow()
-    effective_at = queued_at + timedelta(hours=24)
+    effective_at = _next_business_day_noon(queued_at)
     db.add(
-        QueuedCreditCardPayment(
+        AccountTransfer(
             user_id=current_user.id,
-            credit_card_account_id=credit_card.id,
             source_account_id=funding_account.id,
+            destination_account_id=credit_card.id,
+            amount_cents=payment_cents,
             current_balance_cents=current_balance_cents,
             pending_balance_cents=pending_balance_cents,
-            payment_cents=payment_cents,
+            transfer_kind="credit_card_payment",
             queued_at=queued_at,
             effective_at=effective_at,
         )
@@ -1644,7 +1805,7 @@ def queue_credit_card_payment(
     _record_account_value_history(db, credit_card)
     db.commit()
     db.refresh(credit_card)
-    return _apply_active_queued_credit_card_payments(
+    return _apply_active_account_transfers(
         db, current_user.id, [_serialize_account(db, credit_card)]
     )[0]
 
@@ -1659,7 +1820,7 @@ def update_queued_credit_card_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AccountSchema:
-    _settle_due_queued_credit_card_payments(db, current_user.id)
+    _settle_due_account_transfers(db, current_user.id)
     credit_card = (
         db.query(Account)
         .filter(Account.id == account_id, Account.user_id == current_user.id)
@@ -1673,11 +1834,12 @@ def update_queued_credit_card_payment(
             detail="Queued payments are only supported for credit cards",
         )
     active_existing = (
-        db.query(QueuedCreditCardPayment)
+        db.query(AccountTransfer)
         .filter(
-            QueuedCreditCardPayment.user_id == current_user.id,
-            QueuedCreditCardPayment.credit_card_account_id == credit_card.id,
-            QueuedCreditCardPayment.applied_at.is_(None),
+            AccountTransfer.user_id == current_user.id,
+            AccountTransfer.destination_account_id == credit_card.id,
+            AccountTransfer.transfer_kind == "credit_card_payment",
+            AccountTransfer.applied_at.is_(None),
         )
         .first()
     )
@@ -1710,19 +1872,172 @@ def update_queued_credit_card_payment(
         _record_account_value_history(db, credit_card)
         db.commit()
         db.refresh(credit_card)
-        return _serialize_account(db, credit_card)
+        return _apply_active_account_transfers(
+            db, current_user.id, [_serialize_account(db, credit_card)]
+        )[0]
     active_existing.source_account_id = funding_account.id
+    active_existing.amount_cents = payment_cents
     active_existing.current_balance_cents = current_balance_cents
     active_existing.pending_balance_cents = pending_balance_cents
-    active_existing.payment_cents = payment_cents
     active_existing.queued_at = now
-    active_existing.effective_at = now + timedelta(hours=24)
+    active_existing.effective_at = _next_business_day_noon(now)
     _record_account_value_history(db, credit_card)
     db.commit()
     db.refresh(credit_card)
-    return _apply_active_queued_credit_card_payments(
+    return _apply_active_account_transfers(
         db, current_user.id, [_serialize_account(db, credit_card)]
     )[0]
+
+
+@router.get("/transfers", response_model=list[AccountTransferSchema])
+def list_account_transfers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AccountTransferSchema]:
+    if _settle_due_account_transfers(db, current_user.id):
+        db.commit()
+    transfers = (
+        db.query(AccountTransfer)
+        .filter(
+            AccountTransfer.user_id == current_user.id,
+            AccountTransfer.applied_at.is_(None),
+        )
+        .order_by(AccountTransfer.effective_at.asc(), AccountTransfer.queued_at.asc())
+        .all()
+    )
+    if not transfers:
+        return []
+    account_ids = {transfer.source_account_id for transfer in transfers} | {
+        transfer.destination_account_id for transfer in transfers
+    }
+    names_by_id = {
+        account.id: account.name
+        for account in db.query(Account)
+        .filter(Account.user_id == current_user.id, Account.id.in_(account_ids))
+        .all()
+    }
+    return [
+        _build_transfer_schema(
+            transfer,
+            names_by_id.get(transfer.source_account_id, "Unknown account"),
+            names_by_id.get(transfer.destination_account_id, "Unknown account"),
+        )
+        for transfer in transfers
+    ]
+
+
+@router.post("/transfers", response_model=AccountTransferSchema)
+def create_account_transfer(
+    payload: AccountTransferCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountTransferSchema:
+    if _settle_due_account_transfers(db, current_user.id):
+        db.commit()
+    if int(payload.amount_cents or 0) <= 0:
+        raise HTTPException(
+            status_code=400, detail="amount_cents must be greater than 0"
+        )
+    source_account, destination_account = _validate_transfer_accounts(
+        db,
+        current_user.id,
+        payload.source_account_id,
+        payload.destination_account_id,
+    )
+    queued_at = datetime.utcnow()
+    transfer = AccountTransfer(
+        user_id=current_user.id,
+        source_account_id=source_account.id,
+        destination_account_id=destination_account.id,
+        amount_cents=int(payload.amount_cents),
+        transfer_kind="standard",
+        queued_at=queued_at,
+        effective_at=payload.effective_at or _next_business_day_noon(queued_at),
+    )
+    db.add(transfer)
+    db.commit()
+    db.refresh(transfer)
+    return _build_transfer_schema(
+        transfer, source_account.name, destination_account.name
+    )
+
+
+@router.put("/transfers/{transfer_id}", response_model=AccountTransferSchema)
+def update_account_transfer(
+    transfer_id: UUID,
+    payload: AccountTransferUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountTransferSchema:
+    if _settle_due_account_transfers(db, current_user.id):
+        db.commit()
+    transfer = (
+        db.query(AccountTransfer)
+        .filter(
+            AccountTransfer.id == transfer_id,
+            AccountTransfer.user_id == current_user.id,
+            AccountTransfer.applied_at.is_(None),
+        )
+        .first()
+    )
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    next_source_id = payload.source_account_id or transfer.source_account_id
+    next_destination_id = transfer.destination_account_id
+    if (
+        transfer.transfer_kind == "standard"
+        and payload.destination_account_id is not None
+    ):
+        next_destination_id = payload.destination_account_id
+    amount_cents = int(
+        payload.amount_cents
+        if payload.amount_cents is not None
+        else transfer.amount_cents
+    )
+    if amount_cents <= 0:
+        raise HTTPException(
+            status_code=400, detail="amount_cents must be greater than 0"
+        )
+    source_account, destination_account = _validate_transfer_accounts(
+        db,
+        current_user.id,
+        next_source_id,
+        next_destination_id,
+        require_credit_card_destination=transfer.transfer_kind == "credit_card_payment",
+    )
+    transfer.source_account_id = source_account.id
+    transfer.destination_account_id = destination_account.id
+    transfer.amount_cents = amount_cents
+    if payload.effective_at is not None:
+        transfer.effective_at = payload.effective_at
+    db.commit()
+    db.refresh(transfer)
+    return _build_transfer_schema(
+        transfer, source_account.name, destination_account.name
+    )
+
+
+@router.delete("/transfers/{transfer_id}", status_code=204)
+def delete_account_transfer(
+    transfer_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    if _settle_due_account_transfers(db, current_user.id):
+        db.commit()
+    transfer = (
+        db.query(AccountTransfer)
+        .filter(
+            AccountTransfer.id == transfer_id,
+            AccountTransfer.user_id == current_user.id,
+            AccountTransfer.applied_at.is_(None),
+        )
+        .first()
+    )
+    if transfer is None:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    db.delete(transfer)
+    db.commit()
 
 
 @router.delete("/accounts/{account_id}", status_code=204)

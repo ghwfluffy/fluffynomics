@@ -69,16 +69,16 @@ Account timestamp semantics are intentionally split:
 - `accounts.icon_type` is enum-like constrained text: `Letters`, `Gravatar`, `Icon`.
   - for `Letters`/`Gravatar`, `accounts.icon_id` is expected to be null and icon bytes are generated on demand
 - `accounts.last_payment_date` stores the most recently recorded payment date for payable accounts (`line_of_credit`, `credit_card`, `loan`).
-- `queued_credit_card_payments` stores one active queued payment per credit card until settlement:
-  - `credit_card_account_id`
+- `account_transfers` stores pending account-to-account movement, including queued credit-card payments:
   - `source_account_id`
-  - `current_balance_cents`
-  - `pending_balance_cents`
-  - `payment_cents`
+  - `destination_account_id`
+  - `amount_cents`
+  - optional `current_balance_cents` / `pending_balance_cents` snapshot fields for the credit-card-payment workflow
+  - `transfer_kind` (`standard` or `credit_card_payment`)
   - `queued_at`
   - `effective_at`
   - `applied_at`
-  - partial unique rule: only one row with `applied_at IS NULL` may exist for a given `credit_card_account_id`
+  - partial unique rule: only one row with `transfer_kind='credit_card_payment'` and `applied_at IS NULL` may exist for a given destination credit card
 - Cash balances should be treated as derived from `account_cash_denominations` quantities (not an independently authored static `accounts.balance_cents` value).
 - `account_crypto_positions.exchange_rate_cents` stores per-ticker USD exchange rate used for derived crypto account value.
   - update flows propagate same ticker rate across all of a user's crypto holdings.
@@ -207,7 +207,7 @@ Current replace order removes user rows from:
 - `contracts`
   - cascades `contract_postings` by contract foreign key
 - `account_value_history`
-- `queued_credit_card_payments`
+- `account_transfers`
 - `net_worth_daily_snapshot`
 - `accounts` (cascades account positions/denominations)
 - `stocks`

@@ -20,6 +20,7 @@ from mp.api.auth import get_current_user
 from mp.db import get_db
 from mp.schema.account import (
     Account,
+    AccountTransfer,
     AccountCashDenomination,
     AccountCryptoPosition,
     AccountStockPosition,
@@ -28,7 +29,6 @@ from mp.schema.account import (
     IconAsset,
     NetWorthDailySnapshot,
     Organization,
-    QueuedCreditCardPayment,
     Stock,
 )
 from mp.schema.contract import Contract, ContractPosting
@@ -39,7 +39,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 6
+PAYLOAD_SCHEMA_VERSION = 7
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -71,7 +71,7 @@ class ImportResponseSchema(BaseModel):
     imported_expenses: int
     imported_history_points: int
     imported_net_worth_snapshots: int
-    imported_queued_credit_card_payments: int
+    imported_account_transfers: int
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -1541,7 +1541,7 @@ def _convert_legacy_payload_to_latest(
         "expenses": converted_expenses,
         "account_value_history": [],
         "net_worth_daily_snapshot": [],
-        "queued_credit_card_payments": [],
+        "account_transfers": [],
     }
 
 
@@ -1595,12 +1595,12 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
         .order_by(NetWorthDailySnapshot.snapshot_date.asc())
         .all()
     )
-    queued_credit_card_payments = (
-        db.query(QueuedCreditCardPayment)
-        .filter(QueuedCreditCardPayment.user_id == user_id)
+    account_transfers = (
+        db.query(AccountTransfer)
+        .filter(AccountTransfer.user_id == user_id)
         .order_by(
-            QueuedCreditCardPayment.queued_at.asc(),
-            QueuedCreditCardPayment.id.asc(),
+            AccountTransfer.queued_at.asc(),
+            AccountTransfer.id.asc(),
         )
         .all()
     )
@@ -1845,19 +1845,24 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             }
             for point in net_worth_snapshots
         ],
-        "queued_credit_card_payments": [
+        "account_transfers": [
             {
-                "id": str(payment.id),
-                "credit_card_account_id": str(payment.credit_card_account_id),
-                "source_account_id": str(payment.source_account_id),
-                "current_balance_cents": int(payment.current_balance_cents),
-                "pending_balance_cents": int(payment.pending_balance_cents),
-                "payment_cents": int(payment.payment_cents),
-                "queued_at": _serialize_datetime(payment.queued_at),
-                "effective_at": _serialize_datetime(payment.effective_at),
-                "applied_at": _serialize_datetime(payment.applied_at),
+                "id": str(transfer.id),
+                "source_account_id": str(transfer.source_account_id),
+                "destination_account_id": str(transfer.destination_account_id),
+                "amount_cents": int(transfer.amount_cents),
+                "current_balance_cents": int(transfer.current_balance_cents)
+                if transfer.current_balance_cents is not None
+                else None,
+                "pending_balance_cents": int(transfer.pending_balance_cents)
+                if transfer.pending_balance_cents is not None
+                else None,
+                "transfer_kind": str(transfer.transfer_kind or "standard"),
+                "queued_at": _serialize_datetime(transfer.queued_at),
+                "effective_at": _serialize_datetime(transfer.effective_at),
+                "applied_at": _serialize_datetime(transfer.applied_at),
             }
-            for payment in queued_credit_card_payments
+            for transfer in account_transfers
         ],
     }
 
@@ -1946,6 +1951,31 @@ def _upgrade_payload_v5_to_v6(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 7
+    if "account_transfers" not in upgraded:
+        upgraded["account_transfers"] = [
+            {
+                "id": item.get("id"),
+                "source_account_id": item.get("source_account_id"),
+                "destination_account_id": item.get("credit_card_account_id"),
+                "amount_cents": item.get("payment_cents"),
+                "current_balance_cents": item.get("current_balance_cents"),
+                "pending_balance_cents": item.get("pending_balance_cents"),
+                "transfer_kind": "credit_card_payment",
+                "queued_at": item.get("queued_at"),
+                "effective_at": item.get("effective_at"),
+                "applied_at": item.get("applied_at"),
+            }
+            for item in _required_list(
+                upgraded.get("queued_credit_card_payments", []),
+                "queued_credit_card_payments",
+            )
+        ]
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -1953,6 +1983,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     3: _upgrade_payload_v3_to_v4,
     4: _upgrade_payload_v4_to_v5,
     5: _upgrade_payload_v5_to_v6,
+    6: _upgrade_payload_v6_to_v7,
 }
 
 
@@ -2103,8 +2134,8 @@ def _replace_user_data(
     net_worth_snapshots = _required_list(
         payload.get("net_worth_daily_snapshot"), "net_worth_daily_snapshot"
     )
-    queued_credit_card_payments = _required_list(
-        payload.get("queued_credit_card_payments", []), "queued_credit_card_payments"
+    account_transfers = _required_list(
+        payload.get("account_transfers", []), "account_transfers"
     )
 
     db.query(Expense).filter(Expense.user_id == user_id).delete(
@@ -2116,9 +2147,9 @@ def _replace_user_data(
     db.query(AccountValueHistory).filter(AccountValueHistory.user_id == user_id).delete(
         synchronize_session=False
     )
-    db.query(QueuedCreditCardPayment).filter(
-        QueuedCreditCardPayment.user_id == user_id
-    ).delete(synchronize_session=False)
+    db.query(AccountTransfer).filter(AccountTransfer.user_id == user_id).delete(
+        synchronize_session=False
+    )
     db.query(NetWorthDailySnapshot).filter(
         NetWorthDailySnapshot.user_id == user_id
     ).delete(synchronize_session=False)
@@ -2642,7 +2673,7 @@ def _replace_user_data(
         imported_history_points += 1
 
     imported_snapshots = 0
-    imported_queued_credit_card_payments = 0
+    imported_account_transfers = 0
     for raw in net_worth_snapshots:
         item = _required_dict(raw, "net_worth_daily_snapshot[]")
         snapshot_date = _parse_optional_date(
@@ -2669,59 +2700,70 @@ def _replace_user_data(
         )
         imported_snapshots += 1
 
-    for raw in queued_credit_card_payments:
-        item = _required_dict(raw, "queued_credit_card_payments[]")
-        old_credit_card_account_id = _parse_uuid(
-            item.get("credit_card_account_id"),
-            "queued_credit_card_payments[].credit_card_account_id",
-        )
+    for raw in account_transfers:
+        item = _required_dict(raw, "account_transfers[]")
         old_source_account_id = _parse_uuid(
             item.get("source_account_id"),
-            "queued_credit_card_payments[].source_account_id",
+            "account_transfers[].source_account_id",
         )
-        credit_card_account_id = account_id_map.get(old_credit_card_account_id)
+        old_destination_account_id = _parse_uuid(
+            item.get("destination_account_id"),
+            "account_transfers[].destination_account_id",
+        )
         source_account_id = account_id_map.get(old_source_account_id)
-        if credit_card_account_id is None or source_account_id is None:
+        destination_account_id = account_id_map.get(old_destination_account_id)
+        if source_account_id is None or destination_account_id is None:
             raise HTTPException(
                 status_code=400,
-                detail="queued_credit_card_payments[] references unknown account",
+                detail="account_transfers[] references unknown account",
+            )
+        transfer_kind = str(item.get("transfer_kind") or "standard").strip()
+        if transfer_kind not in {"standard", "credit_card_payment"}:
+            raise HTTPException(
+                status_code=400,
+                detail="account_transfers[].transfer_kind is invalid",
             )
         db.add(
-            QueuedCreditCardPayment(
+            AccountTransfer(
                 id=uuid4(),
                 user_id=user_id,
-                credit_card_account_id=credit_card_account_id,
                 source_account_id=source_account_id,
+                destination_account_id=destination_account_id,
+                amount_cents=_parse_int(
+                    item.get("amount_cents"),
+                    "account_transfers[].amount_cents",
+                ),
                 current_balance_cents=_parse_int(
                     item.get("current_balance_cents"),
-                    "queued_credit_card_payments[].current_balance_cents",
-                ),
+                    "account_transfers[].current_balance_cents",
+                )
+                if item.get("current_balance_cents") is not None
+                else None,
                 pending_balance_cents=_parse_int(
                     item.get("pending_balance_cents"),
-                    "queued_credit_card_payments[].pending_balance_cents",
+                    "account_transfers[].pending_balance_cents",
                     default=0,
-                ),
-                payment_cents=_parse_int(
-                    item.get("payment_cents"),
-                    "queued_credit_card_payments[].payment_cents",
-                ),
+                )
+                if item.get("pending_balance_cents") is not None
+                else None,
+                transfer_kind=transfer_kind,
                 queued_at=_parse_optional_datetime(
                     item.get("queued_at"),
-                    "queued_credit_card_payments[].queued_at",
+                    "account_transfers[].queued_at",
                 )
                 or datetime.now(tz=timezone.utc),
                 effective_at=_parse_optional_datetime(
                     item.get("effective_at"),
-                    "queued_credit_card_payments[].effective_at",
+                    "account_transfers[].effective_at",
                 )
                 or datetime.now(tz=timezone.utc),
                 applied_at=_parse_optional_datetime(
                     item.get("applied_at"),
-                    "queued_credit_card_payments[].applied_at",
+                    "account_transfers[].applied_at",
                 ),
             )
         )
-        imported_queued_credit_card_payments += 1
+        imported_account_transfers += 1
 
     return ImportResponseSchema(
         schema_version=PAYLOAD_SCHEMA_VERSION,
@@ -2733,7 +2775,7 @@ def _replace_user_data(
         imported_expenses=imported_expenses,
         imported_history_points=imported_history_points,
         imported_net_worth_snapshots=imported_snapshots,
-        imported_queued_credit_card_payments=imported_queued_credit_card_payments,
+        imported_account_transfers=imported_account_transfers,
     )
 
 

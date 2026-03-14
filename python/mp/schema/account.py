@@ -248,6 +248,42 @@ class QueuedCreditCardPayment(Base):
     )
 
 
+class AccountTransfer(Base):
+    __tablename__ = "account_transfers"
+
+    id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    source_account_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    destination_account_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pending_balance_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    transfer_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'standard'")
+    )
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    applied_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class NetWorthDailySnapshot(Base):
     __tablename__ = "net_worth_daily_snapshot"
     __table_args__ = (
@@ -396,6 +432,32 @@ class QueueCreditCardPaymentCreateSchema(BaseModel):
     payment_cents: Optional[int] = None
     source_account_id: UUID
     rewards_balance_cents: Optional[int] = None
+
+
+class AccountTransferSchema(BaseModel):
+    id: UUID
+    source_account_id: UUID
+    source_account_name: str
+    destination_account_id: UUID
+    destination_account_name: str
+    amount_cents: int
+    transfer_kind: Literal["standard", "credit_card_payment"] = "standard"
+    queued_at: datetime
+    effective_at: datetime
+
+
+class AccountTransferCreateSchema(BaseModel):
+    source_account_id: UUID
+    destination_account_id: UUID
+    amount_cents: int
+    effective_at: Optional[datetime] = None
+
+
+class AccountTransferUpdateSchema(BaseModel):
+    source_account_id: Optional[UUID] = None
+    destination_account_id: Optional[UUID] = None
+    amount_cents: Optional[int] = None
+    effective_at: Optional[datetime] = None
 
 
 class AccountRankUpdateSchema(BaseModel):

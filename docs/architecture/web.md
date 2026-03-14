@@ -17,6 +17,7 @@
 Dashboard top-level tabs are now:
 - `Overview` (widgets/forecast/trend)
 - `Accounts`
+- `Transfers`
 - `Contracts`
 - `Expenses`
 - `Calendar`
@@ -195,8 +196,10 @@ In `AccountsPage.vue`:
     - `Amount Paying = 0` is valid and means “sync card balance only, no queued payment”
     - tile/table balances immediately render as if the queued payment has already reduced both the card and the funding account
     - while a queued payment is active, the modal reopens with the queued values prefilled so the user can edit them
-    - editing an active queued payment uses `PUT /accounts/{id}/queue-credit-card-payment` and restarts the 24-hour settlement timer
+    - editing an active queued payment uses `PUT /accounts/{id}/queue-credit-card-payment` and reschedules settlement to the next business day at noon
     - setting `Amount Paying` to `0` while editing an active queued payment cancels it
+  - every account update modal also shows a bottom `Transfers` section listing pending transfers where that account is either the source or destination
+  - that section supports transfer CRUD in-place for supported direct-balance account types and uses short descriptions like transfer amount + counterpart account
 - History flow:
   - opens history modal from tile menu
   - fetches `GET /accounts/{id}/history`
@@ -216,6 +219,12 @@ In `AccountsPage.vue`:
   - all account types expose an editable `url` field near the bottom of the modal
 - account tiles show a hyperlink icon when URL is present; opening uses a new browser tab
 - when masked mode is active, account-number displays (tile/table last-4 and related derived strings) must use masked values instead of the real account number
+
+Transfers tab UX:
+- `Transfers` is a dedicated dashboard tab for pending transfers.
+- It lists queued credit-card payments and manual transfers together with source, destination, amount, completion timestamp, and transfer type.
+- Transfer create/edit uses `/transfers` CRUD; credit-card payments stay special on the account update modal but can still be edited or deleted from the Transfers tab/account transfer section.
+- Manual transfer create/edit defaults the completion timestamp server-side to next business day at noon when left blank.
 
 ## Ranking / Reorder UX
 
