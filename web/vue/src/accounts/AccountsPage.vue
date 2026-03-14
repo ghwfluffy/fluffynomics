@@ -147,14 +147,24 @@
           </div>
           <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
         </article>
-        <article class="widget-slot widget-card">
-          <div class="widget-card-head">
-            <h3>Portfolio Mix</h3>
-            <span class="widget-card-hint">Hover slices for type and percent</span>
-          </div>
-          <div class="widget-donut-row">
-            <VChart class="widget-donut-echart" :option="mixChartOption" autoresize />
-          </div>
+        <article class="widget-slot widget-card widget-card--split">
+          <section class="widget-split-panel">
+            <div class="widget-card-head">
+              <h3>Portfolio Mix</h3>
+            </div>
+            <div class="widget-donut-row">
+              <VChart class="widget-donut-echart" :option="mixChartOption" autoresize />
+            </div>
+          </section>
+          <section class="widget-split-panel">
+            <div class="widget-card-head">
+              <h3>Expense Mix</h3>
+            </div>
+            <div v-if="expenseMixSlices.length" class="widget-donut-row">
+              <VChart class="widget-donut-echart" :option="expenseMixChartOption" autoresize />
+            </div>
+            <div v-else class="widget-empty-state">No recurring outflows yet.</div>
+          </section>
         </article>
         <article class="widget-slot widget-card">
           <h3>Net-Worth Projection</h3>
@@ -1307,6 +1317,19 @@ interface DailyDriverItem {
   dailyRateCents: number
 }
 
+interface DonutSlice {
+  key: string
+  label: string
+  value_cents: number
+  percent: number
+  color: string
+  items?: Array<{
+    key: string
+    label: string
+    value_cents: number
+  }>
+}
+
 type RateRow = {
   key: string
   label: string
@@ -1877,10 +1900,95 @@ const mixSlices = computed(() => {
     }))
 })
 
+const expenseMixPalette = ['#9a3412', '#c2410c', '#ea580c', '#f59e0b', '#dc2626', '#b91c1c', '#fb7185', '#7c2d12']
+
+const expenseMixSlices = computed<DonutSlice[]>(() => {
+  const totals = new Map<string, number>()
+  const itemsByCategory = new Map<string, Array<{ key: string; label: string; value_cents: number }>>()
+  const referenceTime = widgetAnchorDate.value
+
+  const addCategoryItem = (category: string, item: { key: string; label: string; value_cents: number }) => {
+    totals.set(category, (totals.get(category) || 0) + item.value_cents)
+    const existing = itemsByCategory.get(category) || []
+    existing.push(item)
+    itemsByCategory.set(category, existing)
+  }
+
+  for (const contract of calendarContracts.value) {
+    if (!contractIsActiveForSummary(contract, referenceTime)) {
+      continue
+    }
+    if (contract.type === 'income' || contract.type === 'transfer') {
+      continue
+    }
+    const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
+    const annualOutflowCents = Math.abs(intOrZero(contract.amount_cents)) * annualOccurrences
+    if (!annualOutflowCents) {
+      continue
+    }
+    const category = (contract.category || 'Financial').trim() || 'Financial'
+    addCategoryItem(category, {
+      key: `contract:${contract.id}`,
+      label: contract.name,
+      value_cents: annualOutflowCents,
+    })
+  }
+
+  for (const expense of calendarExpenses.value) {
+    if (!expenseIsActiveForSummary(expense)) {
+      continue
+    }
+    const annualOccurrences = annualOccurrencesFromRecurring(expense.general_frequency)
+    const annualOutflowCents = Math.abs(intOrZero(expense.estimated_amount_cents)) * annualOccurrences
+    if (!annualOutflowCents) {
+      continue
+    }
+    const category = (expense.category || 'Other').trim() || 'Other'
+    addCategoryItem(category, {
+      key: `expense:${expense.id}`,
+      label: expense.name,
+      value_cents: annualOutflowCents,
+    })
+  }
+
+  for (const account of accounts.value) {
+    if (!feeIsActiveForSummary(account)) {
+      continue
+    }
+    const annualOccurrences = annualOccurrencesFromRecurring(account.fee_period)
+    const annualOutflowCents = Math.abs(intOrZero(account.fee_amount_cents)) * annualOccurrences
+    if (!annualOutflowCents) {
+      continue
+    }
+    addCategoryItem('Account fees', {
+      key: `fee:${account.id}`,
+      label: account.name,
+      value_cents: annualOutflowCents,
+    })
+  }
+
+  const nonZeroEntries = Array.from(totals.entries()).filter(([, value]) => value > 0)
+  const total = nonZeroEntries.reduce((sum, [, value]) => sum + value, 0) || 1
+  return nonZeroEntries
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, value], index) => ({
+      key: label,
+      label,
+      value_cents: value,
+      percent: Math.round((value / total) * 100),
+      color: expenseMixPalette[index % expenseMixPalette.length],
+      items: [...(itemsByCategory.get(label) || [])].sort((a, b) =>
+        b.value_cents === a.value_cents ? a.label.localeCompare(b.label) : b.value_cents - a.value_cents,
+      ),
+    }))
+})
+
 const mixChartOption = computed(() => ({
   color: mixSlices.value.map((item) => item.color),
   tooltip: {
     trigger: 'item',
+    confine: true,
+    position: clampedChartTooltipPosition,
     formatter: (params: { name: string; value: number; percent: number }) =>
       `${params.name}<br/>Value: ${cents(params.value)} (${params.percent}%)`,
   },
@@ -1898,6 +2006,88 @@ const mixChartOption = computed(() => ({
         borderWidth: 2,
       },
       data: mixSlices.value.map((slice) => ({
+        name: slice.label,
+        value: slice.value_cents,
+      })),
+    },
+  ],
+}))
+
+const escapeTooltipHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+
+const clampedChartTooltipPosition = (
+  point: readonly number[],
+  _params: unknown,
+  _dom: unknown,
+  _rect: unknown,
+  size: { contentSize: readonly number[]; viewSize: readonly number[] },
+) => {
+  const gutter = 10
+  const offset = 14
+  const tooltipWidth = size.contentSize?.[0] || 0
+  const tooltipHeight = size.contentSize?.[1] || 0
+  const viewWidth = size.viewSize?.[0] || 0
+  const viewHeight = size.viewSize?.[1] || 0
+  const compactViewport = typeof window !== 'undefined' && window.innerWidth <= 768
+
+  let x = compactViewport ? point[0] + offset : point[0] - tooltipWidth / 2
+  let y = compactViewport ? point[1] + offset : point[1] - tooltipHeight - offset
+
+  if (!compactViewport && y < gutter) {
+    y = point[1] + offset
+  }
+  if (x + tooltipWidth > viewWidth - gutter) {
+    x = viewWidth - tooltipWidth - gutter
+  }
+  if (x < gutter) {
+    x = gutter
+  }
+  if (y < gutter) {
+    y = gutter
+  }
+  if (y + tooltipHeight > viewHeight - gutter) {
+    y = Math.max(gutter, viewHeight - tooltipHeight - gutter)
+  }
+
+  return [x, y]
+}
+
+const expenseMixChartOption = computed(() => ({
+  color: expenseMixSlices.value.map((item) => item.color),
+  tooltip: {
+    trigger: 'item',
+    confine: true,
+    position: clampedChartTooltipPosition,
+    formatter: (params: { name: string; value: number; percent: number }) => {
+      const slice = expenseMixSlices.value.find((item) => item.label === params.name)
+      const detailRows = (slice?.items || [])
+        .map((item) => `${escapeTooltipHtml(item.label)}: ${cents(item.value_cents)}/year`)
+        .join('<br/>')
+      return detailRows
+        ? `${escapeTooltipHtml(params.name)}<br/>Annualized: ${cents(params.value)} (${params.percent}%)<br/><br/>${detailRows}`
+        : `${escapeTooltipHtml(params.name)}<br/>Annualized: ${cents(params.value)} (${params.percent}%)`
+    },
+  },
+  legend: { show: false },
+  series: [
+    {
+      type: 'pie',
+      radius: ['52%', '74%'],
+      center: ['50%', '50%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      itemStyle: {
+        borderColor: '#ffffff',
+        borderWidth: 2,
+      },
+      data: expenseMixSlices.value.map((slice) => ({
         name: slice.label,
         value: slice.value_cents,
       })),
@@ -1930,6 +2120,8 @@ const trendChartOption = computed(() => {
     grid: { left: 78, right: 20, top: 14, bottom: 36 },
     tooltip: {
       trigger: 'axis',
+      confine: true,
+      position: clampedChartTooltipPosition,
       formatter: (params: Array<{ axisValue: string; data: number }>) => {
         const first = params?.[0]
         if (!first) {
@@ -1999,6 +2191,8 @@ const netWorthProjectionChartOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
+    confine: true,
+    position: clampedChartTooltipPosition,
     formatter: (params: Array<{ axisValue: string; value?: number | string | Array<number | string>; dataIndex?: number }>) => {
       const first = params?.[0]
       if (!first) {
@@ -4997,6 +5191,21 @@ watch(
   padding: 0.9rem;
 }
 
+.widget-card--split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.widget-split-panel {
+  min-width: 0;
+}
+
+.widget-split-panel + .widget-split-panel {
+  border-left: 1px solid var(--cds-border-subtle-01);
+  padding-left: 12px;
+}
+
 .widget-card h3 {
   margin: 0 0 0.5rem;
   font-size: 0.95rem;
@@ -5059,6 +5268,16 @@ watch(
 .widget-donut-echart {
   width: 100%;
   height: 146px;
+}
+
+.widget-empty-state {
+  min-height: 146px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--cds-text-secondary);
 }
 
 .widget-trend-head {
@@ -6086,6 +6305,17 @@ watch(
 
   .widget-card-hint {
     white-space: normal;
+  }
+
+  .widget-card--split {
+    grid-template-columns: 1fr;
+  }
+
+  .widget-split-panel + .widget-split-panel {
+    border-left: 0;
+    border-top: 1px solid var(--cds-border-subtle-01);
+    padding-left: 0;
+    padding-top: 12px;
   }
 
   .icon-grid-scroll {

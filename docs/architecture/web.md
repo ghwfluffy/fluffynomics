@@ -94,7 +94,13 @@ Trend widget behavior:
 - Endpoint returns daily snapshots; frontend should preserve daily points for normal recent-history ranges and only collapse to coarser monthly points once the history gets long enough to need bucketing.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
-- On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, followed by portfolio mix, last-30 change, and next-30 change.
+- On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, a split donut card second, then last-30 change and next-30 change.
+- The split donut card contains:
+  - `Portfolio Mix`, grouped by account type / rewards,
+  - `Expense Mix`, grouped by recurring outflow category using contract categories, expense categories, and a combined `Account fees` bucket.
+- `Expense Mix` should use the same active-item rules as the proration/projection widgets: exclude expired contracts, disabled expenses, and closed fee-bearing accounts.
+- Hovering an `Expense Mix` slice should show the category total plus the contributing contracts/expenses/fees within that category, ordered by annualized cost descending.
+- Overview ECharts tooltips should use clamped in-chart positioning so they do not overflow off the left edge on mobile or off the top edge on desktop.
 - Overview trend header shows only the prorated `Net Worth` value.
 - Hovering or focusing that net-worth value reveals a popover with `Current Net Worth`.
 - That popover should also show an itemized signed `/day` breakdown for the actual live proration inputs that move the net-worth value: recurring contracts, recurring expenses, and account fees.
