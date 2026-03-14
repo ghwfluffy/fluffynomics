@@ -1994,8 +1994,9 @@ const creditCardFundingAccountOptions = computed(() =>
       (account) =>
         account.id !== updatingAccount.value?.id &&
         !account.closed &&
-        !['credit_card', 'line_of_credit', 'loan', 'cash', 'crypto_wallet'].includes(account.type),
+        account.type === 'checking',
     )
+    .sort((a, b) => b.rank - a.rank)
     .map((account) => ({
       label: `${account.name} (${account.organization || 'Unknown'})`,
       value: account.id,
