@@ -348,7 +348,12 @@ const ordinal = (value: number) => {
   if (number >= 11 && number <= 13) {
     return `${number}th`
   }
-  const suffix = ['th', 'st', 'nd', 'rd'][Math.min(number % 10, 3)] || 'th'
+  const suffixByDigit: Record<number, string> = {
+    1: 'st',
+    2: 'nd',
+    3: 'rd',
+  }
+  const suffix = suffixByDigit[number % 10] || 'th'
   return `${number}${suffix}`
 }
 </script>

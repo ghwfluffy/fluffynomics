@@ -396,6 +396,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (event: 'update:viewMode', value: 'tiles' | 'icons' | 'table'): void
+  (event: 'changed'): void
 }>()
 
 const PRESET_CATEGORIES = ['Living', 'Entertainment', 'Health', 'Digital', 'Financial', 'Work', 'Family']
@@ -1121,6 +1122,10 @@ const loadIcons = async () => {
   iconChoices.value = await request.get<IconListItem[]>('/icons')
 }
 
+const notifyChanged = () => {
+  emit('changed')
+}
+
 const onContractTypePicked = (value: string) => {
   if (guardMaskedMode('create contracts')) {
     return
@@ -1218,6 +1223,7 @@ const submitContract = async () => {
   }
   closeContractDialog()
   await loadContracts()
+  notifyChanged()
 }
 
 const moveContractLeft = async (section: Section, index: number, event?: MouseEvent) => {
@@ -1318,6 +1324,7 @@ const submitUpdateDialog = async () => {
   })
   closeUpdateDialog()
   await loadContracts()
+  notifyChanged()
 }
 
 const openFromCalendar = async (contractId: string, action: 'edit' | 'update') => {
@@ -1355,6 +1362,7 @@ const confirmDeleteContract = async () => {
   await request.delete(`/contracts/${pendingDeleteContractId.value}`)
   closeDeleteContractDialog()
   await loadContracts()
+  notifyChanged()
 }
 
 const openIconUploadPicker = () => {

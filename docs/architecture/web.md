@@ -105,6 +105,7 @@ Trend widget behavior:
 - Early-payment proration rule: if a recurring contract is marked paid early for its upcoming scheduled occurrence, the next accrual cycle should begin immediately from that actual payment date rather than leaving a dead window until the old scheduled boundary.
 - Exclusion rule: expired contracts, closed fee-bearing accounts, and disabled expenses must be excluded from both the live proration math and the overview summaries/rate widgets that explain that math.
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
+- Contract and expense create/edit/update/delete actions must refresh the overview proration data immediately in-page; the user should not need a full page reload to see the net-worth summary and projected-flow widgets update.
 - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow from contracts + expenses + recurring account fees (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
@@ -281,6 +282,8 @@ Expenses support CRUD in `ExpensesTab.vue` with:
 - general frequency,
 - last expensed date,
 - next expensed date with static-vs-derived toggle.
+- expense icon uploads use `POST /icons` with multipart field name `file`, matching the shared account icon upload flow.
+- generated `Letters` and `Gravatar` expense icons should use the expense name as their seed; fall back to category only when name is blank.
 - `Update` menu action edits only operational fields: `enabled`, `last expensed date`, `next expensed date`.
 
 The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.

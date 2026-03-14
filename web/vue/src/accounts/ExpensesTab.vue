@@ -285,7 +285,10 @@ interface ExpenseSection {
 const props = withDefaults(defineProps<{ viewMode?: 'tiles' | 'icons' | 'table' }>(), {
   viewMode: 'icons',
 })
-const emit = defineEmits<{ (event: 'update:viewMode', value: 'tiles' | 'icons' | 'table'): void }>()
+const emit = defineEmits<{
+  (event: 'update:viewMode', value: 'tiles' | 'icons' | 'table'): void
+  (event: 'changed'): void
+}>()
 
 const viewMode = computed({
   get: () => props.viewMode,
@@ -560,9 +563,9 @@ const resolveIconUrl = (iconId?: string, iconType?: 'Letters' | 'Gravatar' | 'Ic
   return iconUrl(iconId)
 }
 
-const expenseIconUrl = (item: Expense) => resolveIconUrl(item.icon_id, item.icon_type, item.category || item.name)
+const expenseIconUrl = (item: Expense) => resolveIconUrl(item.icon_id, item.icon_type, item.name || item.category)
 const selectedFormIconUrl = computed(() =>
-  resolveIconUrl(form.value.icon_id || undefined, form.value.icon_type, form.value.category || form.value.name),
+  resolveIconUrl(form.value.icon_id || undefined, form.value.icon_type, form.value.name || form.value.category),
 )
 
 const resetForm = () => {
@@ -591,6 +594,10 @@ const loadAccounts = async () => {
 
 const loadIcons = async () => {
   iconChoices.value = await request.get<IconListItem[]>('/icons')
+}
+
+const notifyChanged = () => {
+  emit('changed')
 }
 
 const openCreate = () => {
@@ -671,11 +678,11 @@ const uploadExpenseIcon = async (event: Event) => {
     return
   }
   const body = new FormData()
-  body.append('icon', file)
-  const created = await request.post<{ icon_id: string }>('/icons', body)
+  body.append('file', file)
+  const created = await request.post<{ id: string; hash: string }>('/icons', body)
   await loadIcons()
   form.value.icon_type = 'Icon'
-  form.value.icon_id = created.icon_id
+  form.value.icon_id = created.id
   target.value = ''
 }
 
@@ -705,6 +712,7 @@ const saveExpense = async () => {
   }
   closeDialog()
   await loadExpenses()
+  notifyChanged()
 }
 
 const openDelete = (id: string) => {
@@ -755,6 +763,7 @@ const saveUpdate = async () => {
   })
   closeUpdateDialog()
   await loadExpenses()
+  notifyChanged()
 }
 
 const openFromCalendar = async (expenseId: string, action: 'edit' | 'update') => {
@@ -787,6 +796,7 @@ const confirmDelete = async () => {
   await request.delete(`/expenses/${deleteId.value}`)
   deleteId.value = null
   await loadExpenses()
+  notifyChanged()
 }
 
 const toggleMenu = (id: string) => {

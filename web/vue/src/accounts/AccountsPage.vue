@@ -1088,6 +1088,7 @@
       :accounts="accounts"
       :forecast-date="forecastDate"
       v-model:view-mode="dashboardViewMode"
+      @changed="refreshRecurringOverviewData"
     />
 
     <ExpensesTab
@@ -1097,6 +1098,7 @@
       role="tabpanel"
       aria-labelledby="tab-expenses"
       v-model:view-mode="dashboardViewMode"
+      @changed="refreshRecurringOverviewData"
     />
 
     <div v-if="calendarEventDialogOpen && selectedCalendarEvent" class="modal-backdrop">
@@ -3995,6 +3997,10 @@ const loadCalendarSources = async () => {
   ])
   calendarContracts.value = contracts
   calendarExpenses.value = expenses
+}
+
+const refreshRecurringOverviewData = async () => {
+  await loadCalendarSources()
 }
 
 const loadOrganizations = async () => {
