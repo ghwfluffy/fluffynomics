@@ -1,4 +1,5 @@
-from datetime import date, datetime, time, timedelta
+from calendar import monthrange
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -80,6 +81,7 @@ ACCOUNT_TYPES = {
 LEGACY_RECURRING_PERIODS = {"daily", "weekly", "biweekly", "monthly", "yearly"}
 LIABILITY_ACCOUNT_TYPES = {"credit_card", "line_of_credit", "loan"}
 TRANSFER_KINDS = {"standard", "credit_card_payment"}
+IMPLIED_INVESTMENT_APY = 0.055
 
 
 def _validate_account_type(account_type: str) -> None:
@@ -237,6 +239,155 @@ def _apply_balance_delta(item: AccountSchema, delta_cents: int) -> None:
         return
     current = getattr(item, field) or 0
     setattr(item, field, int(current) + int(delta_cents))
+
+
+def _account_yield_settings(
+    account_type: str,
+    *,
+    apy_bps: int | None = None,
+    compound_period: str | None = None,
+) -> tuple[float, str] | None:
+    if account_type == "savings":
+        annual_rate = max(0.0, float(int(apy_bps or 0)) / 10000.0)
+        if annual_rate <= 0:
+            return None
+        return annual_rate, (
+            "daily"
+            if str(compound_period or "").strip().lower() == "daily"
+            else "monthly"
+        )
+    if account_type in {"stocks_account", "investment_fund", "retirement"}:
+        return IMPLIED_INVESTMENT_APY, "monthly"
+    return None
+
+
+def _add_months_preserving_clock(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    last_day = (next_month - timedelta(days=1)).day
+    day = min(value.day, last_day)
+    return value.replace(year=year, month=month, day=day)
+
+
+def _compound_growth_factor(
+    start: datetime, end: datetime, annual_rate: float, compound_period: str
+) -> float:
+    if annual_rate <= 0 or end <= start:
+        return 1.0
+    if compound_period == "daily":
+        elapsed_days = (end - start).total_seconds() / (60 * 60 * 24)
+        return float((1 + annual_rate) ** (elapsed_days / 365.0))
+    monthly_rate = float((1 + annual_rate) ** (1 / 12.0) - 1)
+    factor = 1.0
+    cycle_start = start
+    cycle_end = _add_months_preserving_clock(cycle_start, 1)
+    guard = 0
+    while cycle_end <= end and guard < 600:
+        factor *= 1 + monthly_rate
+        cycle_start = cycle_end
+        cycle_end = _add_months_preserving_clock(cycle_start, 1)
+        guard += 1
+    remaining_span = (cycle_end - cycle_start).total_seconds()
+    if remaining_span > 0 and end > cycle_start:
+        fraction = max(
+            0.0,
+            min(1.0, (end - cycle_start).total_seconds() / remaining_span),
+        )
+        factor *= float((1 + monthly_rate) ** fraction)
+    return factor
+
+
+def _serialized_account_value_cents(account: AccountSchema) -> int:
+    if account.type == "stocks_account":
+        return int(
+            sum(
+                int(
+                    round(
+                        float(position.quantity or 0)
+                        * int(position.last_price_cents or 0)
+                    )
+                )
+                for position in account.stock_positions or []
+            )
+            + int(account.balance_cents or 0)
+        )
+    if account.type in {"crypto_wallet", "crypto_exchange"}:
+        total = int(
+            sum(
+                int(
+                    round(
+                        float(position.quantity or 0)
+                        * int(position.exchange_rate_cents or 0)
+                    )
+                )
+                for position in account.crypto_positions or []
+            )
+        )
+        if account.type == "crypto_exchange":
+            total += int(account.usd_balance_cents or 0)
+        return total
+    if account.type == "cash":
+        return int(
+            sum(
+                int(item.denomination_cents or 0) * int(item.quantity or 0)
+                for item in account.cash_bills or []
+            )
+        )
+    return int(account.balance_cents or 0)
+
+
+def _project_account_yield_delta_cents(
+    *,
+    principal_cents: int,
+    account_type: str,
+    apy_bps: int | None,
+    compound_period: str | None,
+    anchor: datetime | None,
+    target: datetime,
+) -> int:
+    settings = _account_yield_settings(
+        account_type, apy_bps=apy_bps, compound_period=compound_period
+    )
+    if settings is None or principal_cents <= 0 or anchor is None or target <= anchor:
+        return 0
+    annual_rate, effective_compound_period = settings
+    factor = _compound_growth_factor(
+        anchor, target, annual_rate, effective_compound_period
+    )
+    return int(round(principal_cents * (factor - 1.0)))
+
+
+def _naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _apply_projected_account_yield(
+    accounts: list[AccountSchema], as_of_date: date
+) -> list[AccountSchema]:
+    target_dt = datetime.combine(as_of_date, time.max)
+    for account in accounts:
+        anchor = account.last_update or account.created_at
+        if anchor is None:
+            continue
+        delta_cents = _project_account_yield_delta_cents(
+            principal_cents=max(0, _serialized_account_value_cents(account)),
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=_naive_utc(anchor),
+            target=target_dt,
+        )
+        _apply_balance_delta(account, delta_cents)
+    return accounts
 
 
 def _first_weekday_of_month(year: int, month: int, weekday: int) -> date:
@@ -693,6 +844,21 @@ def _forecast_net_worth_points(
 ) -> list[NetWorthForecastPointSchema]:
     today = date.today()
     current = _compute_user_net_worth_cents(db, user_id)
+    now = _naive_utc(datetime.now(timezone.utc)) or datetime.utcnow()
+    user_accounts = (
+        db.query(Account)
+        .filter(Account.user_id == user_id, Account.closed.is_(False))
+        .all()
+    )
+    for account in user_accounts:
+        current += _project_account_yield_delta_cents(
+            principal_cents=max(0, _compute_account_value_cents(db, account)),
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=_naive_utc(account.last_update or account.created_at),
+            target=now,
+        )
     if through_date <= today:
         return [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
 
@@ -777,6 +943,62 @@ def _forecast_net_worth_points(
         deltas_by_day[expense_posting.effective_date] = (
             deltas_by_day.get(expense_posting.effective_date, 0) + net_delta
         )
+
+    for account in user_accounts:
+        principal_cents = max(0, _compute_account_value_cents(db, account))
+        anchor = account.last_update or account.created_at
+        if principal_cents <= 0 or anchor is None:
+            continue
+        baseline_delta = _project_account_yield_delta_cents(
+            principal_cents=principal_cents,
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=_naive_utc(anchor),
+            target=now,
+        )
+        projected_delta = _project_account_yield_delta_cents(
+            principal_cents=principal_cents,
+            account_type=account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+            anchor=_naive_utc(anchor),
+            target=datetime.combine(through_date, time.max),
+        )
+        if projected_delta <= baseline_delta:
+            continue
+        settings = _account_yield_settings(
+            account.type,
+            apy_bps=account.apy_bps,
+            compound_period=account.compound_period,
+        )
+        if settings is None:
+            continue
+        _, effective_compound_period = settings
+        cursor_day = today + timedelta(days=1)
+        while cursor_day <= through_date:
+            should_emit = (
+                effective_compound_period == "daily"
+                or cursor_day == through_date
+                or cursor_day.day
+                == min(anchor.day, monthrange(cursor_day.year, cursor_day.month)[1])
+            )
+            if should_emit:
+                cumulative_delta = _project_account_yield_delta_cents(
+                    principal_cents=principal_cents,
+                    account_type=account.type,
+                    apy_bps=account.apy_bps,
+                    compound_period=account.compound_period,
+                    anchor=_naive_utc(anchor),
+                    target=datetime.combine(cursor_day, time.max),
+                )
+                incremental_delta = cumulative_delta - baseline_delta
+                if incremental_delta > 0:
+                    deltas_by_day[cursor_day] = (
+                        deltas_by_day.get(cursor_day, 0) + incremental_delta
+                    )
+                    baseline_delta = cumulative_delta
+            cursor_day += timedelta(days=1)
 
     points = [NetWorthForecastPointSchema(snapshot_date=today, value_cents=current)]
     running = current
@@ -1041,7 +1263,12 @@ def get_accounts(
             if not delta:
                 continue
             _apply_balance_delta(item, int(delta))
-    return _apply_active_account_transfers(db, current_user.id, serialized, as_of_date)
+    projected = _apply_active_account_transfers(
+        db, current_user.id, serialized, as_of_date
+    )
+    if as_of_date is not None and as_of_date > date.today():
+        projected = _apply_projected_account_yield(projected, as_of_date)
+    return projected
 
 
 @router.get("/accounts/{account_id}", response_model=AccountSchema)
@@ -1073,9 +1300,12 @@ def get_account(
         ) + expense_simulation.account_deltas.get(serialized.id, 0)
         if delta:
             _apply_balance_delta(serialized, int(delta))
-    return _apply_active_account_transfers(
+    projected = _apply_active_account_transfers(
         db, current_user.id, [serialized], as_of_date
-    )[0]
+    )
+    if as_of_date is not None and as_of_date > date.today():
+        projected = _apply_projected_account_yield(projected, as_of_date)
+    return projected[0]
 
 
 @router.get(

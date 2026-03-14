@@ -1225,6 +1225,8 @@ interface AccountPayload {
   rewards_balance_cents?: number
   fee_amount_cents?: number
   fee_period?: string
+  apy_bps?: number
+  compound_period?: string
   usd_balance_cents?: number
   queued_credit_card_payment?: QueuedCreditCardPaymentPayload | null
   stock_positions?: Array<{ stock_id?: string; ticker?: string; quantity: string; last_price_cents?: number }>
@@ -1840,6 +1842,10 @@ const feeProratedAdjustmentCents = computed(() => {
   const referenceTime = proratedReferenceTime.value
   return accounts.value.reduce((sum, account) => sum + feeProratedContributionCents(account, referenceTime), 0)
 })
+const accountYieldProratedAdjustmentCents = computed(() => {
+  const referenceTime = proratedReferenceTime.value
+  return accounts.value.reduce((sum, account) => sum + accountYieldProratedContributionCents(account, referenceTime), 0)
+})
 const automaticContractProratedAdjustmentCents = computed(() => {
   const referenceTime = proratedReferenceTime.value
   return calendarContracts.value.reduce((sum, contract) => {
@@ -1856,7 +1862,8 @@ const currentNetWorthCents = computed(
     baseNetWorthCents.value +
     manualContractProratedAdjustmentCents.value +
     expenseProratedAdjustmentCents.value +
-    feeProratedAdjustmentCents.value
+    feeProratedAdjustmentCents.value +
+    accountYieldProratedAdjustmentCents.value
       ),
     ),
 )
@@ -2698,6 +2705,7 @@ const intOrZero = (value: unknown) => {
 
 const accountRewardsCents = (account: AccountPayload) => Math.max(0, account.rewards_balance_cents || 0)
 const liabilityAccountTypes = new Set<AccountType>(['credit_card', 'line_of_credit', 'loan'])
+const IMPLIED_INVESTMENT_APY = 0.055
 
 const incomingTransferDeltaCents = (account: AccountPayload, amountCents: number) =>
   liabilityAccountTypes.has(account.type) ? -amountCents : amountCents
@@ -2788,6 +2796,100 @@ const tableBalanceCents = (account: AccountPayload) => {
     return (account.cash_bills || []).reduce((sum, bill) => sum + bill.denomination_cents * bill.quantity, 0) + accountRewardsCents(account)
   }
   return (account.balance_cents || 0) + accountRewardsCents(account)
+}
+
+const addMonthsPreservingClock = (value: Date, months: number) => {
+  const next = new Date(value)
+  next.setMonth(next.getMonth() + months)
+  return next
+}
+
+const accountYieldSettings = (
+  account: AccountPayload,
+): { annualRate: number; compoundPeriod: 'daily' | 'monthly' } | null => {
+  if (account.closed) {
+    return null
+  }
+  if (account.type === 'savings') {
+    const annualRate = Math.max(0, Number(account.apy_bps || 0) / 10000)
+    if (!annualRate) {
+      return null
+    }
+    return {
+      annualRate,
+      compoundPeriod: account.compound_period === 'daily' ? 'daily' : 'monthly',
+    }
+  }
+  if (['stocks_account', 'investment_fund', 'retirement'].includes(account.type)) {
+    return {
+      annualRate: IMPLIED_INVESTMENT_APY,
+      compoundPeriod: 'monthly',
+    }
+  }
+  return null
+}
+
+const accountYieldPrincipalCents = (account: AccountPayload) => {
+  const principal = tableBalanceCents(account)
+  return principal > 0 ? principal : 0
+}
+
+const compoundGrowthFactor = (start: Date, end: Date, annualRate: number, compoundPeriod: 'daily' | 'monthly') => {
+  if (!(annualRate > 0) || end <= start) {
+    return 1
+  }
+  if (compoundPeriod === 'daily') {
+    const elapsedDays = (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+    return Math.pow(1 + annualRate, elapsedDays / 365)
+  }
+  const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1
+  let factor = 1
+  let cycleStart = new Date(start)
+  let cycleEnd = addMonthsPreservingClock(cycleStart, 1)
+  let guard = 0
+  while (cycleEnd <= end && guard < 600) {
+    factor *= 1 + monthlyRate
+    cycleStart = cycleEnd
+    cycleEnd = addMonthsPreservingClock(cycleStart, 1)
+    guard += 1
+  }
+  const remainingSpan = cycleEnd.getTime() - cycleStart.getTime()
+  if (remainingSpan > 0 && end > cycleStart) {
+    const fraction = Math.max(0, Math.min(1, (end.getTime() - cycleStart.getTime()) / remainingSpan))
+    factor *= Math.pow(1 + monthlyRate, fraction)
+  }
+  return factor
+}
+
+const accountYieldProratedContributionCents = (account: AccountPayload, referenceTime: Date) => {
+  const settings = accountYieldSettings(account)
+  const principalCents = accountYieldPrincipalCents(account)
+  if (!settings || principalCents <= 0 || !account.last_update) {
+    return 0
+  }
+  const anchor = new Date(account.last_update)
+  if (Number.isNaN(anchor.getTime()) || referenceTime <= anchor) {
+    return 0
+  }
+  return principalCents * (compoundGrowthFactor(anchor, referenceTime, settings.annualRate, settings.compoundPeriod) - 1)
+}
+
+const accountYieldDailyRateCents = (account: AccountPayload) => {
+  const settings = accountYieldSettings(account)
+  const principalCents = accountYieldPrincipalCents(account)
+  if (!settings || principalCents <= 0) {
+    return 0
+  }
+  return principalCents * (Math.pow(1 + settings.annualRate, 1 / 365) - 1)
+}
+
+const accountYieldAnnualContributionCents = (account: AccountPayload) => {
+  const settings = accountYieldSettings(account)
+  const principalCents = accountYieldPrincipalCents(account)
+  if (!settings || principalCents <= 0) {
+    return 0
+  }
+  return Math.round(principalCents * settings.annualRate)
 }
 
 const localIsoDate = (value: Date) => {
@@ -3080,7 +3182,8 @@ const loadWidgets = async () => {
         }
         const annualOccurrences = annualOccurrencesFromRecurring(account.fee_period)
         return sum + feeAmountCents * annualOccurrences
-      }, 0)
+      }, 0) +
+      accounts.value.reduce((sum, account) => sum + accountYieldAnnualContributionCents(account), 0)
     projectedNetWorthDailyRateCents.value = Math.round(projectedAnnualCents / 365)
 
     const sortedHistory = [...netWorthHistory]
@@ -4061,7 +4164,21 @@ const currentNetWorthDailyDriverItems = computed<DailyDriverItem[]>(() => {
     })
     .filter((item): item is DailyDriverItem => item !== null)
 
-  return [...contractItems, ...expenseItems, ...feeItems].sort((a, b) => {
+  const yieldItems = accounts.value
+    .map((account) => {
+      const dailyRateCents = accountYieldDailyRateCents(account)
+      if (!dailyRateCents) {
+        return null
+      }
+      return {
+        key: `yield:${account.id}`,
+        label: `Yield: ${account.name}`,
+        dailyRateCents,
+      }
+    })
+    .filter((item): item is DailyDriverItem => item !== null)
+
+  return [...contractItems, ...expenseItems, ...feeItems, ...yieldItems].sort((a, b) => {
     const magnitudeDiff = Math.abs(b.dailyRateCents) - Math.abs(a.dailyRateCents)
     if (magnitudeDiff !== 0) {
       return magnitudeDiff

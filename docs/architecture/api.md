@@ -84,12 +84,14 @@ Defined in `python/mp/api/accounts.py`.
   - returns forecast net-worth datapoints between today and `through_date`
   - includes intermediate contract-effective dates (not only final target date)
   - liability account types are signed negative in the net-worth projection
+  - also includes projected positive yield from savings APY and the implicit 5.5% monthly-compounded yield used for `stocks_account`, `investment_fund`, and `retirement`
 - `POST /accounts`
 - `PUT /accounts/{account_id}`
 - `PUT /accounts/{account_id}/value`
   - dedicated “value update” endpoint used by dashboard Update modal
   - updates balance/position values only
   - `investment_fund` accounts are simple balance-based investment assets; they use `balance_cents` and do not carry per-holding stock positions
+  - savings APY (`apy_bps` + `compound_period`) participates in forecast/proration calculations
   - for `line_of_credit`/`credit_card`/`loan`, can also set `last_payment_date`
   - `credit_card` accounts with an active queued payment reject direct `balance_cents` writes until the queued payment settles
   - for `cash` accounts, accepts `cash_bills` quantities and balance is derived from denominations

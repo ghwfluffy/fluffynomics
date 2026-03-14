@@ -70,6 +70,8 @@ Account timestamp semantics are intentionally split:
   - for `Letters`/`Gravatar`, `accounts.icon_id` is expected to be null and icon bytes are generated on demand
 - `accounts.type` includes `investment_fund` for pooled/balance-only investment platforms that should not store rows in `account_stock_positions`.
 - migration `0038_accounts_investment_fund.sql` upgrades existing Betterment/Acorns `stocks_account` rows to `investment_fund`, preserves their total value in `balance_cents`, and clears obsolete stock-position rows.
+- `accounts.apy_bps` / `accounts.compound_period` are used for savings-account yield in proration/forecast calculations.
+- `stocks_account`, `investment_fund`, and `retirement` do not persist a user-editable APY, but product logic applies an implicit 5.5% monthly-compounded yield in overview/forecast calculations.
 - `accounts.last_payment_date` stores the most recently recorded payment date for payable accounts (`line_of_credit`, `credit_card`, `loan`).
 - `account_transfers` stores pending account-to-account movement, including queued credit-card payments:
   - `source_account_id`

@@ -103,9 +103,12 @@ Trend widget behavior:
 - Overview ECharts tooltips should use clamped in-chart positioning so they do not overflow off the left edge on mobile or off the top edge on desktop.
 - Overview trend header shows only the prorated `Net Worth` value.
 - Hovering or focusing that net-worth value reveals a popover with `Current Net Worth`.
-- That popover should also show an itemized signed `/day` breakdown for the actual live proration inputs that move the net-worth value: recurring contracts, recurring expenses, and account fees.
+- That popover should also show an itemized signed `/day` breakdown for the actual live proration inputs that move the net-worth value: recurring contracts, recurring expenses, account fees, and account yield.
 - `Current Net Worth` starts from account balances and includes in-progress accrual for non-automatic recurring contracts plus recurring expenses over their current cycles.
 - `Current Net Worth` also includes in-progress recurring account-fee accrual over the current fee cycle.
+- `Current Net Worth` also includes accrued account yield since `last_update`:
+  - savings accounts use their saved `apy_bps` + `compound_period`,
+  - `stocks_account`, `investment_fund`, and `retirement` use an implicit 5.5% annual yield with monthly compounding.
 - Displayed `Net Worth` adds automatic recurring contract accrual on top of that current-net-worth baseline.
 - Proration smoothing rule: recurring contract/expense/fee accrual should be summed in fractional cents first and rounded once at the final displayed total, rather than rounding each line item independently.
 - Early-payment proration rule: if a recurring contract is marked paid early for its upcoming scheduled occurrence, the next accrual cycle should begin immediately from that actual payment date rather than leaving a dead window until the old scheduled boundary.
@@ -113,7 +116,7 @@ Trend widget behavior:
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
 - Contract and expense create/edit/update/delete actions must refresh the overview proration data immediately in-page; the user should not need a full page reload to see the net-worth summary and projected-flow widgets update.
 - Overview also includes derived rate widgets under the trend chart:
-  - projected net-worth flow from contracts + expenses + recurring account fees (`per year/month/week/day`, dollar-rounded),
+  - projected net-worth flow from contracts + expenses + recurring account fees + account yield (`per year/month/week/day`, dollar-rounded),
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
   - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
   - a net-worth projection bar chart for the anchor month/year plus the calculated `+1 year`, `+5 year`, and `+10 year` month/year targets.
