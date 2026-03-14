@@ -358,6 +358,25 @@ def _apply_transfer_delta_db(account: Account, delta_cents: int) -> bool:
     return True
 
 
+def _apply_destination_transfer_delta(
+    db: Session,
+    destination_account: Account,
+    amount_cents: int,
+    recorded_at: datetime,
+    *,
+    reverse: bool = False,
+) -> bool:
+    delta_cents = _incoming_transfer_delta(destination_account.type, amount_cents)
+    if reverse:
+        delta_cents *= -1
+    applied = _apply_transfer_delta_db(destination_account, delta_cents)
+    if not applied:
+        return False
+    destination_account.last_update = recorded_at
+    _record_account_value_history(db, destination_account)
+    return True
+
+
 def _build_transfer_schema(
     transfer: AccountTransfer,
     source_account_name: str,
@@ -376,6 +395,7 @@ def _build_transfer_schema(
         destination_account_name=destination_account_name,
         amount_cents=int(transfer.amount_cents or 0),
         transfer_kind=kind,  # type: ignore[arg-type]
+        instant_deposit=bool(transfer.instant_deposit),
         queued_at=transfer.queued_at,
         effective_at=transfer.effective_at,
     )
@@ -583,19 +603,22 @@ def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
             source_account,
             _outgoing_transfer_delta(source_account.type, amount),
         )
-        destination_applied = _apply_transfer_delta_db(
-            destination_account,
-            _incoming_transfer_delta(destination_account.type, amount),
-        )
+        destination_applied = True
+        if not bool(transfer.instant_deposit):
+            destination_applied = _apply_transfer_delta_db(
+                destination_account,
+                _incoming_transfer_delta(destination_account.type, amount),
+            )
         if not source_applied or not destination_applied:
             transfer.applied_at = now
             changed = True
             continue
-        destination_account.last_update = now
         source_account.last_update = now
         transfer.applied_at = now
         _record_account_value_history(db, source_account)
-        _record_account_value_history(db, destination_account)
+        if not bool(transfer.instant_deposit):
+            destination_account.last_update = now
+            _record_account_value_history(db, destination_account)
         changed = True
     return changed
 
@@ -615,12 +638,6 @@ def _apply_active_account_transfers(
         .order_by(AccountTransfer.queued_at.asc())
         .all()
     )
-    if as_of_date is not None:
-        transfers = [
-            transfer
-            for transfer in transfers
-            if transfer.queued_at.date() <= as_of_date
-        ]
     if not transfers:
         return accounts
 
@@ -641,19 +658,27 @@ def _apply_active_account_transfers(
         amount = int(transfer.amount_cents or 0)
         if amount <= 0:
             continue
+        queued_for_view = as_of_date is None or transfer.queued_at.date() <= as_of_date
         source_account = accounts_by_id.get(transfer.source_account_id)
-        if source_account is not None:
+        if source_account is not None and queued_for_view:
             _apply_balance_delta(
                 source_account,
                 _outgoing_transfer_delta(source_account.type, amount),
             )
         destination_account = accounts_by_id.get(transfer.destination_account_id)
         if destination_account is not None:
-            _apply_balance_delta(
-                destination_account,
-                _incoming_transfer_delta(destination_account.type, amount),
-            )
-            if transfer.transfer_kind == "credit_card_payment":
+            if bool(transfer.instant_deposit):
+                if as_of_date is not None and not queued_for_view:
+                    _apply_balance_delta(
+                        destination_account,
+                        -_incoming_transfer_delta(destination_account.type, amount),
+                    )
+            elif queued_for_view:
+                _apply_balance_delta(
+                    destination_account,
+                    _incoming_transfer_delta(destination_account.type, amount),
+                )
+            if transfer.transfer_kind == "credit_card_payment" and queued_for_view:
                 destination_account.queued_credit_card_payment = (
                     _build_queued_payment_schema(
                         transfer,
@@ -2015,6 +2040,7 @@ def queue_credit_card_payment(
             current_balance_cents=current_balance_cents,
             pending_balance_cents=pending_balance_cents,
             transfer_kind="credit_card_payment",
+            instant_deposit=False,
             queued_at=queued_at,
             effective_at=effective_at,
         )
@@ -2098,6 +2124,7 @@ def update_queued_credit_card_payment(
     active_existing.pending_balance_cents = pending_balance_cents
     active_existing.queued_at = now
     active_existing.effective_at = _next_business_day_noon(now)
+    active_existing.instant_deposit = False
     _record_account_value_history(db, credit_card)
     db.commit()
     db.refresh(credit_card)
@@ -2168,10 +2195,18 @@ def create_account_transfer(
         destination_account_id=destination_account.id,
         amount_cents=int(payload.amount_cents),
         transfer_kind="standard",
+        instant_deposit=bool(payload.instant_deposit),
         queued_at=queued_at,
         effective_at=payload.effective_at or _next_business_day_noon(queued_at),
     )
     db.add(transfer)
+    if bool(payload.instant_deposit):
+        _apply_destination_transfer_delta(
+            db,
+            destination_account,
+            int(payload.amount_cents),
+            queued_at,
+        )
     db.commit()
     db.refresh(transfer)
     return _build_transfer_schema(
@@ -2199,6 +2234,30 @@ def update_account_transfer(
     )
     if transfer is None:
         raise HTTPException(status_code=404, detail="Transfer not found")
+    if transfer.transfer_kind == "credit_card_payment" and bool(
+        payload.instant_deposit
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="instant_deposit is only supported for standard transfers",
+        )
+    if bool(transfer.instant_deposit):
+        existing_destination = (
+            db.query(Account)
+            .filter(
+                Account.id == transfer.destination_account_id,
+                Account.user_id == current_user.id,
+            )
+            .first()
+        )
+        if existing_destination is not None:
+            _apply_destination_transfer_delta(
+                db,
+                existing_destination,
+                int(transfer.amount_cents or 0),
+                datetime.utcnow(),
+                reverse=True,
+            )
     next_source_id = payload.source_account_id or transfer.source_account_id
     next_destination_id = transfer.destination_account_id
     if (
@@ -2225,8 +2284,19 @@ def update_account_transfer(
     transfer.source_account_id = source_account.id
     transfer.destination_account_id = destination_account.id
     transfer.amount_cents = amount_cents
+    if transfer.transfer_kind == "standard" and payload.instant_deposit is not None:
+        transfer.instant_deposit = bool(payload.instant_deposit)
+    elif transfer.transfer_kind == "credit_card_payment":
+        transfer.instant_deposit = False
     if payload.effective_at is not None:
         transfer.effective_at = payload.effective_at
+    if bool(transfer.instant_deposit):
+        _apply_destination_transfer_delta(
+            db,
+            destination_account,
+            amount_cents,
+            datetime.utcnow(),
+        )
     db.commit()
     db.refresh(transfer)
     return _build_transfer_schema(
@@ -2253,6 +2323,23 @@ def delete_account_transfer(
     )
     if transfer is None:
         raise HTTPException(status_code=404, detail="Transfer not found")
+    if bool(transfer.instant_deposit):
+        destination_account = (
+            db.query(Account)
+            .filter(
+                Account.id == transfer.destination_account_id,
+                Account.user_id == current_user.id,
+            )
+            .first()
+        )
+        if destination_account is not None:
+            _apply_destination_transfer_delta(
+                db,
+                destination_account,
+                int(transfer.amount_cents or 0),
+                datetime.utcnow(),
+                reverse=True,
+            )
     db.delete(transfer)
     db.commit()
 

@@ -81,7 +81,7 @@ def parse_wells_fargo_statement(raw_pdf: bytes) -> list[WellsFargoAccountBalance
         last4 = last4_match.group("last4")
 
         label = None
-        for probe in [line, *lines[max(0, index - 3) : index]]:
+        for probe in [line, *lines[max(0, index - 3) : index]]:  # noqa
             if "Available balance" in probe:
                 label = "available"
                 break
@@ -120,7 +120,7 @@ def parse_wells_fargo_statement(raw_pdf: bytes) -> list[WellsFargoAccountBalance
                 continue
             name_parts.insert(0, candidate)
 
-        for extra_line in lines[amount_line_index + 1 : index]:
+        for extra_line in lines[amount_line_index + 1 : index]:  # noqa
             piece = extra_line
             if "Available balance" in piece:
                 piece = piece.split("Available balance", 1)[0]

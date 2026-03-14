@@ -75,6 +75,7 @@ Account timestamp semantics are intentionally split:
   - `amount_cents`
   - optional `current_balance_cents` / `pending_balance_cents` snapshot fields for the credit-card-payment workflow
   - `transfer_kind` (`standard` or `credit_card_payment`)
+  - `instant_deposit` boolean for manual transfers whose destination balance is posted immediately and whose source debit settles later at `effective_at`
   - `queued_at`
   - `effective_at`
   - `applied_at`

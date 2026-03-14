@@ -126,12 +126,14 @@ Defined in `python/mp/api/accounts.py`.
   - if `payment_cents = 0`, the active queued payment is canceled and removed
 - `GET /transfers`
   - lists active pending account transfers (manual transfers plus queued credit-card payments)
-  - each row includes source account, destination account, amount, transfer kind, queued time, and completion time
+  - each row includes source account, destination account, amount, transfer kind, `instant_deposit`, queued time, and completion time
 - `POST /transfers`
   - creates a manual pending transfer between two user-owned accounts with direct balance fields
+  - supports `instant_deposit=true`, which credits the destination balance immediately while deferring only the source-side debit until `effective_at`
   - default completion time is next business day at noon when `effective_at` is omitted
 - `PUT /transfers/{transfer_id}`
   - edits an active pending transfer
+  - changing or deleting an instant-deposit transfer reverses/reapplies the already-posted destination-side balance effect as needed
   - credit-card-payment transfers keep their destination credit card, but funding account, amount, and completion time remain editable
 - `DELETE /transfers/{transfer_id}`
   - deletes an active pending transfer

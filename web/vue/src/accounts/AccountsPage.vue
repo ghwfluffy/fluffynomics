@@ -739,7 +739,7 @@
             v-model="transferForm.sourceAccountId"
             label="Source Account"
             searchable
-            :options="transferAccountOptions"
+            :options="transferSourceAccountOptions"
           />
           <template v-if="editingTransfer?.transfer_kind === 'credit_card_payment'">
             <div class="transfer-static-field">
@@ -756,6 +756,10 @@
           />
           <DollarField v-model="transferForm.amountCents" label="Amount" />
           <BankField v-model="transferForm.effectiveAt" label="Completes At" type="datetime-local" />
+          <label v-if="editingTransfer?.transfer_kind !== 'credit_card_payment'" class="check-row">
+            <input v-model="transferForm.instantDeposit" type="checkbox" />
+            <span>Instant Deposit</span>
+          </label>
         </div>
         <div class="modal-actions">
           <button class="cds--btn cds--btn--ghost" type="button" @click="closeTransferDialog">Cancel</button>
@@ -978,7 +982,15 @@
               <td>{{ transfer.destination_account_name }}</td>
               <td>{{ cents(transfer.amount_cents) }}</td>
               <td>{{ formatTransferDateTime(transfer.effective_at) }}</td>
-              <td>{{ transfer.transfer_kind === 'credit_card_payment' ? 'Card payment' : 'Transfer' }}</td>
+              <td>
+                {{
+                  transfer.transfer_kind === 'credit_card_payment'
+                    ? 'Card payment'
+                    : transfer.instant_deposit
+                      ? 'Instant deposit'
+                      : 'Transfer'
+                }}
+              </td>
               <td class="table-actions-cell">
                 <div class="transfer-row-actions">
                   <button class="cds--btn cds--btn--ghost" type="button" @click="openTransferDialog(transfer)">Edit</button>
@@ -1216,6 +1228,7 @@ interface AccountTransferPayload {
   destination_account_name: string
   amount_cents: number
   transfer_kind: 'standard' | 'credit_card_payment'
+  instant_deposit: boolean
   queued_at: string
   effective_at: string
 }
@@ -1495,6 +1508,7 @@ const transferForm = ref({
   destinationAccountId: '',
   amountCents: 0,
   effectiveAt: '',
+  instantDeposit: false,
 })
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
@@ -2031,6 +2045,25 @@ const transferAccountOptions = computed(() =>
       value: account.id,
     })),
 )
+const transferSourceAccountOptions = computed(() =>
+  accounts.value
+    .filter((account) => accountSupportsPendingTransfers(account))
+    .sort((a, b) => {
+      const aChecking = a.type === 'checking' ? 1 : 0
+      const bChecking = b.type === 'checking' ? 1 : 0
+      if (aChecking !== bChecking) {
+        return bChecking - aChecking
+      }
+      if (a.rank !== b.rank) {
+        return b.rank - a.rank
+      }
+      return a.name.localeCompare(b.name)
+    })
+    .map((account) => ({
+      label: `${account.name} (${account.organization || 'Unknown'})`,
+      value: account.id,
+    })),
+)
 const transferDestinationOptions = computed(() =>
   transferAccountOptions.value.filter((account) => account.value !== transferForm.value.sourceAccountId),
 )
@@ -2435,21 +2468,34 @@ const intOrZero = (value: unknown) => {
 }
 
 const accountRewardsCents = (account: AccountPayload) => Math.max(0, account.rewards_balance_cents || 0)
+const liabilityAccountTypes = new Set<AccountType>(['credit_card', 'line_of_credit', 'loan'])
 
-const queuedOutgoingCreditCardPaymentCents = (accountId: string) =>
-  accounts.value.reduce((sum, account) => {
-    const queued = account.queued_credit_card_payment
-    if (!queued || queued.source_account_id !== accountId) {
+const incomingTransferDeltaCents = (account: AccountPayload, amountCents: number) =>
+  liabilityAccountTypes.has(account.type) ? -amountCents : amountCents
+
+const outgoingTransferDeltaCents = (account: AccountPayload, amountCents: number) =>
+  liabilityAccountTypes.has(account.type) ? amountCents : -amountCents
+
+const pendingTransferDisplayDeltaCents = (account: AccountPayload) =>
+  transfers.value.reduce((sum, transfer) => {
+    const amountCents = intOrZero(transfer.amount_cents)
+    if (!amountCents) {
       return sum
     }
-    return sum + intOrZero(queued.payment_cents)
+    if (transfer.source_account_id === account.id) {
+      sum += outgoingTransferDeltaCents(account, amountCents)
+    }
+    if (transfer.destination_account_id === account.id && !transfer.instant_deposit) {
+      sum += incomingTransferDeltaCents(account, amountCents)
+    }
+    return sum
   }, 0)
 
 const updateModalBalanceCents = (account: AccountPayload) =>
-  intOrZero(account.balance_cents) + queuedOutgoingCreditCardPaymentCents(account.id)
+  intOrZero(account.balance_cents) - pendingTransferDisplayDeltaCents(account)
 
 const updateModalUsdBalanceCents = (account: AccountPayload) =>
-  intOrZero(account.usd_balance_cents) + queuedOutgoingCreditCardPaymentCents(account.id)
+  intOrZero(account.usd_balance_cents) - pendingTransferDisplayDeltaCents(account)
 
 const visibleBalanceCents = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
@@ -4042,9 +4088,9 @@ const openUpdateDialog = (account: AccountPayload) => {
   activeTileMenuId.value = null
   updatingAccount.value = account
   const queuedPayment = account.queued_credit_card_payment
-  updateForm.value.currentBalanceCents = Math.max(0, queuedPayment?.current_balance_cents || account.balance_cents || 0)
+  updateForm.value.currentBalanceCents = Math.max(0, queuedPayment?.current_balance_cents || updateModalBalanceCents(account))
   updateForm.value.pendingBalanceCents = Math.max(0, queuedPayment?.pending_balance_cents || 0)
-  updateForm.value.paymentCents = Math.max(0, queuedPayment?.payment_cents || account.balance_cents || 0)
+  updateForm.value.paymentCents = Math.max(0, queuedPayment?.payment_cents || updateModalBalanceCents(account))
   updateForm.value.sourceAccountId = queuedPayment?.source_account_id || creditCardFundingAccountOptions.value[0]?.value || ''
   if (account.type === 'stocks_account') {
     const positions =
@@ -4100,6 +4146,7 @@ const closeTransferDialog = () => {
     destinationAccountId: '',
     amountCents: 0,
     effectiveAt: '',
+    instantDeposit: false,
   }
 }
 
@@ -4107,22 +4154,33 @@ const openTransferDialog = (transfer?: AccountTransferPayload, accountContext?: 
   if (guardMaskedMode(transfer ? 'edit transfers' : 'create transfers')) {
     return
   }
-  const fallbackSourceId = transferAccountOptions.value[0]?.value || ''
+  const preferredDestinationId = transfer?.destination_account_id || accountContext?.id || ''
+  const fallbackSourceId =
+    transfer?.source_account_id ||
+    transferSourceAccountOptions.value.find((item) => item.value !== preferredDestinationId)?.value ||
+    transferSourceAccountOptions.value[0]?.value ||
+    ''
   const fallbackDestinationId =
-    transferAccountOptions.value.find((item) => item.value !== fallbackSourceId)?.value || ''
+    transfer?.destination_account_id ||
+    accountContext?.id ||
+    transferAccountOptions.value.find((item) => item.value !== fallbackSourceId)?.value ||
+    transferAccountOptions.value[0]?.value ||
+    ''
   editingTransfer.value = transfer || null
   transferDialogAccountContextId.value = accountContext?.id || null
   transferForm.value = {
-    sourceAccountId:
-      transfer?.source_account_id || accountContext?.id || fallbackSourceId,
-    destinationAccountId:
-      transfer?.destination_account_id ||
-      (accountContext?.id === fallbackSourceId ? fallbackDestinationId : fallbackDestinationId || fallbackSourceId),
+    sourceAccountId: fallbackSourceId,
+    destinationAccountId: fallbackDestinationId,
     amountCents: transfer?.amount_cents || 0,
     effectiveAt: transfer ? toLocalDateTimeInput(transfer.effective_at) : nextBusinessDayNoonInputValue(),
+    instantDeposit: transfer?.instant_deposit || false,
   }
-  if (!transfer && accountContext?.id && transferForm.value.destinationAccountId === accountContext.id) {
-    transferForm.value.destinationAccountId = fallbackDestinationId
+  if (transferForm.value.sourceAccountId === transferForm.value.destinationAccountId) {
+    const alternateSourceId =
+      transferSourceAccountOptions.value.find((item) => item.value !== transferForm.value.destinationAccountId)?.value || ''
+    if (alternateSourceId) {
+      transferForm.value.sourceAccountId = alternateSourceId
+    }
   }
   transferDialog.value = true
 }
@@ -4172,6 +4230,9 @@ const submitTransfer = async () => {
     source_account_id: transferForm.value.sourceAccountId,
     destination_account_id: transferForm.value.destinationAccountId,
     amount_cents: Math.max(0, transferForm.value.amountCents || 0),
+  }
+  if (editingTransfer.value?.transfer_kind !== 'credit_card_payment') {
+    payload.instant_deposit = !!transferForm.value.instantDeposit
   }
   const effectiveAt = fromLocalDateTimeInput(transferForm.value.effectiveAt)
   if (effectiveAt) {
@@ -5683,6 +5744,12 @@ watch(
 
 .transfers-summary p {
   color: var(--cds-text-secondary);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .transfer-row-actions {

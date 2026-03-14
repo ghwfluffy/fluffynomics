@@ -39,7 +39,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 7
+PAYLOAD_SCHEMA_VERSION = 8
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -158,6 +158,14 @@ def _parse_float(value: Any, field: str, default: float = 0.0) -> float:
         raise HTTPException(
             status_code=400, detail=f"{field} must be a number"
         ) from exc
+
+
+def _parse_bool(value: Any, field: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise HTTPException(status_code=400, detail=f"{field} must be a boolean")
 
 
 def _parse_decimal(value: Any, field: str) -> Decimal:
@@ -1858,6 +1866,7 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 if transfer.pending_balance_cents is not None
                 else None,
                 "transfer_kind": str(transfer.transfer_kind or "standard"),
+                "instant_deposit": bool(transfer.instant_deposit),
                 "queued_at": _serialize_datetime(transfer.queued_at),
                 "effective_at": _serialize_datetime(transfer.effective_at),
                 "applied_at": _serialize_datetime(transfer.applied_at),
@@ -1964,6 +1973,7 @@ def _upgrade_payload_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
                 "current_balance_cents": item.get("current_balance_cents"),
                 "pending_balance_cents": item.get("pending_balance_cents"),
                 "transfer_kind": "credit_card_payment",
+                "instant_deposit": False,
                 "queued_at": item.get("queued_at"),
                 "effective_at": item.get("effective_at"),
                 "applied_at": item.get("applied_at"),
@@ -1976,6 +1986,20 @@ def _upgrade_payload_v6_to_v7(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v7_to_v8(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 8
+    upgraded_transfers: list[dict[str, Any]] = []
+    for item in _required_list(
+        upgraded.get("account_transfers", []), "account_transfers"
+    ):
+        normalized = dict(_required_dict(item, "account_transfers[]"))
+        normalized["instant_deposit"] = bool(normalized.get("instant_deposit", False))
+        upgraded_transfers.append(normalized)
+    upgraded["account_transfers"] = upgraded_transfers
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -1984,6 +2008,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     4: _upgrade_payload_v4_to_v5,
     5: _upgrade_payload_v5_to_v6,
     6: _upgrade_payload_v6_to_v7,
+    7: _upgrade_payload_v7_to_v8,
 }
 
 
@@ -2723,6 +2748,16 @@ def _replace_user_data(
                 status_code=400,
                 detail="account_transfers[].transfer_kind is invalid",
             )
+        instant_deposit = _parse_bool(
+            item.get("instant_deposit"),
+            "account_transfers[].instant_deposit",
+            default=False,
+        )
+        if transfer_kind != "standard" and instant_deposit:
+            raise HTTPException(
+                status_code=400,
+                detail="account_transfers[].instant_deposit is only valid for standard transfers",
+            )
         db.add(
             AccountTransfer(
                 id=uuid4(),
@@ -2747,6 +2782,7 @@ def _replace_user_data(
                 if item.get("pending_balance_cents") is not None
                 else None,
                 transfer_kind=transfer_kind,
+                instant_deposit=instant_deposit,
                 queued_at=_parse_optional_datetime(
                     item.get("queued_at"),
                     "account_transfers[].queued_at",

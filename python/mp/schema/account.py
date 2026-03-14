@@ -273,6 +273,9 @@ class AccountTransfer(Base):
     transfer_kind: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'standard'")
     )
+    instant_deposit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     queued_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -442,6 +445,7 @@ class AccountTransferSchema(BaseModel):
     destination_account_name: str
     amount_cents: int
     transfer_kind: Literal["standard", "credit_card_payment"] = "standard"
+    instant_deposit: bool = False
     queued_at: datetime
     effective_at: datetime
 
@@ -451,6 +455,7 @@ class AccountTransferCreateSchema(BaseModel):
     destination_account_id: UUID
     amount_cents: int
     effective_at: Optional[datetime] = None
+    instant_deposit: bool = False
 
 
 class AccountTransferUpdateSchema(BaseModel):
@@ -458,6 +463,7 @@ class AccountTransferUpdateSchema(BaseModel):
     destination_account_id: Optional[UUID] = None
     amount_cents: Optional[int] = None
     effective_at: Optional[datetime] = None
+    instant_deposit: Optional[bool] = None
 
 
 class AccountRankUpdateSchema(BaseModel):

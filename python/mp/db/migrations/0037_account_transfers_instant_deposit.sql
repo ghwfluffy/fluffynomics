@@ -1,0 +1,2 @@
+ALTER TABLE account_transfers
+ADD COLUMN IF NOT EXISTS instant_deposit BOOLEAN NOT NULL DEFAULT FALSE;

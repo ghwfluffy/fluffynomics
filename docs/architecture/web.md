@@ -198,6 +198,7 @@ In `AccountsPage.vue`:
     - calls `POST /accounts/{id}/queue-credit-card-payment`
     - `Amount Paying = 0` is valid and means “sync card balance only, no queued payment”
     - tile/table balances immediately render as if the queued payment has already reduced both the card and the funding account
+    - update-form starting values must use the stored/imported account balance, not the transfer-adjusted display balance shown on tiles/icons
     - while a queued payment is active, the modal reopens with the queued values prefilled so the user can edit them
     - editing an active queued payment uses `PUT /accounts/{id}/queue-credit-card-payment` and reschedules settlement to the next business day at noon
     - setting `Amount Paying` to `0` while editing an active queued payment cancels it
@@ -228,6 +229,8 @@ Transfers tab UX:
 - It lists queued credit-card payments and manual transfers together with source, destination, amount, completion timestamp, and transfer type.
 - Transfer create/edit uses `/transfers` CRUD; credit-card payments stay special on the account update modal but can still be edited or deleted from the Transfers tab/account transfer section.
 - Manual transfer create/edit defaults the completion timestamp server-side to next business day at noon when left blank.
+- Standard manual transfers also expose an `Instant Deposit` checkbox; when enabled, the destination account reflects the transfer immediately while the source waits until completion.
+- When transfer create is opened from an account update modal, that account should default as the destination; source-account dropdown ordering should prioritize checking accounts by rank before other eligible accounts.
 
 ## Ranking / Reorder UX
 
