@@ -119,6 +119,13 @@ Trend widget behavior:
 
 Organization fuzzy search sources organizations from `GET /organizations` (not only local account state) so defaults and known icons are available immediately.
 
+Masked mode UX:
+- Profile menu exposes a one-way `Masked Mode` action.
+- Once enabled, masked mode stays active through page refreshes and cannot be turned off in-session; logout clears it.
+- While active, account/contract-facing dollar amounts and account numbers render through deterministic fake values that preserve sign, ordering, and digit-scale for safe demos.
+- Masked mode applies to chart geometry too, not only labels/tooltips, so net-worth/history/projection visuals do not leak the real scale.
+- Masked mode is view-only for dashboard finance actions; account, contract, and expense create/edit/update/delete/reorder flows should refuse to open or submit until the user logs out and signs back in.
+
 ## Data Portability UX
 
 `AppShell.vue` header uses a profile trigger (avatar + username) with a dropdown menu that provides:
@@ -207,7 +214,8 @@ In `AccountsPage.vue`:
   - generic defaults are available via backend default icon catalog (`GET /default-icons`) for consistent fallback choices
   - right-click on a user-uploaded icon in the picker opens delete action (`DELETE /icons/{id}`)
   - all account types expose an editable `url` field near the bottom of the modal
-  - account tiles show a hyperlink icon when URL is present; opening uses a new browser tab
+- account tiles show a hyperlink icon when URL is present; opening uses a new browser tab
+- when masked mode is active, account-number displays (tile/table last-4 and related derived strings) must use masked values instead of the real account number
 
 ## Ranking / Reorder UX
 
@@ -239,6 +247,7 @@ Contract create/edit also mirrors account create/edit patterns:
 - immutable type selected before modal opens.
 - linked target selector supports wallet aliases (`PayPal Wallet`, `Google Pay Wallet`) in addition to account IDs.
 - `Payment Day` field is hidden and omitted from payload for week-based recurring periods (`weekly_weekday`, `biweekly_weekday`, `every_n_weeks_weekday`).
+- masked mode should still show contract amounts/countdowns, but through the same deterministic fake-currency formatter used by the accounts dashboard
 
 ## Expenses UX
 
@@ -257,6 +266,7 @@ Expenses support CRUD in `ExpensesTab.vue` with:
 The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.
 The create/edit expense modal must always expose linked-account selection so expense simulation can apply deltas to the intended account.
 Disabled expenses stay editable/updateable in the `Legacy` tile section, which is collapsed by default.
+When masked mode is active, expense amounts should render through the same fake-currency display layer and all expense mutations should stay locked.
 
 ## Next-Payment Early-Pay Logic
 

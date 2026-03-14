@@ -47,6 +47,19 @@
             <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileImportClick">
               Import Data
             </button>
+            <button
+              v-if="!maskedModeEnabled"
+              class="profile-menu-item"
+              type="button"
+              role="menuitem"
+              @click="onEnableMaskedModeClick"
+            >
+              Masked Mode
+            </button>
+            <div v-else class="profile-menu-item profile-menu-item--disabled" role="menuitem" aria-disabled="true">
+              Masked Mode On
+              <span class="profile-menu-item-note">Logout to exit</span>
+            </div>
             <button class="profile-menu-item profile-menu-item--danger" type="button" role="menuitem" @click="onProfileLogoutClick">
               Logout
             </button>
@@ -56,6 +69,7 @@
     </header>
 
     <main class="shell-main">
+      <div v-if="maskedModeEnabled" class="masked-mode-banner">MASKED MODE ENABLED. VALUES ARE NOT REAL.</div>
       <router-view />
     </main>
 
@@ -650,6 +664,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, deleteOwnAccount, logout, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import { enableMaskedMode, maskedModeEnabled } from '@/lib/maskedMode'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
 const router = useRouter()
@@ -829,6 +844,11 @@ const onProfileExportClick = () => {
 const onProfileImportClick = () => {
   closeProfileMenu()
   openImportDialog()
+}
+
+const onEnableMaskedModeClick = () => {
+  enableMaskedMode(currentUser.value?.id)
+  closeProfileMenu()
 }
 
 const onProfileLogoutClick = async () => {
@@ -1551,10 +1571,38 @@ const runImport = async () => {
   color: var(--cds-support-error);
 }
 
+.profile-menu-item--disabled {
+  cursor: default;
+  color: var(--cds-text-secondary);
+  display: grid;
+  gap: 2px;
+}
+
+.profile-menu-item--disabled:hover {
+  background: transparent;
+}
+
+.profile-menu-item-note {
+  font-size: 0.75rem;
+}
+
 .shell-main {
   padding-top: 0.75rem;
   margin-left: 0 !important;
   width: 100%;
+}
+
+.masked-mode-banner {
+  margin: 0 0 0.9rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid #f59e0b;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
 }
 
 .toast-wrap {

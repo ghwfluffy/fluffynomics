@@ -323,6 +323,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import { formatMaskedCurrencyCents, guardMaskedMode } from '@/lib/maskedMode'
 import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
@@ -709,11 +710,7 @@ const selectedFormIconUrl = computed(() =>
   resolveIconUrl(contractForm.value.icon_id, contractForm.value.icon_type, contractForm.value.organization || contractForm.value.name),
 )
 
-const cents = (value?: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format((value || 0) / 100)
+const cents = (value?: number) => formatMaskedCurrencyCents(value)
 
 const normalizedUrl = (raw?: string) => (!raw?.trim() ? '#' : /^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
 const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
@@ -1125,6 +1122,9 @@ const loadIcons = async () => {
 }
 
 const onContractTypePicked = (value: string) => {
+  if (guardMaskedMode('create contracts')) {
+    return
+  }
   contractForm.value = makeContractForm()
   contractForm.value.type = value as ContractForm['type']
   contractForm.value.linked_account_id = props.accounts[0]?.id || ''
@@ -1139,6 +1139,9 @@ const closeContractDialog = () => {
 }
 
 const startEditContract = (contract: ContractPayload) => {
+  if (guardMaskedMode('edit contracts')) {
+    return
+  }
   activeTileMenuId.value = null
   contractForm.value = {
     ...makeContractForm(),
@@ -1188,6 +1191,9 @@ const validateContractForm = () => {
 }
 
 const submitContract = async () => {
+  if (guardMaskedMode(editingContractId.value ? 'edit contracts' : 'create contracts')) {
+    return
+  }
   if (!validateContractForm()) {
     return
   }
@@ -1216,6 +1222,9 @@ const submitContract = async () => {
 
 const moveContractLeft = async (section: Section, index: number, event?: MouseEvent) => {
   ;(event?.currentTarget as HTMLButtonElement | null)?.blur()
+  if (guardMaskedMode('reorder contracts')) {
+    return
+  }
   if (index <= 0) {
     return
   }
@@ -1229,6 +1238,9 @@ const moveContractLeft = async (section: Section, index: number, event?: MouseEv
 
 const moveContractRight = async (section: Section, index: number, event?: MouseEvent) => {
   ;(event?.currentTarget as HTMLButtonElement | null)?.blur()
+  if (guardMaskedMode('reorder contracts')) {
+    return
+  }
   if (index >= section.contracts.length - 1) {
     return
   }
@@ -1245,12 +1257,18 @@ const toggleTileMenu = (contractId: string) => {
 }
 
 const openDeleteContract = (contractId: string) => {
+  if (guardMaskedMode('delete contracts')) {
+    return
+  }
   activeTileMenuId.value = null
   pendingDeleteContractId.value = contractId
   deleteContractDialog.value = true
 }
 
 const openUpdateDialog = (contract: ContractPayload) => {
+  if (guardMaskedMode('update contracts')) {
+    return
+  }
   activeTileMenuId.value = null
   updatingContract.value = contract
   updateForm.value = {
@@ -1268,6 +1286,9 @@ const closeUpdateDialog = () => {
 }
 
 const submitUpdateDialog = async () => {
+  if (guardMaskedMode('update contracts')) {
+    return
+  }
   if (!updatingContract.value) {
     return
   }
@@ -1300,6 +1321,9 @@ const submitUpdateDialog = async () => {
 }
 
 const openFromCalendar = async (contractId: string, action: 'edit' | 'update') => {
+  if (guardMaskedMode(action === 'edit' ? 'edit contracts' : 'update contracts')) {
+    return false
+  }
   let contract = contracts.value.find((item) => item.id === contractId)
   if (!contract) {
     await loadContracts()
@@ -1322,6 +1346,9 @@ const closeDeleteContractDialog = () => {
 }
 
 const confirmDeleteContract = async () => {
+  if (guardMaskedMode('delete contracts')) {
+    return
+  }
   if (!pendingDeleteContractId.value) {
     return
   }

@@ -240,6 +240,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { request } from '@/lib/api'
+import { formatMaskedCurrencyCents, guardMaskedMode } from '@/lib/maskedMode'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
 import BankField from '@/components/BankField.vue'
@@ -472,8 +473,7 @@ const setSort = (key: typeof sortKey.value) => {
   sortDir.value = 'asc'
 }
 
-const cents = (value?: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format((value || 0) / 100)
+const cents = (value?: number) => formatMaskedCurrencyCents(value)
 
 const formatDate = (raw?: string) => {
   if (!raw) {
@@ -594,12 +594,18 @@ const loadIcons = async () => {
 }
 
 const openCreate = () => {
+  if (guardMaskedMode('create expenses')) {
+    return
+  }
   resetForm()
   editingId.value = null
   dialogOpen.value = true
 }
 
 const openEdit = (item: Expense) => {
+  if (guardMaskedMode('edit expenses')) {
+    return
+  }
   form.value = {
     name: item.name,
     category: item.category,
@@ -678,6 +684,9 @@ const clearNextExpensedDate = () => {
 }
 
 const saveExpense = async () => {
+  if (guardMaskedMode(editingId.value ? 'edit expenses' : 'create expenses')) {
+    return
+  }
   const payload = {
     ...form.value,
     linked_account_id: form.value.linked_account_id || null,
@@ -699,6 +708,9 @@ const saveExpense = async () => {
 }
 
 const openDelete = (id: string) => {
+  if (guardMaskedMode('delete expenses')) {
+    return
+  }
   deleteId.value = id
   activeMenuId.value = null
 }
@@ -710,6 +722,9 @@ const updateForm = ref({
 })
 
 const openUpdate = (item: Expense) => {
+  if (guardMaskedMode('update expenses')) {
+    return
+  }
   updateForm.value = {
     enabled: item.enabled ?? true,
     last_expensed_date: item.last_expensed_date || '',
@@ -726,6 +741,9 @@ const closeUpdateDialog = () => {
 }
 
 const saveUpdate = async () => {
+  if (guardMaskedMode('update expenses')) {
+    return
+  }
   if (!updatingId.value) {
     return
   }
@@ -740,6 +758,9 @@ const saveUpdate = async () => {
 }
 
 const openFromCalendar = async (expenseId: string, action: 'edit' | 'update') => {
+  if (guardMaskedMode(action === 'edit' ? 'edit expenses' : 'update expenses')) {
+    return false
+  }
   let item = expenses.value.find((entry) => entry.id === expenseId)
   if (!item) {
     await loadExpenses()
@@ -757,6 +778,9 @@ const openFromCalendar = async (expenseId: string, action: 'edit' | 'update') =>
 }
 
 const confirmDelete = async () => {
+  if (guardMaskedMode('delete expenses')) {
+    return
+  }
   if (!deleteId.value) {
     return
   }

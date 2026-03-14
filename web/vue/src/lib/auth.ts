@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { request } from '@/lib/api'
+import { clearMaskedMode, syncMaskedModeForUser } from '@/lib/maskedMode'
 
 export interface User {
   id: string
@@ -27,10 +28,12 @@ export async function refreshSession(): Promise<User | null> {
   try {
     const user = await request.get<User>('/auth/me', { suppressError: true })
     currentUser.value = user
+    syncMaskedModeForUser(user.id)
     return user
   } catch {
     currentUser.value = null
     sessionToken.value = null
+    clearMaskedMode()
     return null
   }
 }
@@ -43,6 +46,7 @@ export async function login(username: string, password: string, sessionSeconds?:
   })
   currentUser.value = response.user
   sessionToken.value = response.session_token
+  syncMaskedModeForUser(response.user.id)
   return response.user
 }
 
@@ -64,11 +68,13 @@ export async function logout(): Promise<void> {
   await request.post('/auth/logout')
   currentUser.value = null
   sessionToken.value = null
+  clearMaskedMode()
 }
 
 export function clearLocalSession(): void {
   currentUser.value = null
   sessionToken.value = null
+  clearMaskedMode()
 }
 
 export async function updateProfile(payload: {
@@ -80,6 +86,7 @@ export async function updateProfile(payload: {
 }): Promise<User> {
   const user = await request.put<User>('/auth/profile', payload)
   currentUser.value = user
+  syncMaskedModeForUser(user.id)
   return user
 }
 

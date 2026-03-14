@@ -705,7 +705,7 @@
               <div :class="dashboardViewMode === 'icons' ? 'icon-card-details' : ''">
                 <div class="tile-title">{{ account.name }}</div>
                 <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
-                <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
+                <div class="tile-sub">•••• {{ displayLast4(account) }}</div>
                 <div class="tile-balance" :class="balanceTone(account, section.key)">
                   {{ balanceLabel(account) }}
                 </div>
@@ -777,7 +777,7 @@
               <td>{{ sectionTitleByType(account.type) }}</td>
               <td>{{ account.name }}</td>
               <td>{{ account.organization || 'Unknown' }}</td>
-              <td>•••• {{ last4(account.account_number) }}</td>
+              <td>•••• {{ displayLast4(account) }}</td>
               <td>{{ account.type.replaceAll('_', ' ') }}</td>
               <td>{{ balanceLabel(account).replace('Balance ', '') }}</td>
               <td>{{ formatLastUpdate(account.last_update) }}</td>
@@ -934,6 +934,14 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { currentUser } from '@/lib/auth'
+import {
+  formatMaskedCurrencyCents,
+  formatMaskedIntegerCurrencyCents,
+  formatMaskedSignedCurrencyCents,
+  guardMaskedMode,
+  maskCurrencyCents,
+  maskAccountNumber,
+} from '@/lib/maskedMode'
 import BankField from '@/components/BankField.vue'
 import DollarField from '@/components/DollarField.vue'
 import PercentField from '@/components/PercentField.vue'
@@ -1414,7 +1422,7 @@ const accountsTableRows = computed(() => {
       sectionTitleForAccount(account),
       account.name,
       account.organization || '',
-      account.account_number,
+      displayedAccountNumber(account),
       account.type,
       balanceLabel(account),
       formatLastUpdate(account.last_update),
@@ -1448,7 +1456,7 @@ const accountsTableRows = computed(() => {
           : key === 'organization'
             ? a.organization || ''
             : key === 'last4'
-              ? last4(a.account_number)
+              ? displayLast4(a)
               : key === 'type'
                 ? a.type
                 : key === 'balance'
@@ -1462,7 +1470,7 @@ const accountsTableRows = computed(() => {
           : key === 'organization'
             ? b.organization || ''
             : key === 'last4'
-              ? last4(b.account_number)
+              ? displayLast4(b)
               : key === 'type'
                 ? b.type
                 : key === 'balance'
@@ -1627,11 +1635,18 @@ const mixChartOption = computed(() => ({
   ],
 }))
 
+const maskedTrendSnapshots = computed(() =>
+  trendSnapshots.value.map((item) => ({
+    ...item,
+    masked_value_cents: maskCurrencyCents(item.value_cents, `trend-snapshot:${item.key}`),
+  })),
+)
+
 const trendScale = computed(() => {
-  if (!trendSnapshots.value.length) {
+  if (!maskedTrendSnapshots.value.length) {
     return { min: 0, max: 1 }
   }
-  const maxRaw = Math.max(0, ...trendSnapshots.value.map((item) => item.value_cents))
+  const maxRaw = Math.max(0, ...maskedTrendSnapshots.value.map((item) => item.masked_value_cents))
   const paddedMax = Math.max(1, maxRaw * 1.02)
   const step = Math.max(1, Math.ceil(paddedMax / 4 / 10000) * 10000)
   return { min: 0, max: step * 4 }
@@ -1655,7 +1670,7 @@ const trendChartOption = computed(() => {
     },
     xAxis: {
       type: 'category',
-      data: trendSnapshots.value.map((item) => item.label),
+      data: maskedTrendSnapshots.value.map((item) => item.label),
       axisTick: { show: false },
       axisLine: { lineStyle: { color: '#94a3b8' } },
       axisLabel: { color: '#64748b', fontSize: 10 },
@@ -1677,14 +1692,14 @@ const trendChartOption = computed(() => {
     series: [
       {
         type: 'line',
-        data: trendSnapshots.value.map((item) => item.value_cents / 100),
+        data: maskedTrendSnapshots.value.map((item) => item.masked_value_cents / 100),
         showSymbol: true,
         symbol: 'circle',
         symbolSize: 6,
         lineStyle: { width: 2.25, color: '#0f62fe' },
         itemStyle: {
           color: (params: { dataIndex: number }) =>
-            trendSnapshots.value[params.dataIndex]?.forecast ? '#f59e0b' : '#0f62fe',
+            maskedTrendSnapshots.value[params.dataIndex]?.forecast ? '#f59e0b' : '#0f62fe',
         },
         emphasis: { focus: 'series' },
       },
@@ -1702,6 +1717,13 @@ const netWorthProjectionBars = computed(() => {
   }))
 })
 
+const maskedNetWorthProjectionBars = computed(() =>
+  netWorthProjectionBars.value.map((item) => ({
+    ...item,
+    masked_value_cents: maskCurrencyCents(item.value_cents, `projection:${item.key}`),
+  })),
+)
+
 const netWorthProjectionChartOption = computed(() => ({
   grid: { left: 56, right: 12, top: 24, bottom: 28 },
   tooltip: {
@@ -1712,7 +1734,7 @@ const netWorthProjectionChartOption = computed(() => ({
       if (!first) {
         return ''
       }
-      const point = typeof first.dataIndex === 'number' ? netWorthProjectionBars.value[first.dataIndex] : null
+      const point = typeof first.dataIndex === 'number' ? maskedNetWorthProjectionBars.value[first.dataIndex] : null
       const rawValue = Array.isArray(first.value) ? Number(first.value[1] || 0) : Number(first.value || 0)
       const title = point?.snapshot_date
         ? new Date(`${point.snapshot_date}T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
@@ -1722,7 +1744,7 @@ const netWorthProjectionChartOption = computed(() => ({
   },
   xAxis: {
     type: 'category',
-    data: netWorthProjectionBars.value.map((item) => item.label),
+    data: maskedNetWorthProjectionBars.value.map((item) => item.label),
     axisTick: { show: false },
     axisLine: { lineStyle: { color: '#94a3b8' } },
     axisLabel: { color: '#64748b', fontSize: 10 },
@@ -1749,8 +1771,8 @@ const netWorthProjectionChartOption = computed(() => ({
         fontSize: 10,
         formatter: (params: { value: number }) => formatDollarInteger(Math.round(Number(params.value) * 100)),
       },
-      data: netWorthProjectionBars.value.map((item) => ({
-        value: item.value_cents / 100,
+      data: maskedNetWorthProjectionBars.value.map((item) => ({
+        value: item.masked_value_cents / 100,
         itemStyle: {
           color: item.color,
           borderRadius: [6, 6, 0, 0],
@@ -1858,7 +1880,9 @@ const historyScale = computed(() => {
   if (!historyItems.value.length) {
     return { minValue: 0, maxValue: 10000, minTime: 0, maxTime: 1 }
   }
-  const values = historyItems.value.map((item) => Math.max(0, item.value_cents || 0))
+  const values = historyItems.value.map((item, index) =>
+    Math.max(0, maskCurrencyCents(item.value_cents || 0, `account-history:${historyAccount.value?.id || 'none'}:${index}:${item.recorded_at}`)),
+  )
   const maxValue = niceCeil(Math.max(...values) * 1.02)
   const times = historyItems.value
     .map((item) => new Date(item.recorded_at).getTime())
@@ -1877,8 +1901,12 @@ const historyChartPoints = computed(() => {
   const timeSpan = Math.max(1, maxTime - minTime)
   return historyItems.value.map((item, index) => {
     const ts = new Date(item.recorded_at).getTime()
+    const maskedValue = maskCurrencyCents(
+      item.value_cents || 0,
+      `account-history:${historyAccount.value?.id || 'none'}:${index}:${item.recorded_at}`,
+    )
     const x = HISTORY_LEFT + ((ts - minTime) / timeSpan) * HISTORY_WIDTH
-    const y = HISTORY_TOP + ((maxValue - item.value_cents) / valueSpan) * HISTORY_HEIGHT
+    const y = HISTORY_TOP + ((maxValue - maskedValue) / valueSpan) * HISTORY_HEIGHT
     return {
       key: `${item.recorded_at}-${index}`,
       x,
@@ -1964,42 +1992,27 @@ const organizationUrlByName = computed(() => {
   return map
 })
 
-const last4 = (value: string) => value.slice(-4)
+const displayedAccountNumber = (account: Pick<AccountPayload, 'id' | 'account_number'>) =>
+  maskAccountNumber(account.account_number || '', `account:${account.id}:account-number`)
 
-const cents = (value?: number) =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format((value || 0) / 100)
+const displayLast4 = (account: Pick<AccountPayload, 'id' | 'account_number'>) => displayedAccountNumber(account).slice(-4)
 
-const signedCents = (value: number) => {
-  const formatted = cents(Math.abs(value))
-  if (value > 0) {
-    return `+${formatted}`
-  }
-  if (value < 0) {
-    return `-${formatted}`
-  }
-  return formatted
-}
+const cents = (value?: number) => formatMaskedCurrencyCents(value)
 
-const formatDollarInteger = (valueCents: number) => {
-  const dollars = Math.round(valueCents / 100)
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(dollars)
-}
+const signedCents = (value: number) => formatMaskedSignedCurrencyCents(value)
+
+const formatDollarInteger = (valueCents: number) => formatMaskedIntegerCurrencyCents(valueCents, 'integer-currency')
 
 const formatDollarRate = (valueCents: number) => {
+  const maskedValue = Math.abs(valueCents)
   const sign = valueCents > 0 ? '+' : valueCents < 0 ? '-' : ''
-  return `${sign}${formatDollarInteger(Math.abs(valueCents))}`
+  return `${sign}${formatMaskedIntegerCurrencyCents(maskedValue, 'rate-currency')}`
 }
 
 const formatDollarPerMonthSquared = (valueCents: number) => {
+  const maskedValue = Math.abs(valueCents)
   const sign = valueCents > 0 ? '+' : valueCents < 0 ? '-' : ''
-  return `${sign}${formatDollarInteger(Math.abs(valueCents))}/month²`
+  return `${sign}${formatMaskedIntegerCurrencyCents(maskedValue, 'acceleration-currency')}/month²`
 }
 
 const deltaClass = (value: number) => {
@@ -3381,6 +3394,9 @@ const closeCreateDialog = () => {
 }
 
 const openCreateDialog = (type: AccountType) => {
+  if (guardMaskedMode('create accounts')) {
+    return
+  }
   createForm.value = makeCreateForm()
   createForm.value.type = type
   editingAccountId.value = null
@@ -3414,6 +3430,9 @@ const validateCreateForm = (): boolean => {
 }
 
 const submitCreateAccount = async () => {
+  if (guardMaskedMode(editingAccountId.value ? 'edit accounts' : 'create accounts')) {
+    return
+  }
   if (!validateCreateForm()) {
     return
   }
@@ -3523,6 +3542,9 @@ const toggleTileMenu = (accountId: string) => {
 }
 
 const startEditAccount = (account: AccountPayload) => {
+  if (guardMaskedMode('edit accounts')) {
+    return
+  }
   activeTileMenuId.value = null
   createForm.value = {
     ...makeCreateForm(),
@@ -3536,6 +3558,9 @@ const startEditAccount = (account: AccountPayload) => {
 }
 
 const deleteAccount = async (accountId: string) => {
+  if (guardMaskedMode('delete accounts')) {
+    return
+  }
   activeTileMenuId.value = null
   pendingDeleteAccountId.value = accountId
   deleteDialog.value = true
@@ -3547,6 +3572,9 @@ const closeDeleteDialog = () => {
 }
 
 const confirmDeleteAccount = async () => {
+  if (guardMaskedMode('delete accounts')) {
+    return
+  }
   if (!pendingDeleteAccountId.value) {
     return
   }
@@ -3556,6 +3584,9 @@ const confirmDeleteAccount = async () => {
 }
 
 const openUpdateDialog = (account: AccountPayload) => {
+  if (guardMaskedMode('update accounts')) {
+    return
+  }
   activeTileMenuId.value = null
   updatingAccount.value = account
   const queuedPayment = account.queued_credit_card_payment
@@ -3660,6 +3691,9 @@ const closeCalendarEventDialog = () => {
 }
 
 const runCalendarEventAction = async (action: CalendarEventAction) => {
+  if (guardMaskedMode(action === 'edit' ? 'edit scheduled items' : 'update scheduled items')) {
+    return
+  }
   if (!selectedCalendarEvent.value) {
     return
   }
@@ -3711,6 +3745,9 @@ const removeStockPosition = (index: number) => {
 }
 
 const submitUpdateValue = async () => {
+  if (guardMaskedMode('update accounts')) {
+    return
+  }
   if (!updatingAccount.value) {
     return
   }
@@ -3830,6 +3867,9 @@ const submitUpdateValue = async () => {
 
 const moveAccountLeft = async (section: Section, index: number, event?: MouseEvent) => {
   ;(event?.currentTarget as HTMLButtonElement | null)?.blur()
+  if (guardMaskedMode('reorder accounts')) {
+    return
+  }
   if (index <= 0) {
     return
   }
@@ -3843,6 +3883,9 @@ const moveAccountLeft = async (section: Section, index: number, event?: MouseEve
 
 const moveAccountRight = async (section: Section, index: number, event?: MouseEvent) => {
   ;(event?.currentTarget as HTMLButtonElement | null)?.blur()
+  if (guardMaskedMode('reorder accounts')) {
+    return
+  }
   if (index >= section.accounts.length - 1) {
     return
   }
