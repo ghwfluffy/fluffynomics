@@ -3,6 +3,14 @@
     <button
       type="button"
       class="view-toggle-btn"
+      :class="{ 'view-toggle-btn--active': modelValue === 'icons' }"
+      @click="emit('update:modelValue', 'icons')"
+    >
+      Icons
+    </button>
+    <button
+      type="button"
+      class="view-toggle-btn"
       :class="{ 'view-toggle-btn--active': modelValue === 'tiles' }"
       @click="emit('update:modelValue', 'tiles')"
     >
@@ -21,11 +29,11 @@
 
 <script setup lang="ts">
 defineProps<{
-  modelValue: 'tiles' | 'table'
+  modelValue: 'tiles' | 'icons' | 'table'
 }>()
 
 const emit = defineEmits<{
-  (event: 'update:modelValue', value: 'tiles' | 'table'): void
+  (event: 'update:modelValue', value: 'tiles' | 'icons' | 'table'): void
 }>()
 </script>
 

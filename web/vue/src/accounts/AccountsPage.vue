@@ -319,7 +319,7 @@
       <div class="top-controls">
         <ViewModeToggle v-model="dashboardViewMode" />
       </div>
-      <div v-if="dashboardViewMode === 'tiles'">
+      <div v-if="dashboardViewMode !== 'table'">
         <AddTypePickerButton
           button-label="Add New Account"
           placeholder="Select account type"
@@ -625,7 +625,7 @@
       </section>
     </div>
 
-    <template v-if="activeTab === 'accounts' && dashboardViewMode === 'tiles'">
+    <template v-if="activeTab === 'accounts' && dashboardViewMode !== 'table'">
       <section v-for="section in sections" :key="section.key" class="section-wrap">
         <CollapsibleSectionHeader
           :title="section.title"
@@ -633,72 +633,104 @@
           :collapsible="section.key === 'closed'"
           @toggle="toggleAccountSection(section)"
         />
-        <div v-if="!isAccountSectionCollapsed(section) && section.accounts.length" class="section-grid">
-          <article v-for="(account, index) in section.accounts" :key="account.id" class="cds--tile account-tile">
-            <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="tile-icon" alt="Account icon" />
-            <div v-else class="tile-icon tile-icon--empty" />
+        <div
+          v-if="!isAccountSectionCollapsed(section) && section.accounts.length"
+          class="section-grid"
+          :class="{ 'section-grid--icons': dashboardViewMode === 'icons' }"
+        >
+          <article
+            v-for="(account, index) in section.accounts"
+            :key="account.id"
+            class="cds--tile account-tile"
+            :class="{
+              'account-tile--icon': dashboardViewMode === 'icons',
+              'account-tile--icon-expanded': dashboardViewMode === 'icons' && isAccountIconExpanded(account.id),
+            }"
+          >
             <button
-              v-if="index > 0"
-              class="tile-rank-trigger"
+              v-if="dashboardViewMode === 'icons'"
+              class="icon-card-trigger"
               type="button"
-              title="Move left"
-              @click="moveAccountLeft(section, index, $event)"
+              :aria-expanded="isAccountIconExpanded(account.id) ? 'true' : 'false'"
+              :aria-label="`${isAccountIconExpanded(account.id) ? 'Collapse' : 'Expand'} ${account.name}`"
+              @click="toggleAccountIconExpanded(account.id)"
             >
-              ◀
+              <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="icon-card-icon" alt="" />
+              <div v-else class="icon-card-icon icon-card-icon--empty" aria-hidden="true"></div>
             </button>
-            <button
-              v-if="index < section.accounts.length - 1"
-              class="tile-rank-trigger tile-rank-trigger--right"
-              type="button"
-              title="Move right"
-              @click="moveAccountRight(section, index, $event)"
-            >
-              ▶
-            </button>
-            <span
-              v-if="!account.closed"
-              class="tile-update-clock"
-              :class="lastUpdateTone(account)"
-              :title="lastUpdateTooltip(account)"
-              aria-label="Last update status"
-            />
-            <a
-              v-if="account.url?.trim()"
-              class="tile-link"
-              :href="normalizedAccountUrl(account.url)"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open account link"
-              @click.stop
-            >
-              ↗
-            </a>
-            <div class="tile-title">{{ account.name }}</div>
-            <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
-            <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
-            <div class="tile-balance" :class="balanceTone(account, section.key)">
-              {{ balanceLabel(account) }}
+            <template v-else>
+              <img v-if="accountIconUrl(account)" :src="accountIconUrl(account)" class="tile-icon" alt="Account icon" />
+              <div v-else class="tile-icon tile-icon--empty" />
+            </template>
+            <div v-if="dashboardViewMode === 'icons'" class="icon-card-balance" :class="balanceTone(account, section.key)">
+              {{ balanceLabel(account).replace('Balance ', '') }}
             </div>
-            <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
-            <div class="tile-type">{{ account.type.replaceAll('_', ' ') }}</div>
-            <div class="tile-actions">
+            <template v-if="dashboardViewMode === 'tiles' || isAccountIconExpanded(account.id)">
               <button
-                class="tile-menu-trigger"
+                v-if="index > 0"
+                class="tile-rank-trigger"
                 type="button"
-                aria-label="Account menu"
-                @click.stop="toggleTileMenu(account.id)"
+                title="Move left"
+                @click="moveAccountLeft(section, index, $event)"
               >
-                <span class="tile-menu-dots" aria-hidden="true"></span>
+                ◀
               </button>
-              <div v-if="activeTileMenuId === account.id" class="tile-menu">
-                <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
-                <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
-                <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
-                <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">
-                  Delete
-                </button>
+              <button
+                v-if="index < section.accounts.length - 1"
+                class="tile-rank-trigger tile-rank-trigger--right"
+                type="button"
+                title="Move right"
+                @click="moveAccountRight(section, index, $event)"
+              >
+                ▶
+              </button>
+              <span
+                v-if="!account.closed"
+                class="tile-update-clock"
+                :class="lastUpdateTone(account)"
+                :title="lastUpdateTooltip(account)"
+                aria-label="Last update status"
+              />
+              <a
+                v-if="account.url?.trim()"
+                class="tile-link"
+                :href="normalizedAccountUrl(account.url)"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open account link"
+                @click.stop
+              >
+                ↗
+              </a>
+              <div :class="dashboardViewMode === 'icons' ? 'icon-card-details' : ''">
+                <div class="tile-title">{{ account.name }}</div>
+                <div class="tile-sub">{{ account.organization || 'Unknown organization' }}</div>
+                <div class="tile-sub">•••• {{ last4(account.account_number) }}</div>
+                <div class="tile-balance" :class="balanceTone(account, section.key)">
+                  {{ balanceLabel(account) }}
+                </div>
+                <div v-if="paymentSummary(account)" class="tile-sub">{{ paymentSummary(account) }}</div>
+                <div class="tile-type">{{ account.type.replaceAll('_', ' ') }}</div>
               </div>
-            </div>
+              <div class="tile-actions">
+                <button
+                  class="tile-menu-trigger"
+                  type="button"
+                  aria-label="Account menu"
+                  @click.stop="toggleTileMenu(account.id)"
+                >
+                  <span class="tile-menu-dots" aria-hidden="true"></span>
+                </button>
+                <div v-if="activeTileMenuId === account.id" class="tile-menu">
+                  <button type="button" class="tile-menu-option" @click="startEditAccount(account)">Edit</button>
+                  <button type="button" class="tile-menu-option" @click="openUpdateDialog(account)">Update</button>
+                  <button type="button" class="tile-menu-option" @click="openHistoryDialog(account)">History</button>
+                  <button type="button" class="tile-menu-option tile-menu-option--danger" @click="deleteAccount(account.id)">
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </template>
           </article>
         </div>
         <div v-else-if="!isAccountSectionCollapsed(section)" class="cds--tile empty-state">No accounts yet.</div>
@@ -1163,7 +1195,8 @@ const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
 const activeTab = ref<DashboardTab>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
-const dashboardViewMode = ref<'tiles' | 'table'>('tiles')
+const dashboardViewMode = ref<'tiles' | 'icons' | 'table'>('icons')
+const expandedAccountIconIds = ref<Set<string>>(new Set())
 const closedAccountsSectionOpen = ref(false)
 const widgetLoading = ref(false)
 const next30BreakdownBusy = ref(false)
@@ -1333,6 +1366,18 @@ const toggleAccountSection = (section: Section) => {
     return
   }
   closedAccountsSectionOpen.value = !closedAccountsSectionOpen.value
+}
+
+const isAccountIconExpanded = (accountId: string) => expandedAccountIconIds.value.has(accountId)
+
+const toggleAccountIconExpanded = (accountId: string) => {
+  const next = new Set(expandedAccountIconIds.value)
+  if (next.has(accountId)) {
+    next.delete(accountId)
+  } else {
+    next.add(accountId)
+  }
+  expandedAccountIconIds.value = next
 }
 
 const sectionTitleForAccount = (account: AccountPayload) =>

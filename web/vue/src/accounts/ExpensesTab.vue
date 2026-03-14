@@ -3,11 +3,11 @@
     <div class="top-controls">
       <ViewModeToggle v-model="viewMode" />
     </div>
-    <div v-if="viewMode === 'tiles'" class="action-row">
+    <div v-if="viewMode !== 'table'" class="action-row">
       <button class="cds--btn cds--btn--primary mp-add-btn" type="button" @click="openCreate">Add Expense</button>
     </div>
 
-    <template v-if="viewMode === 'tiles'">
+    <template v-if="viewMode !== 'table'">
       <section v-for="section in sections" :key="section.key" class="section-wrap">
         <CollapsibleSectionHeader
           :title="section.label"
@@ -15,25 +15,57 @@
           :collapsible="section.key === 'legacy'"
           @toggle="toggleExpenseSection(section)"
         />
-        <div v-if="!isExpenseSectionCollapsed(section) && section.items.length" class="section-grid">
-          <article v-for="item in section.items" :key="item.id" class="cds--tile account-tile">
-            <img v-if="expenseIconUrl(item)" :src="expenseIconUrl(item)" class="tile-icon" alt="Expense icon" />
-            <div v-else class="tile-icon tile-icon--empty" />
-            <div class="tile-title">{{ item.name }}</div>
-            <div class="tile-sub">Last: {{ formatDate(item.last_expensed_date) }}</div>
-            <div class="tile-sub">Next: {{ formatDate(item.next_expensed_date) }}</div>
-            <div class="tile-balance balance-liability">Est. {{ cents(item.estimated_amount_cents) }}</div>
-            <div class="tile-type">{{ frequencyLabel(item.general_frequency) }}<span v-if="!item.enabled"> • Disabled</span></div>
-            <div class="tile-actions">
-              <button class="tile-menu-trigger" type="button" aria-label="Expense menu" @click.stop="toggleMenu(item.id)">
-                <span class="tile-menu-dots" aria-hidden="true"></span>
-              </button>
-              <div v-if="activeMenuId === item.id" class="tile-menu">
-                <button type="button" class="tile-menu-option" @click="openEdit(item)">Edit</button>
-                <button type="button" class="tile-menu-option" @click="openUpdate(item)">Update</button>
-                <button type="button" class="tile-menu-option tile-menu-option--danger" @click="openDelete(item.id)">Delete</button>
-              </div>
+        <div
+          v-if="!isExpenseSectionCollapsed(section) && section.items.length"
+          class="section-grid"
+          :class="{ 'section-grid--icons': viewMode === 'icons' }"
+        >
+          <article
+            v-for="item in section.items"
+            :key="item.id"
+            class="cds--tile account-tile"
+            :class="{
+              'account-tile--icon': viewMode === 'icons',
+              'account-tile--icon-expanded': viewMode === 'icons' && isExpenseIconExpanded(item.id),
+            }"
+          >
+            <button
+              v-if="viewMode === 'icons'"
+              class="icon-card-trigger"
+              type="button"
+              :aria-expanded="isExpenseIconExpanded(item.id) ? 'true' : 'false'"
+              :aria-label="`${isExpenseIconExpanded(item.id) ? 'Collapse' : 'Expand'} ${item.name}`"
+              @click="toggleExpenseIconExpanded(item.id)"
+            >
+              <img v-if="expenseIconUrl(item)" :src="expenseIconUrl(item)" class="icon-card-icon" alt="" />
+              <div v-else class="icon-card-icon icon-card-icon--empty" aria-hidden="true"></div>
+            </button>
+            <template v-else>
+              <img v-if="expenseIconUrl(item)" :src="expenseIconUrl(item)" class="tile-icon" alt="Expense icon" />
+              <div v-else class="tile-icon tile-icon--empty" />
+            </template>
+            <div v-if="viewMode === 'icons'" class="icon-card-balance balance-liability">
+              {{ cents(item.estimated_amount_cents) }}
             </div>
+            <template v-if="viewMode === 'tiles' || isExpenseIconExpanded(item.id)">
+              <div :class="viewMode === 'icons' ? 'icon-card-details' : ''">
+                <div class="tile-title">{{ item.name }}</div>
+                <div class="tile-sub">Last: {{ formatDate(item.last_expensed_date) }}</div>
+                <div class="tile-sub">Next: {{ formatDate(item.next_expensed_date) }}</div>
+                <div class="tile-balance balance-liability">Est. {{ cents(item.estimated_amount_cents) }}</div>
+                <div class="tile-type">{{ frequencyLabel(item.general_frequency) }}<span v-if="!item.enabled"> • Disabled</span></div>
+              </div>
+              <div class="tile-actions">
+                <button class="tile-menu-trigger" type="button" aria-label="Expense menu" @click.stop="toggleMenu(item.id)">
+                  <span class="tile-menu-dots" aria-hidden="true"></span>
+                </button>
+                <div v-if="activeMenuId === item.id" class="tile-menu">
+                  <button type="button" class="tile-menu-option" @click="openEdit(item)">Edit</button>
+                  <button type="button" class="tile-menu-option" @click="openUpdate(item)">Update</button>
+                  <button type="button" class="tile-menu-option tile-menu-option--danger" @click="openDelete(item.id)">Delete</button>
+                </div>
+              </div>
+            </template>
           </article>
         </div>
         <div v-else-if="!isExpenseSectionCollapsed(section)" class="cds--tile empty-state">No expenses yet.</div>
@@ -249,14 +281,14 @@ interface ExpenseSection {
   items: Expense[]
 }
 
-const props = withDefaults(defineProps<{ viewMode?: 'tiles' | 'table' }>(), {
-  viewMode: 'tiles',
+const props = withDefaults(defineProps<{ viewMode?: 'tiles' | 'icons' | 'table' }>(), {
+  viewMode: 'icons',
 })
-const emit = defineEmits<{ (event: 'update:viewMode', value: 'tiles' | 'table'): void }>()
+const emit = defineEmits<{ (event: 'update:viewMode', value: 'tiles' | 'icons' | 'table'): void }>()
 
 const viewMode = computed({
   get: () => props.viewMode,
-  set: (value: 'tiles' | 'table') => emit('update:viewMode', value),
+  set: (value: 'tiles' | 'icons' | 'table') => emit('update:viewMode', value),
 })
 
 const expenses = ref<Expense[]>([])
@@ -271,6 +303,7 @@ const dialogOpen = ref(false)
 const deleteId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const activeMenuId = ref<string | null>(null)
+const expandedExpenseIconIds = ref<Set<string>>(new Set())
 const legacyExpensesSectionOpen = ref(false)
 const updateDialog = ref(false)
 const updatingId = ref<string | null>(null)
@@ -344,6 +377,18 @@ const toggleExpenseSection = (section: ExpenseSection) => {
     return
   }
   legacyExpensesSectionOpen.value = !legacyExpensesSectionOpen.value
+}
+
+const isExpenseIconExpanded = (expenseId: string) => expandedExpenseIconIds.value.has(expenseId)
+
+const toggleExpenseIconExpanded = (expenseId: string) => {
+  const next = new Set(expandedExpenseIconIds.value)
+  if (next.has(expenseId)) {
+    next.delete(expenseId)
+  } else {
+    next.add(expenseId)
+  }
+  expandedExpenseIconIds.value = next
 }
 
 const filteredExpenses = computed(() => {

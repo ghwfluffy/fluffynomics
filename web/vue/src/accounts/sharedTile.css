@@ -4,6 +4,15 @@
   gap: 12px;
 }
 
+.section-grid--icons {
+  grid-template-columns: repeat(auto-fill, 72px);
+  gap: 12px;
+  align-items: start;
+  justify-content: start;
+  grid-auto-rows: min-content;
+  grid-auto-flow: row dense;
+}
+
 .account-tile {
   min-height: 148px;
   border-radius: 12px;
@@ -240,20 +249,116 @@
   color: #b91c1c;
 }
 
+.account-tile--icon {
+  min-height: unset !important;
+  min-block-size: unset !important;
+  min-inline-size: unset !important;
+  width: 72px;
+  height: auto !important;
+  padding: 0.45rem 0.35rem !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: start;
+  gap: 0.3rem;
+}
+
+.icon-card-trigger {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-card-trigger:focus-visible {
+  outline: 2px solid #0f62fe;
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+.icon-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--cds-border-subtle-01);
+  object-fit: cover;
+}
+
+.icon-card-icon--empty {
+  background: #e2e8f0;
+}
+
+.icon-card-balance {
+  text-align: center;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.15;
+  width: 100%;
+}
+
+.icon-card-details {
+  width: 100%;
+  padding-top: 0.1rem;
+}
+
+.account-tile--icon-expanded {
+  align-items: stretch;
+  padding: 0.55rem 0.85rem 2rem 2.5rem !important;
+  width: auto !important;
+  min-height: 148px !important;
+  grid-column: span 3;
+}
+
+.account-tile--icon-expanded .icon-card-trigger {
+  position: absolute;
+  left: 0.55rem;
+  top: 0.55rem;
+}
+
+.account-tile--icon-expanded .icon-card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.account-tile--icon-expanded .icon-card-balance {
+  display: none;
+}
+
 @media (max-width: 1280px) {
   .section-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
 }
 
 @media (max-width: 980px) {
   .section-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .section-grid--icons {
+    grid-template-columns: repeat(auto-fill, 72px);
+  }
+
+  .account-tile--icon-expanded {
+    grid-column: span 2;
+  }
 }
 
 @media (max-width: 640px) {
   .section-grid {
     grid-template-columns: 1fr;
+  }
+
+  .section-grid--icons {
+    grid-template-columns: repeat(auto-fill, 72px);
+  }
+
+  .account-tile--icon-expanded {
+    grid-column: span 2;
   }
 }

@@ -74,8 +74,10 @@ Forecast-date UX:
 - This is read-only simulation mode; write endpoints do not use forecast date.
 
 View mode UX:
-- Accounts/Contracts/Expenses share one table-vs-tiles mode state.
-- Toggling `Tiles`/`Table` in one tab applies to the other tab for consistency.
+- Accounts/Contracts/Expenses share one `Tiles` / `Icons` / `Table` mode state.
+- Toggling view mode in one tab applies to the other tabs for consistency.
+- `Icons` is the default dashboard view mode.
+- `Icons` mode shows compact icon-first cards with balance/value visible up front; clicking the icon expands that card into the same detail content/actions as the tile view.
 - In tile mode, stale trailing sections stay collapsed by default behind `CollapsibleSectionHeader.vue`:
   - Accounts: `Closed Accounts`
   - Contracts: `Expired`

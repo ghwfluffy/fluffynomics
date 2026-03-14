@@ -3,7 +3,7 @@
     <div class="top-controls">
       <ViewModeToggle v-model="contractsViewMode" />
     </div>
-    <div v-if="contractsViewMode === 'tiles'">
+    <div v-if="contractsViewMode !== 'table'">
       <AddTypePickerButton
         button-label="Add Contract"
         placeholder="Select contract type"
@@ -12,7 +12,7 @@
       />
     </div>
 
-    <template v-if="contractsViewMode === 'tiles'">
+    <template v-if="contractsViewMode !== 'table'">
     <section v-for="section in sections" :key="section.key" class="section-wrap">
       <CollapsibleSectionHeader
         :title="section.title"
@@ -20,73 +20,109 @@
         :collapsible="section.key === 'expired'"
         @toggle="toggleContractSection(section)"
       />
-      <div v-if="!isContractSectionCollapsed(section) && section.contracts.length" class="section-grid">
-        <article v-for="(contract, index) in section.contracts" :key="contract.id" class="cds--tile account-tile">
-          <img v-if="contractIconUrl(contract)" :src="contractIconUrl(contract)" class="tile-icon" alt="Contract icon" />
-          <div v-else class="tile-icon tile-icon--empty" />
+      <div
+        v-if="!isContractSectionCollapsed(section) && section.contracts.length"
+        class="section-grid"
+        :class="{ 'section-grid--icons': contractsViewMode === 'icons' }"
+      >
+        <article
+          v-for="(contract, index) in section.contracts"
+          :key="contract.id"
+          class="cds--tile account-tile"
+          :class="{
+            'account-tile--icon': contractsViewMode === 'icons',
+            'account-tile--icon-expanded': contractsViewMode === 'icons' && isContractIconExpanded(contract.id),
+          }"
+        >
           <button
-            v-if="index > 0"
-            class="tile-rank-trigger"
+            v-if="contractsViewMode === 'icons'"
+            class="icon-card-trigger"
             type="button"
-            title="Move left"
-            @click="moveContractLeft(section, index, $event)"
+            :aria-expanded="isContractIconExpanded(contract.id) ? 'true' : 'false'"
+            :aria-label="`${isContractIconExpanded(contract.id) ? 'Collapse' : 'Expand'} ${contract.name}`"
+            @click="toggleContractIconExpanded(contract.id)"
           >
-            ◀
+            <img v-if="contractIconUrl(contract)" :src="contractIconUrl(contract)" class="icon-card-icon" alt="" />
+            <div v-else class="icon-card-icon icon-card-icon--empty" aria-hidden="true"></div>
           </button>
-          <button
-            v-if="index < section.contracts.length - 1"
-            class="tile-rank-trigger tile-rank-trigger--right"
-            type="button"
-            title="Move right"
-            @click="moveContractRight(section, index, $event)"
+          <template v-else>
+            <img v-if="contractIconUrl(contract)" :src="contractIconUrl(contract)" class="tile-icon" alt="Contract icon" />
+            <div v-else class="tile-icon tile-icon--empty" />
+          </template>
+          <div
+            v-if="contractsViewMode === 'icons'"
+            class="icon-card-balance"
+            :class="contract.type === 'income' ? 'balance-asset' : 'balance-liability'"
           >
-            ▶
-          </button>
-          <img
-            v-if="contract.automatic"
-            src="/automatic.png"
-            class="tile-automatic-icon"
-            :title="nextPaymentTooltip(contract)"
-            alt="Automatic contract"
-          />
-          <span
-            v-else
-            class="tile-update-clock"
-            :class="lastUpdateTone(contract.updated_at)"
-            :title="`last update: ${formatLastUpdate(contract.updated_at)}`"
-            aria-label="Last update status"
-          />
-          <a
-            v-if="contract.url?.trim()"
-            class="tile-link"
-            :href="normalizedUrl(contract.url)"
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Open contract link"
-            @click.stop
-          >
-            ↗
-          </a>
-          <div class="tile-title">{{ contract.name }}</div>
-          <div class="tile-sub">{{ contract.organization || 'Unknown organization' }}</div>
-          <div class="tile-sub" :title="nextPaymentExactLabel(contract)">{{ nextPaymentCountdownLabel(contract) }}</div>
-          <div class="tile-balance" :class="contract.type === 'income' ? 'balance-asset' : 'balance-liability'">
-            {{ contract.type === 'income' ? 'Amount' : 'Payment' }} {{ cents(contract.amount_cents) }}
+            {{ cents(contract.amount_cents) }}
           </div>
-          <div class="tile-sub">{{ contractTypeLabel(contract.type) }} • {{ contract.automatic ? 'Automatic' : 'Manual' }}</div>
-          <div class="tile-type">{{ contractLinkedTargetLabel(contract) }}</div>
-          <div class="tile-actions">
-            <button class="tile-menu-trigger" type="button" aria-label="Contract menu" @click.stop="toggleTileMenu(contract.id)">
-              <span class="tile-menu-dots" aria-hidden="true"></span>
+          <template v-if="contractsViewMode === 'tiles' || isContractIconExpanded(contract.id)">
+            <button
+              v-if="index > 0"
+              class="tile-rank-trigger"
+              type="button"
+              title="Move left"
+              @click="moveContractLeft(section, index, $event)"
+            >
+              ◀
             </button>
-            <div v-if="activeTileMenuId === contract.id" class="tile-menu">
-              <button type="button" class="tile-menu-option" @click="startEditContract(contract)">Edit</button>
-              <button type="button" class="tile-menu-option" @click="openUpdateDialog(contract)">Update</button>
-              <button type="button" class="tile-menu-option tile-menu-option--danger" @click="openDeleteContract(contract.id)">
-                Delete
-              </button>
+            <button
+              v-if="index < section.contracts.length - 1"
+              class="tile-rank-trigger tile-rank-trigger--right"
+              type="button"
+              title="Move right"
+              @click="moveContractRight(section, index, $event)"
+            >
+              ▶
+            </button>
+            <img
+              v-if="contract.automatic"
+              src="/automatic.png"
+              class="tile-automatic-icon"
+              :title="nextPaymentTooltip(contract)"
+              alt="Automatic contract"
+            />
+            <span
+              v-else
+              class="tile-update-clock"
+              :class="lastUpdateTone(contract.updated_at)"
+              :title="`last update: ${formatLastUpdate(contract.updated_at)}`"
+              aria-label="Last update status"
+            />
+            <a
+              v-if="contract.url?.trim()"
+              class="tile-link"
+              :href="normalizedUrl(contract.url)"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open contract link"
+              @click.stop
+            >
+              ↗
+            </a>
+            <div :class="contractsViewMode === 'icons' ? 'icon-card-details' : ''">
+              <div class="tile-title">{{ contract.name }}</div>
+              <div class="tile-sub">{{ contract.organization || 'Unknown organization' }}</div>
+              <div class="tile-sub" :title="nextPaymentExactLabel(contract)">{{ nextPaymentCountdownLabel(contract) }}</div>
+              <div class="tile-balance" :class="contract.type === 'income' ? 'balance-asset' : 'balance-liability'">
+                {{ contract.type === 'income' ? 'Amount' : 'Payment' }} {{ cents(contract.amount_cents) }}
+              </div>
+              <div class="tile-sub">{{ contractTypeLabel(contract.type) }} • {{ contract.automatic ? 'Automatic' : 'Manual' }}</div>
+              <div class="tile-type">{{ contractLinkedTargetLabel(contract) }}</div>
             </div>
-          </div>
+            <div class="tile-actions">
+              <button class="tile-menu-trigger" type="button" aria-label="Contract menu" @click.stop="toggleTileMenu(contract.id)">
+                <span class="tile-menu-dots" aria-hidden="true"></span>
+              </button>
+              <div v-if="activeTileMenuId === contract.id" class="tile-menu">
+                <button type="button" class="tile-menu-option" @click="startEditContract(contract)">Edit</button>
+                <button type="button" class="tile-menu-option" @click="openUpdateDialog(contract)">Update</button>
+                <button type="button" class="tile-menu-option tile-menu-option--danger" @click="openDeleteContract(contract.id)">
+                  Delete
+                </button>
+              </div>
+            </div>
+          </template>
         </article>
       </div>
       <div v-else-if="!isContractSectionCollapsed(section)" class="cds--tile empty-state">No contracts yet.</div>
@@ -351,14 +387,14 @@ interface Section {
 }
 
 const props = withDefaults(
-  defineProps<{ accounts: AccountSummary[]; forecastDate?: string; viewMode?: 'tiles' | 'table' }>(),
+  defineProps<{ accounts: AccountSummary[]; forecastDate?: string; viewMode?: 'tiles' | 'icons' | 'table' }>(),
   {
-    viewMode: 'tiles',
+    viewMode: 'icons',
   },
 )
 
 const emit = defineEmits<{
-  (event: 'update:viewMode', value: 'tiles' | 'table'): void
+  (event: 'update:viewMode', value: 'tiles' | 'icons' | 'table'): void
 }>()
 
 const PRESET_CATEGORIES = ['Living', 'Entertainment', 'Health', 'Digital', 'Financial', 'Work', 'Family']
@@ -386,10 +422,11 @@ const makeContractForm = (): ContractForm => ({
 })
 
 const contracts = ref<ContractPayload[]>([])
-const contractsViewMode = computed<'tiles' | 'table'>({
+const contractsViewMode = computed<'tiles' | 'icons' | 'table'>({
   get: () => props.viewMode,
   set: (value) => emit('update:viewMode', value),
 })
+const expandedContractIconIds = ref<Set<string>>(new Set())
 const contractsTableFilter = ref('')
 const contractsSortKey = ref<'group' | 'name' | 'organization' | 'type' | 'amount' | 'next_payment_days' | 'status'>('group')
 const contractsSortDir = ref<'asc' | 'desc'>('asc')
@@ -494,6 +531,18 @@ const toggleContractSection = (section: Section) => {
     return
   }
   expiredContractsSectionOpen.value = !expiredContractsSectionOpen.value
+}
+
+const isContractIconExpanded = (contractId: string) => expandedContractIconIds.value.has(contractId)
+
+const toggleContractIconExpanded = (contractId: string) => {
+  const next = new Set(expandedContractIconIds.value)
+  if (next.has(contractId)) {
+    next.delete(contractId)
+  } else {
+    next.add(contractId)
+  }
+  expandedContractIconIds.value = next
 }
 
 const contractsTableRows = computed(() => {
