@@ -223,7 +223,7 @@ Icon handling during import:
 ## Example Data Contract
 
 - `users.example_data` controls whether sample data should exist.
-- `python/mp/sample_data.py` is part of the product experience, not test-only helper.
+- `python/mp/db/sample_data.py` is part of the product experience, not test-only helper.
 - When adding schema/features/account types, update sample seeding with representative records.
 - Keep sample data varied where UX depends on state (for example varied `last_update` ages for clock-status colors).
 - For defaults-driven UX, keep startup default loaders aligned with DB schema (example: organization defaults + icons).

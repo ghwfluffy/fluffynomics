@@ -7,7 +7,7 @@ from mp.db import run_database_upgrades
 from mp.api.auth import initialize_session_signing_key
 from mp.contracts.scheduler import start_contract_scheduler, stop_contract_scheduler
 from mp.organization_defaults import ensure_default_organizations_loaded
-from mp.sample_data import ensure_example_data_for_opted_in_users
+from mp.db.sample_data import ensure_example_data_for_opted_in_users
 
 # FastAPI
 app: FastAPI = FastAPI()

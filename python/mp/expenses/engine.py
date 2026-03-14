@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from mp.recurring_period import RecurringPeriod, parse_recurring_period
+from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import Account
 from mp.schema.expense import Expense
 

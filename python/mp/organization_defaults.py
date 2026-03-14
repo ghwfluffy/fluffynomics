@@ -4,7 +4,7 @@ import yaml
 from sqlalchemy.orm import Session
 
 from mp.db.core import SessionLocal
-from mp.icons import digest_icon, normalize_icon_png
+from mp.db.icons import digest_icon, normalize_icon_png
 from mp.schema.account import DefaultIcon, IconAsset, Organization
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from mp.api.auth import get_current_user
 from mp.db import get_db
-from mp.recurring_period import parse_recurring_period
+from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
 from mp.schema.expense import (
     Expense,

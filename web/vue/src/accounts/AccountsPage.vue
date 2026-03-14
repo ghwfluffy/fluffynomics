@@ -537,6 +537,26 @@
       >
         <h3>Update {{ updatingAccount?.name }}</h3>
         <p>{{ updateDescription }}</p>
+        <div v-if="showWellsFargoStatementImport" class="statement-import-panel">
+          <div class="statement-import-copy">
+            <strong>Wells Fargo Account PDF</strong>
+            <span>Upload a Wells Fargo account summary PDF to sync matching balances by account last 4.</span>
+          </div>
+          <button
+            type="button"
+            class="cds--btn cds--btn--secondary"
+            @click="openWellsFargoStatementPicker"
+          >
+            Import Wells Fargo PDF
+          </button>
+          <input
+            ref="wellsFargoStatementInput"
+            class="icon-upload-input"
+            type="file"
+            accept="application/pdf,.pdf"
+            @change="uploadWellsFargoStatement"
+          />
+        </div>
 
         <div class="form-grid form-grid--single">
           <template v-if="updateMode === 'credit_card_payment'">
@@ -1479,6 +1499,7 @@ const transferForm = ref({
 const activeTileMenuId = ref<string | null>(null)
 const iconFileInput = ref<HTMLInputElement | null>(null)
 const robinhoodStatementInput = ref<HTMLInputElement | null>(null)
+const wellsFargoStatementInput = ref<HTMLInputElement | null>(null)
 const contractsTabRef = ref<ContractsTabExpose | null>(null)
 const expensesTabRef = ref<ExpensesTabExpose | null>(null)
 const iconPickerDialog = ref(false)
@@ -2054,6 +2075,9 @@ const showRobinhoodStatementImport = computed(
   () =>
     updatingAccount.value?.type === 'stocks_account' &&
     (updatingAccount.value.organization || '').trim().toLowerCase() === 'robinhood',
+)
+const showWellsFargoStatementImport = computed(
+  () => (updatingAccount.value?.organization || '').trim().toLowerCase() === 'wells fargo',
 )
 
 const queuedCreditCardPaymentSummary = computed(() => {
@@ -3840,6 +3864,10 @@ const openRobinhoodStatementPicker = () => {
   robinhoodStatementInput.value?.click()
 }
 
+const openWellsFargoStatementPicker = () => {
+  wellsFargoStatementInput.value?.click()
+}
+
 const openIconPickerModal = () => {
   iconPickerDraftId.value = createForm.value.icon_id
   iconPickerDraftType.value = createForm.value.icon_type || 'Icon'
@@ -3938,6 +3966,24 @@ const uploadRobinhoodStatement = async (event: Event) => {
   const form = new FormData()
   form.append('file', file)
   await request.post(`/accounts/${account.id}/import-robinhood-statement`, form)
+  input.value = ''
+  closeUpdateDialog()
+  await loadAccounts()
+}
+
+const uploadWellsFargoStatement = async (event: Event) => {
+  if (guardMaskedMode('update accounts')) {
+    return
+  }
+  const account = updatingAccount.value
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!account || !file) {
+    return
+  }
+  const form = new FormData()
+  form.append('file', file)
+  await request.post(`/accounts/${account.id}/import-wells-fargo-statement`, form)
   input.value = ''
   closeUpdateDialog()
   await loadAccounts()

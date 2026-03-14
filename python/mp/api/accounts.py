@@ -12,9 +12,10 @@ from mp.db import get_db
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.expenses.engine import run_expense_simulation
-from mp.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
-from mp.robinhood_statement import parse_robinhood_statement
-from mp.recurring_period import parse_recurring_period
+from mp.db.icons import digest_icon, generate_algorithmic_icon, normalize_icon_png
+from mp.imports.robinhood_statement import parse_robinhood_statement
+from mp.imports.wells_fargo_statement import parse_wells_fargo_statement
+from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import (
     Account,
     AccountTransfer,
@@ -513,6 +514,10 @@ def _is_robinhood_account(account: Account) -> bool:
     return (account.organization or "").strip().lower() == "robinhood"
 
 
+def _is_wells_fargo_account(account: Account) -> bool:
+    return (account.organization or "").strip().lower() == "wells fargo"
+
+
 def _get_robinhood_crypto_exchange_account(
     db: Session, user_id: UUID
 ) -> Account | None:
@@ -534,6 +539,11 @@ def _get_robinhood_crypto_exchange_account(
             detail="Multiple Robinhood crypto exchange accounts found",
         )
     return robinhood_matches[0] if robinhood_matches else None
+
+
+def _account_last4_digits(account_number: str | None) -> str:
+    digits = "".join(ch for ch in (account_number or "") if ch.isdigit())
+    return digits[-4:] if len(digits) >= 4 else ""
 
 
 def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
@@ -1840,6 +1850,91 @@ async def import_robinhood_statement(
     return _apply_active_account_transfers(
         db, current_user.id, [_serialize_account(db, account)]
     )[0]
+
+
+@router.post(
+    "/accounts/{account_id}/import-wells-fargo-statement",
+    response_model=list[AccountSchema],
+)
+async def import_wells_fargo_statement(
+    account_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[AccountSchema]:
+    _settle_due_account_transfers(db, current_user.id)
+    account = (
+        db.query(Account)
+        .filter(Account.id == account_id, Account.user_id == current_user.id)
+        .first()
+    )
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if not _is_wells_fargo_account(account):
+        raise HTTPException(
+            status_code=400,
+            detail="Wells Fargo statement import is only supported for Wells Fargo accounts",
+        )
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Statement file is empty")
+
+    try:
+        imported_balances = parse_wells_fargo_statement(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    matching_accounts = [
+        item
+        for item in db.query(Account)
+        .filter(Account.user_id == current_user.id, Account.organization.isnot(None))
+        .all()
+        if _is_wells_fargo_account(item)
+    ]
+    accounts_by_last4: dict[str, list[Account]] = {}
+    for item in matching_accounts:
+        last4 = _account_last4_digits(item.account_number)
+        if last4:
+            accounts_by_last4.setdefault(last4, []).append(item)
+
+    now = datetime.utcnow()
+    updated_accounts: list[Account] = []
+    updated_ids: set[UUID] = set()
+    for imported in imported_balances:
+        matches = accounts_by_last4.get(imported.last4, [])
+        if len(matches) > 1:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Multiple Wells Fargo accounts matched last 4 {imported.last4}",
+            )
+        if not matches:
+            continue
+        matched = matches[0]
+        field = _account_balance_field(matched.type)
+        if field is None:
+            continue
+        setattr(matched, field, imported.balance_cents)
+        matched.last_update = now
+        _record_account_value_history(db, matched)
+        if matched.id not in updated_ids:
+            updated_ids.add(matched.id)
+            updated_accounts.append(matched)
+
+    if not updated_accounts:
+        raise HTTPException(
+            status_code=400,
+            detail="No Wells Fargo accounts in this PDF matched your saved account last-4 values",
+        )
+
+    db.commit()
+    for item in updated_accounts:
+        db.refresh(item)
+    return _apply_active_account_transfers(
+        db,
+        current_user.id,
+        [_serialize_account(db, item) for item in updated_accounts],
+    )
 
 
 @router.post(

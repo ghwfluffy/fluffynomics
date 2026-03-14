@@ -10,7 +10,7 @@ from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.db import get_db
 from mp.expenses.engine import run_expense_simulation
-from mp.recurring_period import parse_recurring_period
+from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
 from mp.schema.contract import (
     Contract,

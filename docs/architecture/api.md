@@ -106,6 +106,11 @@ Defined in `python/mp/api/accounts.py`.
   - replaces the stock account's positions using statement quantity plus derived per-share cents from statement equity/market value
   - updates stock-account cash from `Brokerage Cash Balance` or `Individual cash` when present
   - if the PDF includes cryptocurrencies, backend also looks up the user's Robinhood `crypto_exchange` account and replaces its crypto positions from the statement
+- `POST /accounts/{account_id}/import-wells-fargo-statement`
+  - Wells Fargo helper for account update flow
+  - accepts a Wells Fargo account-summary PDF and parses account last-4 plus available/outstanding balances
+  - matches user-owned Wells Fargo accounts by the last 4 digits of `account_number`
+  - updates every uniquely matched direct-balance account from the PDF in one import pass
 - `POST /accounts/{account_id}/queue-credit-card-payment`
   - credit-card-only update flow used by the dashboard Update modal
   - payload captures `current_balance_cents`, `pending_balance_cents`, `rewards_balance_cents`, `payment_cents`, and `source_account_id`
@@ -387,7 +392,7 @@ For **accounts**:
 
 - Register supports `add_example_data`.
 - Users store `example_data` boolean in DB.
-- Startup sync/seeding uses `python/mp/sample_data.py`.
+- Startup sync/seeding uses `python/mp/db/sample_data.py`.
 - When adding new account features/types, update sample data so opted-in users receive representative records.
 
 ## Organization/Icon Defaults

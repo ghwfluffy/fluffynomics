@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from mp.db import get_db
-from mp.sample_data import ensure_example_data_for_user
+from mp.db.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
 from mp.schema.account import AccountValueHistory, NetWorthDailySnapshot, Stock
 from mp.schema.contract import Contract, ContractPosting
