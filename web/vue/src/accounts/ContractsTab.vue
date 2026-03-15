@@ -1073,9 +1073,25 @@ const nextPaymentTooltip = (contract: ContractPayload) => `next payment: ${forma
 const nextPaymentExactLabel = (contract: ContractPayload) => `Next payment date: ${formatPaymentDate(nextPaymentDate(contract))}`
 
 const nextPaymentCountdownLabel = (contract: ContractPayload) => {
+  if (isExpired(contract)) {
+    return ''
+  }
   const days = nextPaymentDays(contract)
   if (days < 0) {
     return 'Next payment: Unknown'
+  }
+  if (days === 0) {
+    const { kind, payload } = parseContractPeriod(contract)
+    const next = nextPaymentDate(contract)
+    if (next && kind) {
+      const following = advanceOccurrence(next, kind, payload, contract.payment_day || 1)
+      if (following) {
+        const today = startOfDay(new Date())
+        const target = startOfDay(following)
+        const followingDays = Math.max(0, Math.floor((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+        return `Next payment: ${followingDays} day${followingDays === 1 ? '' : 's'}`
+      }
+    }
   }
   return `Next payment: ${days} day${days === 1 ? '' : 's'}`
 }
