@@ -231,6 +231,35 @@ def parse_recurring_period(raw: str) -> RecurringPeriod:
         raise ValueError("Recurring period schema is invalid") from exc
 
 
+def previous_occurrence_before(
+    period: RecurringPeriod, before_value: date
+) -> date | None:
+    search = before_value - timedelta(days=400)
+    current = period.next_on_or_after(search)
+    previous: date | None = None
+    guard = 0
+    while current < before_value and guard < 2000:
+        previous = current
+        current = period.next_on_or_after(current + timedelta(days=1))
+        guard += 1
+    return previous
+
+
+def first_due_after_last_occurrence(
+    period: RecurringPeriod,
+    *,
+    search_start: date,
+    last_occurrence: date | None = None,
+) -> date:
+    next_due = period.next_on_or_after(search_start)
+    if last_occurrence is None:
+        return next_due
+    previous_due = previous_occurrence_before(period, next_due)
+    if previous_due is not None and previous_due < last_occurrence < next_due:
+        return period.next_on_or_after(next_due + timedelta(days=1))
+    return next_due
+
+
 def ordinal(value: int) -> str:
     if 10 <= value % 100 <= 20:
         suffix = "th"

@@ -225,6 +225,7 @@ Defined in `python/mp/api/contracts.py`.
 - `POST /contracts`
 - `PUT /contracts/{contract_id}`
   - contract `type` is immutable after create
+  - early-payment rule: when `last_payment_date` is manually set after the previous scheduled occurrence but before the upcoming scheduled occurrence, the upcoming occurrence is treated as already covered and skipped by scheduler/forecast logic
 - `PUT /contracts/{contract_id}/rank`
   - supports tile reorder behavior in category sections
 - `DELETE /contracts/{contract_id}`
@@ -235,6 +236,7 @@ Defined in `python/mp/api/contracts.py`.
     - `as_of_date` or `through_date`
   - dry-run returns planned postings without mutating balances
   - apply mode writes postings, updates balances, advances `last_payment_date`, records touched account value-history points, and refreshes the user’s daily net-worth snapshot
+  - respects the same early-payment skip rule used by contract reads and projections
   - liability-aware balance deltas:
     - for linked liability accounts (`credit_card`, `line_of_credit`, `loan`), non-transfer contract deltas are inverted at balance layer
     - this means `payment` contracts increase liability balances (more owed), while `income` contracts decrease liability balances
@@ -260,6 +262,9 @@ Defined in `python/mp/api/expenses.py`.
 - `POST /expenses`
 - `PUT /expenses/{expense_id}`
 - `DELETE /expenses/{expense_id}`
+
+Expense recurrence rule:
+- when `last_expensed_date` is manually set after the previous scheduled occurrence but before the upcoming scheduled occurrence, the upcoming occurrence is treated as already covered and derived `next_expensed_date` skips to the following cycle.
 
 ## Investment API Behavior
 

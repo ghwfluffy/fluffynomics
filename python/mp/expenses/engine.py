@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from mp.db.account_history import record_account_value_history
 from mp.db.audit_log import format_cents, record_audit_log
-from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
+from mp.models.recurring_period import (
+    RecurringPeriod,
+    first_due_after_last_occurrence,
+    parse_recurring_period,
+)
 from mp.schema.account import Account
 from mp.schema.audit_log import AuditLogTriggerType
 from mp.schema.expense import Expense
@@ -73,11 +77,15 @@ def _account_name(account: Account) -> str:
 
 
 def _first_due(expense: Expense, period: RecurringPeriod | None) -> date | None:
-    if expense.next_expensed_date is not None:
+    if expense.next_date_is_static and expense.next_expensed_date is not None:
         return expense.next_expensed_date
-    if expense.last_expensed_date is None or period is None:
-        return None
-    return period.next_on_or_after(expense.last_expensed_date + timedelta(days=1))
+    if expense.last_expensed_date is not None and period is not None:
+        return first_due_after_last_occurrence(
+            period,
+            search_start=expense.last_expensed_date + timedelta(days=1),
+            last_occurrence=expense.last_expensed_date,
+        )
+    return expense.next_expensed_date
 
 
 def _iter_due_dates(

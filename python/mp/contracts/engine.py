@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from mp.db.account_history import record_account_value_history
 from mp.db.audit_log import format_cents, record_audit_log
-from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
+from mp.models.recurring_period import (
+    RecurringPeriod,
+    first_due_after_last_occurrence,
+    parse_recurring_period,
+)
 from mp.schema.account import (
     Account,
 )
@@ -66,32 +70,13 @@ def _parse_period(contract: Contract) -> RecurringPeriod | None:
         return None
 
 
-def _previous_occurrence(period: RecurringPeriod, before_value: date) -> date | None:
-    # Generic backwards lookup across period types.
-    search = before_value - timedelta(days=400)
-    current = period.next_on_or_after(search)
-    previous: date | None = None
-    guard = 0
-    while current < before_value and guard < 2000:
-        previous = current
-        current = period.next_on_or_after(current + timedelta(days=1))
-        guard += 1
-    return previous
-
-
 def _first_due_after_last_payment(contract: Contract, period: RecurringPeriod) -> date:
     baseline = contract.last_payment_date or contract.created_at.date()
-    next_due = period.next_on_or_after(baseline + timedelta(days=1))
-    if contract.last_payment_date is None:
-        return next_due
-    previous_due = _previous_occurrence(period, next_due)
-    if (
-        previous_due is not None
-        and previous_due < contract.last_payment_date < next_due
-    ):
-        # Early payment: skip the already-covered upcoming cycle.
-        return period.next_on_or_after(next_due + timedelta(days=1))
-    return next_due
+    return first_due_after_last_occurrence(
+        period,
+        search_start=baseline + timedelta(days=1),
+        last_occurrence=contract.last_payment_date,
+    )
 
 
 def _iter_due_dates(contract: Contract, up_to: date) -> Iterable[date]:

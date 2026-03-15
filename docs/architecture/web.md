@@ -74,6 +74,9 @@ Recurring period UI (`RecurringPeriodField.vue`) must support interval schedules
 
 Use `AddTypePickerButton.vue` for right-aligned "Add ..." flows that open a type-selection dropdown from the action button. This is now shared by Accounts and Contracts tabs.
 
+Recurring schedule display rule:
+- when a contract or expense is marked as paid/expensed early by manually setting its last-occurrence date into the current cycle, dashboard counters, calendar rendering, and projection/proration views must skip the now-covered upcoming scheduled date instead of continuing to show it.
+
 Forecast-date UX:
 - Dashboard widgets live under the `Overview` tab and include a popover `Set Forecast Date` control (`AccountsPage.vue`).
 - When set, frontend sends `as_of_date` in read calls:

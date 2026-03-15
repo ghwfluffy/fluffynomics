@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 from mp.api.auth import get_current_user
 from mp.db import get_db
 from mp.db.audit_log import format_cents, record_audit_log
-from mp.models.recurring_period import parse_recurring_period
+from mp.models.recurring_period import (
+    first_due_after_last_occurrence,
+    parse_recurring_period,
+)
 from mp.schema.account import Account, AccountIconType, Organization
 from mp.schema.expense import (
     Expense,
@@ -93,7 +96,11 @@ def _derive_next_expensed_date(
         period = parse_recurring_period(normalized)
     except ValueError:
         return None
-    return period.next_on_or_after(last_expensed_date + timedelta(days=1))
+    return first_due_after_last_occurrence(
+        period,
+        search_start=last_expensed_date + timedelta(days=1),
+        last_occurrence=last_expensed_date,
+    )
 
 
 def _validate_payload(payload: ExpenseCreateSchema) -> None:
@@ -128,7 +135,12 @@ def _owned_account(
 
 
 def _serialize_expense(expense: Expense) -> ExpenseSchema:
-    return ExpenseSchema.model_validate(expense)
+    serialized = ExpenseSchema.model_validate(expense)
+    if not serialized.next_date_is_static:
+        serialized.next_expensed_date = _derive_next_expensed_date(
+            serialized.last_expensed_date, serialized.general_frequency
+        )
+    return serialized
 
 
 def _expense_name(expense: Expense) -> str:

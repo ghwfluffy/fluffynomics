@@ -3781,6 +3781,27 @@ const previousOccurrenceBefore = (
   return addDays(current, -1)
 }
 
+const nextOccurrenceSkippingEarly = (
+  next: Date | null,
+  kind: string,
+  payload: Record<string, unknown> | null,
+  fallbackDay: number,
+  lastOccurredRaw?: string,
+) => {
+  if (!next || !lastOccurredRaw) {
+    return next
+  }
+  const lastOccurred = parseDateOnly(lastOccurredRaw)
+  if (!lastOccurred) {
+    return next
+  }
+  const expectedLast = previousOccurrenceBefore(next, kind, payload, fallbackDay)
+  if (expectedLast && lastOccurred > expectedLast && lastOccurred < next) {
+    return recurringNext(next, kind, payload, fallbackDay) || next
+  }
+  return next
+}
+
 const weekdayPayloadIndex = (value: Date) => (value.getDay() === 0 ? 6 : value.getDay() - 1)
 
 const recurringSpecFromRaw = (
@@ -3852,13 +3873,19 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
     return 0
   }
   let previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
-  if (contract.last_payment_date) {
+  const adjustedNext = nextOccurrenceSkippingEarly(
+    next,
+    spec.kind,
+    spec.payload,
+    contract.payment_day || 1,
+    contract.last_payment_date,
+  )
+  if (adjustedNext && adjustedNext.getTime() !== next.getTime()) {
     const paidDate = parseDateOnly(contract.last_payment_date)
-    const expectedLast = previous
-    if (paidDate && expectedLast && paidDate > expectedLast && paidDate < next) {
-      next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1) || next
+    if (paidDate) {
       previous = paidDate
     }
+    next = adjustedNext
   }
   const nextIso = formatCalendarDateIso(next)
   if (contract.expiration_date && contract.expiration_date.slice(0, 10) < nextIso) {
@@ -3980,13 +4007,13 @@ const buildManualContractBreakdown = (
     if (!next) {
       continue
     }
-    if (contract.last_payment_date) {
-      const paidDate = parseDateOnly(contract.last_payment_date)
-      const expectedLast = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
-      if (paidDate && expectedLast && paidDate > expectedLast && paidDate < next) {
-        next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1) || next
-      }
-    }
+    next = nextOccurrenceSkippingEarly(
+      next,
+      spec.kind,
+      spec.payload,
+      contract.payment_day || 1,
+      contract.last_payment_date,
+    )
     let guard = 0
     while (next && next <= endDay && guard < 240) {
       const dateIso = localIsoDate(next)
@@ -4012,10 +4039,12 @@ const recurringOccurrencesInMonth = (
   kind: string,
   payload: Record<string, unknown> | null,
   fallbackDay: number,
+  lastOccurredRaw?: string,
 ) => {
   const results: Date[] = []
   let previousIso = ''
   let next = recurringOnOrAfter(monthStart, kind, payload, fallbackDay)
+  next = nextOccurrenceSkippingEarly(next, kind, payload, fallbackDay, lastOccurredRaw)
   let guard = 0
   while (next && next <= monthEnd && guard < 120) {
     const nextIso = formatCalendarDateIso(next)
@@ -4095,6 +4124,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
       kind,
       payload,
       contract.payment_day || 1,
+      contract.last_payment_date,
     )
     for (const date of dates) {
       const dateIso = formatCalendarDateIso(date)

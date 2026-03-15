@@ -147,6 +147,9 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - Key rule: unique `(contract_id, effective_date)` ensures idempotent apply behavior.
 - Posting records store signed `delta_cents` and `applied_at`.
 - Automatic execution updates account balances and advances `contracts.last_payment_date`.
+- Early-occurrence rule:
+  - for contracts and derived expense next-dates, a manually set `last_payment_date` / `last_expensed_date` that lands after the previous scheduled occurrence but before the next scheduled occurrence covers that next scheduled occurrence.
+  - scheduler application, derived next-date storage, and projection/calendar reads must all skip that covered occurrence.
 
 ### User-scoped uniqueness
 
