@@ -46,6 +46,7 @@ class ContractSimulation:
     postings: list[SimulatedPosting]
     account_deltas: dict[UUID, int]
     projected_last_payment: dict[UUID, date]
+    projected_next_payment: dict[UUID, date | None]
 
 
 def _as_date(raw: date | str | None) -> date | None:
@@ -79,6 +80,16 @@ def _first_due_after_last_payment(contract: Contract, period: RecurringPeriod) -
     )
 
 
+def _valid_next_payment_override(contract: Contract) -> date | None:
+    override_due = contract.next_payment_date
+    if override_due is None:
+        return None
+    baseline = contract.last_payment_date or contract.created_at.date()
+    if override_due <= baseline:
+        return None
+    return override_due
+
+
 def _iter_due_dates(contract: Contract, up_to: date) -> Iterable[date]:
     period = _parse_period(contract)
     if period is None:
@@ -87,8 +98,16 @@ def _iter_due_dates(contract: Contract, up_to: date) -> Iterable[date]:
     end_date = min(expiry, up_to)
     if end_date < (contract.last_payment_date or contract.created_at.date()):
         return []
-    due = _first_due_after_last_payment(contract, period)
     items: list[date] = []
+    regular_due = _first_due_after_last_payment(contract, period)
+    override_due = _valid_next_payment_override(contract)
+    if override_due is not None:
+        if override_due > end_date:
+            return []
+        items.append(override_due)
+        due = period.next_on_or_after(regular_due + timedelta(days=1))
+    else:
+        due = regular_due
     guard = 0
     while due <= end_date and guard < 4000:
         items.append(due)
@@ -141,7 +160,10 @@ def run_contract_simulation(
         ).scalar_one()
         if not acquired:
             return ContractSimulation(
-                postings=[], account_deltas={}, projected_last_payment={}
+                postings=[],
+                account_deltas={},
+                projected_last_payment={},
+                projected_next_payment={},
             )
 
     contracts = (
@@ -156,9 +178,13 @@ def run_contract_simulation(
     postings: list[SimulatedPosting] = []
     account_deltas: dict[UUID, int] = {}
     projected_last_payment: dict[UUID, date] = {}
+    projected_next_payment: dict[UUID, date | None] = {}
     now = datetime.utcnow()
 
     for contract in contracts:
+        override_due = _valid_next_payment_override(contract)
+        if override_due is not None:
+            projected_next_payment[contract.id] = override_due
         linked_account_id = contract.linked_account_id
         if linked_account_id is None and user is not None:
             if contract.linked_wallet == "paypal":
@@ -280,6 +306,8 @@ def run_contract_simulation(
             projected_last_payment[contract.id] = max(
                 projected_last_payment.get(contract.id, due_date), due_date
             )
+            if override_due is not None and due_date == override_due:
+                projected_next_payment[contract.id] = None
 
             if contract.type == "transfer":
                 assert source is not None
@@ -375,10 +403,16 @@ def run_contract_simulation(
 
         if apply and contract.id in projected_last_payment:
             contract.last_payment_date = projected_last_payment[contract.id]
+            if (
+                override_due is not None
+                and projected_next_payment.get(contract.id) is None
+            ):
+                contract.next_payment_date = None
             contract.updated_at = now
 
     return ContractSimulation(
         postings=postings,
         account_deltas=account_deltas,
         projected_last_payment=projected_last_payment,
+        projected_next_payment=projected_next_payment,
     )

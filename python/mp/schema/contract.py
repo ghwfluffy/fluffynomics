@@ -54,6 +54,7 @@ class Contract(Base):
     )
     linked_wallet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    next_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     payment_period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     expiration_date: Mapped[date] = mapped_column(
@@ -109,6 +110,7 @@ class ContractBaseSchema(BaseModel):
     linked_wallet: Optional[Literal["paypal", "google_pay"]] = None
     source_account_id: Optional[UUID] = None
     last_payment_date: Optional[date] = None
+    next_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
     payment_day: Optional[int] = None
     expiration_date: Optional[date] = None
@@ -136,6 +138,7 @@ class ContractUpdateSchema(BaseModel):
     linked_wallet: Optional[Literal["paypal", "google_pay"]] = None
     source_account_id: Optional[UUID] = None
     last_payment_date: Optional[date] = None
+    next_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
     payment_day: Optional[int] = None
     expiration_date: Optional[date] = None

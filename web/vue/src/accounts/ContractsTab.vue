@@ -267,6 +267,12 @@
             <label for="contract-expired">Expired</label>
           </div>
           <BankField v-model="updateForm.last_payment_date" label="Last Payment Date" type="date" />
+          <BankField
+            v-if="updatingContract?.type === 'payment'"
+            v-model="updateForm.next_payment_date"
+            label="Next Payment Override"
+            type="date"
+          />
           <BankField v-model="updateForm.expiration_date" label="Expiration Date" type="date" />
         </div>
         <div class="modal-actions">
@@ -354,6 +360,7 @@ interface ContractPayload {
   linked_wallet?: 'paypal' | 'google_pay'
   source_account_id?: string
   last_payment_date?: string
+  next_payment_date?: string
   payment_period?: string
   payment_day?: number
   expiration_date?: string
@@ -362,6 +369,7 @@ interface ContractPayload {
   url?: string
   account_number?: string
   billing_day?: number
+  created_at?: string
   updated_at?: string
 }
 
@@ -445,7 +453,7 @@ const deleteContractDialog = ref(false)
 const pendingDeleteContractId = ref<string | null>(null)
 const updateDialog = ref(false)
 const updatingContract = ref<ContractPayload | null>(null)
-const updateForm = ref<{ last_payment_date?: string; expiration_date?: string; expired: boolean }>({
+const updateForm = ref<{ last_payment_date?: string; next_payment_date?: string; expiration_date?: string; expired: boolean }>({
   expired: false,
 })
 const expiredContractsSectionOpen = ref(false)
@@ -766,6 +774,13 @@ const startOfDay = (value: Date) => {
   return d
 }
 
+const addDays = (value: Date, days: number) => {
+  const d = new Date(value)
+  d.setDate(d.getDate() + days)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 const lastDayOfMonth = (year: number, monthZeroBased: number) => new Date(year, monthZeroBased + 1, 0).getDate()
 
 const clampMonthDay = (year: number, monthZeroBased: number, day: number) =>
@@ -1034,8 +1049,53 @@ const advanceOccurrence = (
   return occurrenceOnOrAfter(startOfDay(probe), kind, payload, fallbackDay)
 }
 
+const firstRegularDueAfterLastPayment = (contract: ContractPayload) => {
+  const { kind, payload } = parseContractPeriod(contract)
+  const dayFromContract = contract.payment_day || 1
+  if (!kind) {
+    return null
+  }
+  const baselineRaw = contract.last_payment_date?.slice(0, 10)
+  const createdRaw = contract.created_at?.slice(0, 10)
+  const baseline = baselineRaw
+    ? startOfDay(new Date(`${baselineRaw}T00:00:00`))
+    : createdRaw
+      ? startOfDay(new Date(`${createdRaw}T00:00:00`))
+      : startOfDay(new Date())
+  let next = occurrenceOnOrAfter(addDays(baseline, 1), kind, payload, dayFromContract)
+  if (!next) {
+    return null
+  }
+  if (baselineRaw) {
+    const paidDate = startOfDay(new Date(`${baselineRaw}T00:00:00`))
+    if (!Number.isNaN(paidDate.getTime())) {
+      const expectedLast = previousOccurrenceBefore(next, kind, payload, dayFromContract)
+      if (expectedLast && paidDate > expectedLast && paidDate < next) {
+        const nextAfter = advanceOccurrence(next, kind, payload, dayFromContract)
+        if (nextAfter) {
+          next = nextAfter
+        }
+      }
+    }
+  }
+  return next
+}
+
 const nextPaymentDate = (contract: ContractPayload) => {
   const today = startOfDay(new Date())
+  const overrideRaw = contract.next_payment_date?.slice(0, 10)
+  const paidRaw = contract.last_payment_date?.slice(0, 10)
+  const overrideDate = overrideRaw ? startOfDay(new Date(`${overrideRaw}T00:00:00`)) : null
+  const paidDate = paidRaw ? startOfDay(new Date(`${paidRaw}T00:00:00`)) : null
+  if (
+    overrideDate &&
+    !Number.isNaN(overrideDate.getTime()) &&
+    (!paidDate || Number.isNaN(paidDate.getTime()) || overrideDate > paidDate)
+  ) {
+    if (overrideDate >= today) {
+      return overrideDate
+    }
+  }
   const { kind, payload } = parseContractPeriod(contract)
   const dayFromContract = contract.payment_day || 1
   if (!kind) {
@@ -1045,8 +1105,6 @@ const nextPaymentDate = (contract: ContractPayload) => {
   if (!next) {
     return null
   }
-
-  const paidRaw = contract.last_payment_date?.slice(0, 10)
   if (paidRaw) {
     const paidDate = startOfDay(new Date(`${paidRaw}T00:00:00`))
     if (!Number.isNaN(paidDate.getTime())) {
@@ -1084,7 +1142,16 @@ const nextPaymentCountdownLabel = (contract: ContractPayload) => {
     const { kind, payload } = parseContractPeriod(contract)
     const next = nextPaymentDate(contract)
     if (next && kind) {
-      const following = advanceOccurrence(next, kind, payload, contract.payment_day || 1)
+      const overrideRaw = contract.next_payment_date?.slice(0, 10)
+      const overrideDate = overrideRaw ? startOfDay(new Date(`${overrideRaw}T00:00:00`)) : null
+      const regularDue = firstRegularDueAfterLastPayment(contract)
+      const following =
+        overrideDate &&
+        !Number.isNaN(overrideDate.getTime()) &&
+        startOfDay(next).getTime() === overrideDate.getTime() &&
+        regularDue
+          ? advanceOccurrence(regularDue, kind, payload, contract.payment_day || 1)
+          : advanceOccurrence(next, kind, payload, contract.payment_day || 1)
       if (following) {
         const today = startOfDay(new Date())
         const target = startOfDay(following)
@@ -1295,6 +1362,7 @@ const openUpdateDialog = (contract: ContractPayload) => {
   updatingContract.value = contract
   updateForm.value = {
     last_payment_date: contract.last_payment_date?.slice(0, 10) || '',
+    next_payment_date: contract.next_payment_date?.slice(0, 10) || '',
     expiration_date: contract.expiration_date?.slice(0, 10) || '',
     expired: isExpired(contract),
   }
@@ -1322,6 +1390,23 @@ const submitUpdateDialog = async () => {
       return
     }
   }
+  if (
+    updatingContract.value.type !== 'payment' &&
+    updateForm.value.next_payment_date
+  ) {
+    errorMessage.value = 'Next payment override is only supported for payment contracts'
+    snackbar.value = true
+    return
+  }
+  if (
+    updateForm.value.last_payment_date &&
+    updateForm.value.next_payment_date &&
+    updateForm.value.next_payment_date <= updateForm.value.last_payment_date
+  ) {
+    errorMessage.value = 'Next payment override must be after last payment date'
+    snackbar.value = true
+    return
+  }
   const todayIso = new Date().toISOString().slice(0, 10)
   let expirationDate = updateForm.value.expiration_date || null
   if (updateForm.value.expired) {
@@ -1336,6 +1421,10 @@ const submitUpdateDialog = async () => {
 
   await request.put(`/contracts/${updatingContract.value.id}`, {
     last_payment_date: updateForm.value.last_payment_date || null,
+    next_payment_date:
+      updatingContract.value.type === 'payment'
+        ? updateForm.value.next_payment_date || null
+        : null,
     expiration_date: expirationDate,
   })
   closeUpdateDialog()

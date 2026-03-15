@@ -281,7 +281,7 @@ Contracts intentionally mirror account tile UX:
 - link icon and update-age clock badge,
 - next-payment countdown text on tiles/tables should expose the exact scheduled date on hover,
 - bottom-right three-dot menu for edit/delete.
-- `Update` action owns payment-timing lifecycle fields (`last_payment_date`, `expiration_date`), while the main edit modal omits them.
+- `Update` action owns payment-timing lifecycle fields (`last_payment_date`, optional one-off `next_payment_date` for payment contracts, and `expiration_date`), while the main edit modal omits them.
 - Update modal exposes an `Expired` checkbox; this is the supported manual-expiration control.
 - Expired contracts (`expiration_date` before today) are rendered in a trailing `Expired` section after active grouped sections, collapsed by default.
 - active contracts are grouped by `type + category` (example: `Incoming Work`, `Payment Digital`).

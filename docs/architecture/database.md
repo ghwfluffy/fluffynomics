@@ -126,6 +126,7 @@ Contracts now carry tile-parity fields to match account dashboard interactions:
 - `rank` (`DOUBLE PRECISION` float for in-section ordering).
 - `expiration_date` (`DATE`, default `2099-01-01`) for lifecycle grouping (active vs expired).
 - `linked_wallet` (`TEXT`, nullable, check `paypal|google_pay`) for wallet-alias indirection.
+- `next_payment_date` (`DATE`, nullable) for a one-off next-occurrence override on payment contracts.
 
 Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
 Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
@@ -150,6 +151,9 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - Early-occurrence rule:
   - for contracts and derived expense next-dates, a manually set `last_payment_date` / `last_expensed_date` that lands after the previous scheduled occurrence but before the next scheduled occurrence covers that next scheduled occurrence.
   - scheduler application, derived next-date storage, and projection/calendar reads must all skip that covered occurrence.
+- One-off override rule:
+  - `contracts.next_payment_date` replaces exactly the next scheduled payment occurrence for payment contracts.
+  - after that overridden occurrence is applied, the override is cleared and subsequent occurrences continue from the normal recurring cadence rather than anchoring future dates to the override itself.
 
 ### User-scoped uniqueness
 

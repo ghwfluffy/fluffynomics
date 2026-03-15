@@ -311,6 +311,9 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
     recent = now - timedelta(days=12)
     aging = now - timedelta(days=45)
     stale = now - timedelta(days=120)
+    first_of_next_month = (date.today().replace(day=28) + timedelta(days=4)).replace(
+        day=1
+    )
 
     checking = _ensure_account(
         db,
@@ -736,6 +739,7 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "linked_account_id": checking.id,
             "source_account_id": None,
             "last_payment_date": date.today().replace(day=1),
+            "next_payment_date": first_of_next_month + timedelta(days=2),
             "payment_period": '{"kind":"monthly_day","day":1}',
             "payment_day": 1,
             "notes": "Seeded housing payment",

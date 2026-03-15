@@ -41,7 +41,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 10
+PAYLOAD_SCHEMA_VERSION = 11
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -1823,6 +1823,7 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                     else None
                 ),
                 "last_payment_date": _serialize_date(contract.last_payment_date),
+                "next_payment_date": _serialize_date(contract.next_payment_date),
                 "payment_period": contract.payment_period,
                 "payment_day": contract.payment_day,
                 "expiration_date": _serialize_date(contract.expiration_date),
@@ -2083,6 +2084,20 @@ def _upgrade_payload_v9_to_v10(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v10_to_v11(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 11
+    contracts = _required_list(upgraded.get("contracts", []), "contracts")
+    upgraded_contracts: list[dict[str, Any]] = []
+    for raw in contracts:
+        item = dict(_required_dict(raw, "contracts[]"))
+        if "next_payment_date" not in item:
+            item["next_payment_date"] = None
+        upgraded_contracts.append(item)
+    upgraded["contracts"] = upgraded_contracts
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2094,6 +2109,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     7: _upgrade_payload_v7_to_v8,
     8: _upgrade_payload_v8_to_v9,
     9: _upgrade_payload_v9_to_v10,
+    10: _upgrade_payload_v10_to_v11,
 }
 
 
@@ -2631,6 +2647,9 @@ def _replace_user_data(
             if source_old is not None
             else None,
             last_payment_date=parsed_contract_last_payment_date,
+            next_payment_date=_parse_optional_date(
+                item.get("next_payment_date"), "contracts[].next_payment_date"
+            ),
             payment_period=str(item.get("payment_period")).strip()
             if item.get("payment_period") is not None
             else None,

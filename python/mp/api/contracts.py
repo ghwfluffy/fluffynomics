@@ -45,6 +45,13 @@ def _validate_last_payment_date(value: date | None) -> None:
         )
 
 
+def _validate_next_payment_date(value: date | None) -> None:
+    if value is None:
+        return
+    if value < date(1900, 1, 1):
+        raise HTTPException(status_code=400, detail="next_payment_date is invalid")
+
+
 def _validate_expiration_date(value: date | None) -> None:
     if value is None:
         return
@@ -115,8 +122,32 @@ def _validate_contract_payload(
     if payload.amount_cents < 0:
         raise HTTPException(status_code=400, detail="amount_cents must be >= 0")
     _validate_last_payment_date(payload.last_payment_date)
+    _validate_next_payment_date(payload.next_payment_date)
     _validate_expiration_date(payload.expiration_date)
     _validate_recurring_period(payload.payment_period)
+    if payload.next_payment_date is not None and payload.type != "payment":
+        raise HTTPException(
+            status_code=400,
+            detail="next_payment_date is only supported for payment contracts",
+        )
+    if (
+        payload.next_payment_date is not None
+        and payload.last_payment_date is not None
+        and payload.next_payment_date <= payload.last_payment_date
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="next_payment_date must be after last_payment_date",
+        )
+    if (
+        payload.next_payment_date is not None
+        and payload.expiration_date is not None
+        and payload.next_payment_date > payload.expiration_date
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="next_payment_date cannot be after expiration_date",
+        )
     if _requires_payment_day(payload.payment_period):
         if payload.payment_day is None:
             raise HTTPException(status_code=400, detail="payment_day is required")
@@ -224,9 +255,12 @@ def get_contracts(
             db, current_user.id, as_of_date, apply=False
         )
         projected = simulation.projected_last_payment
+        projected_next = simulation.projected_next_payment
         for item in serialized:
             if item.id in projected:
                 item.last_payment_date = projected[item.id]
+            if item.id in projected_next:
+                item.next_payment_date = projected_next[item.id]
     return serialized
 
 
@@ -275,6 +309,7 @@ def create_contract(
         if payload.type == "transfer"
         else None,
         last_payment_date=payload.last_payment_date,
+        next_payment_date=payload.next_payment_date,
         payment_period=payload.payment_period,
         payment_day=normalized_payment_day,
         expiration_date=payload.expiration_date or DEFAULT_CONTRACT_EXPIRATION,
@@ -354,6 +389,7 @@ def update_contract(
         linked_wallet=linked_wallet,
         source_account_id=data.get("source_account_id", contract.source_account_id),
         last_payment_date=data.get("last_payment_date", contract.last_payment_date),
+        next_payment_date=data.get("next_payment_date", contract.next_payment_date),
         payment_period=data.get("payment_period", contract.payment_period),
         payment_day=data.get("payment_day", contract.payment_day),
         expiration_date=data.get("expiration_date", contract.expiration_date),
@@ -390,6 +426,7 @@ def update_contract(
         merged.source_account_id if merged.type == "transfer" else None
     )
     contract.last_payment_date = merged.last_payment_date
+    contract.next_payment_date = merged.next_payment_date
     contract.payment_period = merged.payment_period
     contract.payment_day = normalized_payment_day
     contract.expiration_date = merged.expiration_date or DEFAULT_CONTRACT_EXPIRATION
