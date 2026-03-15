@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from mp.api.auth import get_current_user
 from mp.db import get_db
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import Account
 from mp.schema.investment import (
@@ -121,6 +122,12 @@ def _serialize_investment(investment: Investment) -> InvestmentSchema:
     return InvestmentSchema.model_validate(investment)
 
 
+def _account_name(account: Account | None) -> str:
+    if account is None:
+        return "Unknown account"
+    return account.name.strip() or "Unnamed account"
+
+
 @router.get("/investments", response_model=list[InvestmentSchema])
 def get_investments(
     db: Session = Depends(get_db),
@@ -170,6 +177,22 @@ def create_investment(
         updated_at=now,
     )
     db.add(investment)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="investment_created",
+        message=(
+            f"Created recurring investment of {format_cents(int(investment.amount_cents or 0))} "
+            f"from {_account_name(source_account)} to {_account_name(destination_account)}."
+        ),
+        details={
+            "source_account_name": _account_name(source_account),
+            "destination_account_name": _account_name(destination_account),
+            "amount_cents": int(investment.amount_cents or 0),
+        },
+        occurred_at=now,
+    )
     db.commit()
     db.refresh(investment)
     return _serialize_investment(investment)
@@ -240,6 +263,23 @@ def update_investment(
             investment.last_invested_date, investment.general_frequency
         )
     investment.updated_at = datetime.utcnow()
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="investment_updated",
+        message=(
+            f"Updated recurring investment to {format_cents(int(investment.amount_cents or 0))} "
+            f"from {_account_name(source_account)} to {_account_name(destination_account)}."
+        ),
+        details={
+            "source_account_name": _account_name(source_account),
+            "destination_account_name": _account_name(destination_account),
+            "amount_cents": int(investment.amount_cents or 0),
+            "fields": sorted(data.keys()),
+        },
+        occurred_at=investment.updated_at,
+    )
     db.commit()
     db.refresh(investment)
     return _serialize_investment(investment)
@@ -258,5 +298,24 @@ def delete_investment(
     )
     if investment is None:
         raise HTTPException(status_code=404, detail="Investment not found")
+    source_account = _owned_account(db, current_user.id, investment.source_account_id)
+    destination_account = _owned_account(
+        db, current_user.id, investment.destination_account_id
+    )
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="investment_deleted",
+        message=(
+            f"Deleted recurring investment of {format_cents(int(investment.amount_cents or 0))} "
+            f"from {_account_name(source_account)} to {_account_name(destination_account)}."
+        ),
+        details={
+            "source_account_name": _account_name(source_account),
+            "destination_account_name": _account_name(destination_account),
+            "amount_cents": int(investment.amount_cents or 0),
+        },
+    )
     db.delete(investment)
     db.commit()

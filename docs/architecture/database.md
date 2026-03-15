@@ -99,6 +99,13 @@ Account timestamp semantics are intentionally split:
   - update flows propagate same ticker rate across all of a user's crypto holdings.
 - `stocks.last_price_cents` stores user-scoped price metadata for stock tickers.
 - `account_value_history` stores value snapshots (`value_cents`, `recorded_at`) for account history graphs.
+- `audit_log_events` stores user-scoped finance/activity audit entries:
+  - `trigger_type` (`user`, `cron`, `system`)
+  - `event_type`
+  - `message`
+  - `details_json`
+  - `occurred_at`
+  - log rows are append-only product history for the dashboard `Logs` tab
 - `net_worth_daily_snapshot` stores one net-worth snapshot per user per day.
   - unique key: `(user_id, snapshot_date)`
   - on multiple same-day balance-changing events, the row is updated to latest net worth.
@@ -159,6 +166,7 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `account_crypto_positions`
 - `account_cash_denominations`
 - `account_value_history`
+- `audit_log_events`
 - `net_worth_daily_snapshot`
 - `app_config`
 - `pending_payments`
@@ -226,6 +234,7 @@ Current replace order removes user rows from:
   - cascades `contract_postings` by contract foreign key
 - `account_value_history`
 - `account_transfers`
+- `audit_log_events`
 - `net_worth_daily_snapshot`
 - `accounts` (cascades account positions/denominations)
 - `stocks`

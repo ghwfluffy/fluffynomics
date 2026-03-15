@@ -9,8 +9,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from mp.db.account_history import record_account_value_history
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import Account
+from mp.schema.audit_log import AuditLogTriggerType
 from mp.schema.expense import Expense
 
 LEGACY_RECURRING = {
@@ -66,6 +68,10 @@ def _account_delta_for_expense(account_type: str, amount_cents: int) -> int:
     return int(amount_cents) if _is_liability(account_type) else -int(amount_cents)
 
 
+def _account_name(account: Account) -> str:
+    return account.name.strip() or "Unnamed account"
+
+
 def _first_due(expense: Expense, period: RecurringPeriod | None) -> date | None:
     if expense.next_expensed_date is not None:
         return expense.next_expensed_date
@@ -100,6 +106,7 @@ def run_expense_simulation(
     *,
     apply: bool,
     lock: bool = False,
+    trigger_type: AuditLogTriggerType = "system",
 ) -> ExpenseSimulation:
     if lock:
         acquired = db.execute(
@@ -170,6 +177,23 @@ def run_expense_simulation(
             if apply:
                 setattr(account, field, int(getattr(account, field) or 0) + delta)
                 record_account_value_history(db, account, recorded_at=now)
+                record_audit_log(
+                    db,
+                    user_id,
+                    trigger_type=trigger_type,
+                    event_type="recurring_expense_applied",
+                    message=(
+                        f"Recurring expense {expense.name} applied "
+                        f"{format_cents(delta, signed=True)} to {_account_name(account)}."
+                    ),
+                    details={
+                        "expense_name": expense.name,
+                        "account_name": _account_name(account),
+                        "delta_cents": delta,
+                        "effective_date": due_date.isoformat(),
+                    },
+                    occurred_at=now,
+                )
 
         if apply:
             last_due = due_dates[-1]

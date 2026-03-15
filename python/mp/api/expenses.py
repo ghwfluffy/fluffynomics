@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from mp.api.auth import get_current_user
 from mp.db import get_db
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
 from mp.schema.expense import (
@@ -130,6 +131,10 @@ def _serialize_expense(expense: Expense) -> ExpenseSchema:
     return ExpenseSchema.model_validate(expense)
 
 
+def _expense_name(expense: Expense) -> str:
+    return expense.name.strip() or "Unnamed expense"
+
+
 @router.get("/expenses", response_model=list[ExpenseSchema])
 def get_expenses(
     db: Session = Depends(get_db),
@@ -183,6 +188,22 @@ def create_expense(
         updated_at=now,
     )
     db.add(expense)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="expense_created",
+        message=(
+            f"Created expense {_expense_name(expense)} for "
+            f"{format_cents(int(expense.estimated_amount_cents or 0))}."
+        ),
+        details={
+            "expense_name": _expense_name(expense),
+            "category": expense.category,
+            "estimated_amount_cents": int(expense.estimated_amount_cents or 0),
+        },
+        occurred_at=now,
+    )
     db.commit()
     db.refresh(expense)
     return _serialize_expense(expense)
@@ -258,6 +279,19 @@ def update_expense(
             merged.last_expensed_date, merged.general_frequency
         )
     expense.updated_at = datetime.utcnow()
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="expense_updated",
+        message=f"Updated expense {_expense_name(expense)}.",
+        details={
+            "expense_name": _expense_name(expense),
+            "category": expense.category,
+            "fields": sorted(data.keys()),
+        },
+        occurred_at=expense.updated_at,
+    )
     db.commit()
     db.refresh(expense)
     return _serialize_expense(expense)
@@ -276,5 +310,13 @@ def delete_expense(
     )
     if expense is None:
         raise HTTPException(status_code=404, detail="Expense not found")
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="expense_deleted",
+        message=f"Deleted expense {_expense_name(expense)}.",
+        details={"expense_name": _expense_name(expense), "category": expense.category},
+    )
     db.delete(expense)
     db.commit()

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.db import get_db
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.expenses.engine import run_expense_simulation
 from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import Account, AccountIconType, Organization
@@ -187,6 +188,10 @@ def _serialize_contract(contract: Contract) -> ContractSchema:
     return ContractSchema.model_validate(contract)
 
 
+def _contract_name(contract: Contract) -> str:
+    return contract.name.strip() or "Unnamed contract"
+
+
 def _owned_account(
     db: Session, user_id: UUID, account_id: UUID | None
 ) -> Account | None:
@@ -282,6 +287,22 @@ def create_contract(
         updated_at=now,
     )
     db.add(contract)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="contract_created",
+        message=(
+            f"Created contract {_contract_name(contract)} for "
+            f"{format_cents(int(contract.amount_cents or 0))}."
+        ),
+        details={
+            "contract_name": _contract_name(contract),
+            "contract_type": contract.type,
+            "amount_cents": int(contract.amount_cents or 0),
+        },
+        occurred_at=now,
+    )
     db.commit()
     db.refresh(contract)
     return _serialize_contract(contract)
@@ -378,6 +399,19 @@ def update_contract(
     contract.account_number = merged.account_number
     contract.billing_day = merged.billing_day
     contract.updated_at = datetime.utcnow()
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="contract_updated",
+        message=f"Updated contract {_contract_name(contract)}.",
+        details={
+            "contract_name": _contract_name(contract),
+            "contract_type": contract.type,
+            "fields": sorted(data.keys()),
+        },
+        occurred_at=contract.updated_at,
+    )
     db.commit()
     db.refresh(contract)
     return _serialize_contract(contract)
@@ -419,6 +453,7 @@ def run_contracts(
         target_date,
         apply=not dry_run,
         lock=not dry_run,
+        trigger_type="user",
     )
     expense_simulation = run_expense_simulation(
         db,
@@ -426,6 +461,7 @@ def run_contracts(
         target_date,
         apply=not dry_run,
         lock=not dry_run,
+        trigger_type="user",
     )
     if not dry_run:
         db.commit()
@@ -472,5 +508,16 @@ def delete_contract(
     )
     if contract is None:
         raise HTTPException(status_code=404, detail="Contract not found")
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="contract_deleted",
+        message=f"Deleted contract {_contract_name(contract)}.",
+        details={
+            "contract_name": _contract_name(contract),
+            "contract_type": contract.type,
+        },
+    )
     db.delete(contract)
     db.commit()

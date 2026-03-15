@@ -14,6 +14,7 @@
 - `mp.api.contracts` mounted at `/`
 - `mp.api.data_portability` mounted at `/data`
 - `mp.api.investments` mounted at `/`
+- `mp.api.logs` mounted at `/`
 - `mp.api.backups` mounted at `/backups`
 
 ## Auth + Session Model
@@ -152,6 +153,23 @@ Defined in `python/mp/api/accounts.py`.
 - `DELETE /accounts/{account_id}`
 - `GET /organizations`
   - returns organization suggestions (default organizations + user organizations)
+- `GET /logs`
+  - returns recent per-user audit-log events in newest-first order
+  - each event includes:
+    - `trigger_type` (`user`, `cron`, or `system`)
+    - `event_type`
+    - human-readable `message`
+    - `occurred_at`
+    - structured `details`
+  - intended for the dashboard `Logs` tab
+- Audit-log write rule:
+  - log both explicit user mutations and automatic recurring/system balance changes
+  - current covered flows include:
+    - account create/update/delete
+    - account value updates and statement imports
+    - queued transfer / queued credit-card-payment create-update-delete-settle
+    - contract / expense / investment create-update-delete
+    - recurring contract / expense / investment application
   - each suggestion includes optional `icon_id`
 - `POST /icons`
   - uploads image, normalizes to small PNG, deduplicates by SHA-256 hash, returns icon UUID/hash

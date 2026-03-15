@@ -91,6 +91,19 @@
             Investments
           </button>
         </li>
+        <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'logs' }" role="presentation">
+          <button
+            id="tab-logs"
+            class="cds--tabs__nav-link"
+            role="tab"
+            type="button"
+            :aria-selected="activeTab === 'logs'"
+            aria-controls="panel-logs"
+            @click="activeTab = 'logs'"
+          >
+            Logs
+          </button>
+        </li>
         <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': activeTab === 'calendar' }" role="presentation">
           <button
             id="tab-calendar"
@@ -217,7 +230,7 @@
       <div class="widget-derived-grid">
         <article class="widget-slot widget-card">
           <h3>Projected Net-Worth Flow</h3>
-          <p class="widget-subtext">Contracts + expenses forecast</p>
+          <p class="widget-subtext">Average net-worth change over the next year</p>
           <ul class="widget-rate-list">
             <li v-for="row in projectedRateRows" :key="`proj-${row.key}`">
               <span>{{ row.label }}</span>
@@ -240,6 +253,12 @@
           <p class="widget-subtext">Change in $/month trend over {{ historicalWindowWeeks }} week{{ historicalWindowWeeks === 1 ? '' : 's' }}</p>
           <div class="widget-kpi" :class="deltaClass(historicalAccelerationCentsPerMonth2)">
             {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
+          </div>
+          <div class="widget-change-stack-divider"></div>
+          <h3>Projected Acceleration</h3>
+          <p class="widget-subtext">Using the next {{ projectedAccelerationWindowWeeks }} week{{ projectedAccelerationWindowWeeks === 1 ? '' : 's' }} forecast window</p>
+          <div class="widget-kpi" :class="deltaClass(projectedAccelerationCentsPerMonth2)">
+            {{ formatDollarPerMonthSquared(projectedAccelerationCentsPerMonth2) }}
           </div>
         </article>
         <article class="widget-slot widget-card">
@@ -1134,6 +1153,44 @@
       @changed="refreshRecurringOverviewData"
     />
 
+    <section v-if="activeTab === 'logs'" id="panel-logs" class="section-wrap" role="tabpanel" aria-labelledby="tab-logs">
+      <div class="cds--data-table-container">
+        <div class="table-toolbar-row">
+          <div>
+            <h3>Activity Log</h3>
+            <p class="widget-subtext">Recent user, cron, and system events for this account.</p>
+          </div>
+          <button class="cds--btn cds--btn--ghost" type="button" @click="loadLogs">Refresh</button>
+        </div>
+        <table class="cds--data-table cds--data-table--md">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Source</th>
+              <th>Event</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="auditLogs.length === 0">
+              <td colspan="3" class="logs-empty-cell">No logged events yet.</td>
+            </tr>
+            <tr v-for="log in auditLogs" :key="log.id">
+              <td>{{ formatAuditOccurredAt(log.occurred_at) }}</td>
+              <td>
+                <span class="audit-log-source-badge" :class="auditLogSourceClass(log.trigger_type)">
+                  {{ auditLogSourceLabel(log.trigger_type) }}
+                </span>
+              </td>
+              <td class="audit-log-message-cell">
+                <div class="audit-log-message">{{ log.message }}</div>
+                <div class="audit-log-type">{{ log.event_type }}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <div v-if="calendarEventDialogOpen && selectedCalendarEvent" class="modal-backdrop">
       <section class="confirm-card cds--tile">
         <h3>{{ selectedCalendarEvent.title }}</h3>
@@ -1282,6 +1339,16 @@ interface AccountTransferPayload {
   effective_at: string
 }
 
+interface AuditLogEventPayload {
+  id: string
+  user_id: string
+  trigger_type: 'user' | 'cron' | 'system'
+  event_type: string
+  message: string
+  details: Record<string, unknown>
+  occurred_at: string
+}
+
 interface ContractCalendarPayload {
   id: string
   name: string
@@ -1305,6 +1372,18 @@ interface ExpenseCalendarPayload {
   general_frequency?: string
   last_expensed_date?: string
   next_expensed_date?: string
+  next_date_is_static?: boolean
+}
+
+interface InvestmentPayload {
+  id: string
+  source_account_id: string
+  destination_account_id: string
+  amount_cents: number
+  enabled?: boolean
+  general_frequency?: string
+  last_invested_date?: string
+  next_investment_date?: string
   next_date_is_static?: boolean
 }
 
@@ -1398,7 +1477,7 @@ type ExpensesTabExpose = {
   openFromCalendar: (expenseId: string, action: CalendarEventAction) => Promise<boolean>
 }
 
-type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'investments' | 'calendar'
+type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'investments' | 'logs' | 'calendar'
 
 interface Section {
   key: string
@@ -1481,6 +1560,7 @@ const makeCreateForm = (): CreateAccountPayload => ({
 
 const accounts = ref<AccountPayload[]>([])
 const transfers = ref<AccountTransferPayload[]>([])
+const auditLogs = ref<AuditLogEventPayload[]>([])
 const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
   { value: 'overview', label: 'Overview' },
   { value: 'accounts', label: 'Accounts' },
@@ -1488,6 +1568,7 @@ const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
   { value: 'contracts', label: 'Contracts' },
   { value: 'expenses', label: 'Expenses' },
   { value: 'investments', label: 'Investments' },
+  { value: 'logs', label: 'Logs' },
   { value: 'calendar', label: 'Calendar' },
 ]
 const activeTab = ref<DashboardTab>('overview')
@@ -1513,6 +1594,8 @@ const projectedNetWorthDailyRateCents = ref(0)
 const historicalNetWorthDailyRateCents = ref(0)
 const historicalAccelerationCentsPerMonth2 = ref(0)
 const historicalWindowWeeks = ref(0)
+const projectedAccelerationCentsPerMonth2 = ref(0)
+const projectedAccelerationWindowWeeks = ref(0)
 const proratedNowMs = ref(Date.now())
 const suppressProratedNetWorthFlash = ref(false)
 const proratedNetWorthFlashClass = ref<'widget-trend-summary-value--flash-up' | 'widget-trend-summary-value--flash-down' | ''>('')
@@ -2917,6 +3000,100 @@ const accountYieldAnnualContributionCents = (account: AccountPayload) => {
   return Math.round(principalCents * settings.annualRate)
 }
 
+const investmentOccurrenceDates = (investment: InvestmentPayload, startDate: Date, endDate: Date): Date[] => {
+  if (!investment.enabled || intOrZero(investment.amount_cents) <= 0) {
+    return []
+  }
+  const startDay = startOfDay(startDate)
+  const endDay = startOfDay(endDate)
+  const spec = recurringSpecFromRaw(investment.general_frequency, undefined, startDay)
+  let next = parseDateOnly(investment.next_investment_date)
+  if (!next && investment.last_invested_date && spec?.kind) {
+    const last = parseDateOnly(investment.last_invested_date)
+    if (last) {
+      next = recurringOnOrAfter(addDays(last, 1), spec.kind, spec.payload, last.getDate())
+    }
+  }
+  if (!next) {
+    return []
+  }
+  if (!spec?.kind || investment.next_date_is_static) {
+    return next >= startDay && next <= endDay ? [next] : []
+  }
+  const occurrences: Date[] = []
+  let guard = 0
+  while (next && next <= endDay && guard < 2000) {
+    if (next >= startDay) {
+      occurrences.push(next)
+    }
+    next = recurringNext(next, spec.kind, spec.payload, next.getDate())
+    guard += 1
+  }
+  return occurrences
+}
+
+const buildProjectedYieldPremiumPoints = (
+  accountRows: AccountPayload[],
+  investments: InvestmentPayload[],
+  anchorDate: Date,
+  horizonDays: number,
+) => {
+  const anchor = startOfDay(anchorDate)
+  const horizonEnd = addDays(anchor, horizonDays)
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]))
+  const contributionsByAccount = new Map<string, Array<{ at: Date; amount_cents: number }>>()
+
+  for (const investment of investments) {
+    const source = accountsById.get(investment.source_account_id)
+    const destination = accountsById.get(investment.destination_account_id)
+    if (!source || !destination || source.closed || destination.closed || source.type !== 'checking') {
+      continue
+    }
+    if (!accountYieldSettings(destination)) {
+      continue
+    }
+    const dates = investmentOccurrenceDates(investment, anchor, horizonEnd)
+    if (!dates.length) {
+      continue
+    }
+    const bucket = contributionsByAccount.get(destination.id) || []
+    for (const at of dates) {
+      bucket.push({ at, amount_cents: intOrZero(investment.amount_cents) })
+    }
+    contributionsByAccount.set(destination.id, bucket)
+  }
+
+  for (const bucket of contributionsByAccount.values()) {
+    bucket.sort((a, b) => a.at.getTime() - b.at.getTime())
+  }
+
+  const points: Array<{ at: Date; value_cents: number }> = []
+  for (let offset = 0; offset <= horizonDays; offset += 1) {
+    const at = addDays(anchor, offset)
+    let yieldPremiumCents = 0
+    for (const account of accountRows) {
+      const settings = accountYieldSettings(account)
+      const principalCents = accountYieldPrincipalCents(account)
+      if (!settings || principalCents <= 0) {
+        continue
+      }
+      yieldPremiumCents += principalCents * (
+        compoundGrowthFactor(anchor, at, settings.annualRate, settings.compoundPeriod) - 1
+      )
+      for (const contribution of contributionsByAccount.get(account.id) || []) {
+        if (contribution.at > at) {
+          break
+        }
+        yieldPremiumCents += contribution.amount_cents * (
+          compoundGrowthFactor(contribution.at, at, settings.annualRate, settings.compoundPeriod) - 1
+        )
+      }
+    }
+    points.push({ at, value_cents: yieldPremiumCents })
+  }
+  return points
+}
+
 const localIsoDate = (value: Date) => {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, '0')
@@ -3043,15 +3220,46 @@ const loadWidgets = async () => {
   widgetLoading.value = true
   next30BreakdownBusy.value = true
   try {
+    const computeAccelerationSummary = (points: Array<{ at: Date; value_cents: number }>) => {
+      if (points.length < 4) {
+        return { accelerationCentsPerMonth2: 0, windowWeeks: 0 }
+      }
+      const first = points[0]
+      const last = points[points.length - 1]
+      const spanDays = Math.max(1, (last.at.getTime() - first.at.getTime()) / (1000 * 60 * 60 * 24))
+      const windowWeeks = Math.min(52, Math.max(1, Math.floor(spanDays / 7)))
+      const midIndex = Math.floor(points.length / 2)
+      const firstHalf = points.slice(0, midIndex + 1)
+      const secondHalf = points.slice(midIndex)
+      const fhStart = firstHalf[0]
+      const fhEnd = firstHalf[firstHalf.length - 1]
+      const shStart = secondHalf[0]
+      const shEnd = secondHalf[secondHalf.length - 1]
+      const firstHalfDays = Math.max(1, (fhEnd.at.getTime() - fhStart.at.getTime()) / (1000 * 60 * 60 * 24))
+      const secondHalfDays = Math.max(1, (shEnd.at.getTime() - shStart.at.getTime()) / (1000 * 60 * 60 * 24))
+      const slope1 = (fhEnd.value_cents - fhStart.value_cents) / firstHalfDays
+      const slope2 = (shEnd.value_cents - shStart.value_cents) / secondHalfDays
+      const mid1 = (fhStart.at.getTime() + fhEnd.at.getTime()) / 2
+      const mid2 = (shStart.at.getTime() + shEnd.at.getTime()) / 2
+      const slopeSpanDays = Math.max(1, (mid2 - mid1) / (1000 * 60 * 60 * 24))
+      const accelerationPerDay2 = (slope2 - slope1) / slopeSpanDays
+      const daysPerMonth = 365 / 12
+      return {
+        accelerationCentsPerMonth2: Math.round(accelerationPerDay2 * daysPerMonth * daysPerMonth),
+        windowWeeks,
+      }
+    }
+
     const anchor = parseDateOnly(forecastDate.value) || new Date()
     const anchorIso = localIsoDate(anchor)
     const next30Target = shiftDays(anchor, 30)
     const next60Target = shiftDays(anchor, 60)
     const projectionTarget = addYears(anchor, 10)
-    const [netWorthHistory, contracts, expenses, next60Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
+    const [netWorthHistory, contracts, expenses, investments, next60Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
       request.get<ContractCalendarPayload[]>('/contracts'),
       request.get<ExpenseCalendarPayload[]>('/expenses'),
+      request.get<InvestmentPayload[]>('/investments'),
       request.post<ContractRunPreviewPayload>('/contracts/run', undefined, {
         params: { dry_run: true, through_date: localIsoDate(next60Target) },
       }),
@@ -3129,11 +3337,12 @@ const loadWidgets = async () => {
     const projection1yDate = addYears(anchor, 1)
     const projection5yDate = addYears(anchor, 5)
     const projection10yDate = addYears(anchor, 10)
+    const projectionAnchorValue = lookupProjectionAsOf(projectionCurrentDate)
     netWorthProjectionPoints.value = [
       {
         key: 'current',
         label: projectionCurrentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-        value_cents: currentNetWorthCents.value,
+        value_cents: projectionAnchorValue,
         snapshot_date: localIsoDate(projectionCurrentDate),
       },
       {
@@ -3156,60 +3365,12 @@ const loadWidgets = async () => {
       },
     ]
 
-    const accountTypeById = new Map(accounts.value.map((item) => [item.id, item.type]))
-    const resolveContractLinkedType = (contract: ContractCalendarPayload) => {
-      if (contract.linked_account_id) {
-        return accountTypeById.get(contract.linked_account_id)
-      }
-      if (contract.linked_wallet === 'paypal') {
-        return currentUser.value?.paypal_account_id
-          ? accountTypeById.get(currentUser.value.paypal_account_id)
-          : undefined
-      }
-      if (contract.linked_wallet === 'google_pay') {
-        return currentUser.value?.google_pay_account_id
-          ? accountTypeById.get(currentUser.value.google_pay_account_id)
-          : undefined
-      }
-      return undefined
-    }
-    const projectedAnnualCents =
-      contracts.reduce((sum, contract) => {
-        if (!contractIsActiveForSummary(contract, widgetAnchorDate.value)) {
-          return sum
-        }
-        const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
-        if (contract.type === 'transfer') {
-          const amount = intOrZero(contract.amount_cents)
-          const sourceType = contract.source_account_id ? accountTypeById.get(contract.source_account_id) : undefined
-          const linkedType = resolveContractLinkedType(contract)
-          const sourceSign = isLiabilityAccountType(sourceType) ? -1 : 1
-          const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
-          return sum + ((-amount * sourceSign) + (amount * linkedSign)) * annualOccurrences
-        }
-        const linkedType = resolveContractLinkedType(contract)
-        const linkedSign = isLiabilityAccountType(linkedType) ? -1 : 1
-        const rawDelta = contract.type === 'income' ? intOrZero(contract.amount_cents) : -intOrZero(contract.amount_cents)
-        const accountDelta = isLiabilityAccountType(linkedType) ? -rawDelta : rawDelta
-        return sum + accountDelta * linkedSign * annualOccurrences
-      }, 0) -
-      expenses.reduce((sum, expense) => {
-        if (!expenseIsActiveForSummary(expense)) {
-          return sum
-        }
-        const annualOccurrences = annualOccurrencesFromRecurring(expense.general_frequency)
-        return sum + expense.estimated_amount_cents * annualOccurrences
-      }, 0) -
-      accounts.value.reduce((sum, account) => {
-        const feeAmountCents = Math.abs(intOrZero(account.fee_amount_cents))
-        if (!feeIsActiveForSummary(account)) {
-          return sum
-        }
-        const annualOccurrences = annualOccurrencesFromRecurring(account.fee_period)
-        return sum + feeAmountCents * annualOccurrences
-      }, 0) +
-      accounts.value.reduce((sum, account) => sum + accountYieldAnnualContributionCents(account), 0)
-    projectedNetWorthDailyRateCents.value = Math.round(projectedAnnualCents / 365)
+    const projectedOneYearValue = lookupProjectionAsOf(projection1yDate)
+    const projectedFlowSpanDays = Math.max(
+      1,
+      (projection1yDate.getTime() - projectionCurrentDate.getTime()) / (1000 * 60 * 60 * 24),
+    )
+    projectedNetWorthDailyRateCents.value = Math.round((projectedOneYearValue - projectionAnchorValue) / projectedFlowSpanDays)
 
     const sortedHistory = [...netWorthHistory]
       .map((item) => ({ value_cents: item.value_cents, at: new Date(`${item.snapshot_date}T00:00:00`) }))
@@ -3225,32 +3386,17 @@ const loadWidgets = async () => {
       historicalWindowWeeks.value = Math.min(52, Math.max(1, Math.floor(spanDays / 7)))
       historicalNetWorthDailyRateCents.value = Math.round((last.value_cents - first.value_cents) / spanDays)
 
-      if (windowed.length >= 4) {
-        const midIndex = Math.floor(windowed.length / 2)
-        const firstHalf = windowed.slice(0, midIndex + 1)
-        const secondHalf = windowed.slice(midIndex)
-        const fhStart = firstHalf[0]
-        const fhEnd = firstHalf[firstHalf.length - 1]
-        const shStart = secondHalf[0]
-        const shEnd = secondHalf[secondHalf.length - 1]
-        const firstHalfDays = Math.max(1, (fhEnd.at.getTime() - fhStart.at.getTime()) / (1000 * 60 * 60 * 24))
-        const secondHalfDays = Math.max(1, (shEnd.at.getTime() - shStart.at.getTime()) / (1000 * 60 * 60 * 24))
-        const slope1 = (fhEnd.value_cents - fhStart.value_cents) / firstHalfDays
-        const slope2 = (shEnd.value_cents - shStart.value_cents) / secondHalfDays
-        const mid1 = (fhStart.at.getTime() + fhEnd.at.getTime()) / 2
-        const mid2 = (shStart.at.getTime() + shEnd.at.getTime()) / 2
-        const slopeSpanDays = Math.max(1, (mid2 - mid1) / (1000 * 60 * 60 * 24))
-        const accelerationPerDay2 = (slope2 - slope1) / slopeSpanDays
-        const daysPerMonth = 365 / 12
-        historicalAccelerationCentsPerMonth2.value = Math.round(accelerationPerDay2 * daysPerMonth * daysPerMonth)
-      } else {
-        historicalAccelerationCentsPerMonth2.value = 0
-      }
+      historicalAccelerationCentsPerMonth2.value = computeAccelerationSummary(windowed).accelerationCentsPerMonth2
     } else {
       historicalNetWorthDailyRateCents.value = 0
       historicalAccelerationCentsPerMonth2.value = 0
       historicalWindowWeeks.value = 0
     }
+
+    const projectedYieldWindow = buildProjectedYieldPremiumPoints(accounts.value, investments, anchor, 365)
+    const projectedAccelerationSummary = computeAccelerationSummary(projectedYieldWindow)
+    projectedAccelerationCentsPerMonth2.value = projectedAccelerationSummary.accelerationCentsPerMonth2
+    projectedAccelerationWindowWeeks.value = projectedAccelerationSummary.windowWeeks
 
     const dailyHistorical = netWorthHistory
       .map((point) => ({
@@ -4322,11 +4468,15 @@ const lastUpdateTone = (account: AccountPayload) => {
 const loadAccounts = async () => {
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
   accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
-  await Promise.all([loadWidgets(), loadTransfers()])
+  await Promise.all([loadWidgets(), loadTransfers(), loadLogs()])
 }
 
 const loadTransfers = async () => {
   transfers.value = await request.get<AccountTransferPayload[]>('/transfers')
+}
+
+const loadLogs = async () => {
+  auditLogs.value = await request.get<AuditLogEventPayload[]>('/logs', { params: { limit: 200 } })
 }
 
 const loadCalendarSources = async () => {
@@ -4351,6 +4501,37 @@ const loadIcons = async () => {
 }
 
 const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
+const auditLogSourceLabel = (triggerType: AuditLogEventPayload['trigger_type']) => {
+  if (triggerType === 'cron') {
+    return 'Cron'
+  }
+  if (triggerType === 'system') {
+    return 'System'
+  }
+  return 'User'
+}
+const auditLogSourceClass = (triggerType: AuditLogEventPayload['trigger_type']) => {
+  if (triggerType === 'cron') {
+    return 'audit-log-source-badge--cron'
+  }
+  if (triggerType === 'system') {
+    return 'audit-log-source-badge--system'
+  }
+  return 'audit-log-source-badge--user'
+}
+const formatAuditOccurredAt = (value: string) => {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return parsed.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
 const normalizedAccountUrl = (raw?: string) => {
   const value = (raw || '').trim()
   if (!value) {
@@ -5812,6 +5993,49 @@ watch(
 
 .table-icon--empty {
   background: #e2e8f0;
+}
+
+.logs-empty-cell {
+  color: #6f6f6f;
+  text-align: center;
+}
+
+.audit-log-message-cell {
+  min-width: 22rem;
+}
+
+.audit-log-message {
+  color: #161616;
+}
+
+.audit-log-type {
+  color: #6f6f6f;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+  text-transform: uppercase;
+}
+
+.audit-log-source-badge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+}
+
+.audit-log-source-badge--user {
+  background: #d9f0ff;
+  color: #004144;
+}
+
+.audit-log-source-badge--cron {
+  background: #e8daff;
+  color: #491d8b;
+}
+
+.audit-log-source-badge--system {
+  background: #e8f5d8;
+  color: #2d3f00;
 }
 
 .sort-btn {

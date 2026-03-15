@@ -9,8 +9,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from mp.db.account_history import record_account_value_history
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import Account
+from mp.schema.audit_log import AuditLogTriggerType
 from mp.schema.investment import Investment
 
 LEGACY_RECURRING = {
@@ -67,6 +69,10 @@ def _balance_field(account_type: str) -> str | None:
     return "balance_cents"
 
 
+def _account_name(account: Account) -> str:
+    return account.name.strip() or "Unnamed account"
+
+
 def _first_due(investment: Investment, period: RecurringPeriod | None) -> date | None:
     if investment.next_investment_date is not None:
         return investment.next_investment_date
@@ -101,6 +107,7 @@ def run_investment_simulation(
     *,
     apply: bool,
     lock: bool = False,
+    trigger_type: AuditLogTriggerType = "system",
 ) -> InvestmentSimulation:
     if lock:
         acquired = db.execute(
@@ -226,6 +233,23 @@ def run_investment_simulation(
                 destination.last_update = now
                 record_account_value_history(db, source, recorded_at=now)
                 record_account_value_history(db, destination, recorded_at=now)
+                record_audit_log(
+                    db,
+                    user_id,
+                    trigger_type=trigger_type,
+                    event_type="recurring_investment_applied",
+                    message=(
+                        f"Recurring investment moved {format_cents(amount_cents)} from "
+                        f"{_account_name(source)} to {_account_name(destination)}."
+                    ),
+                    details={
+                        "source_account_name": _account_name(source),
+                        "destination_account_name": _account_name(destination),
+                        "amount_cents": amount_cents,
+                        "effective_date": due_date.isoformat(),
+                    },
+                    occurred_at=now,
+                )
 
         if apply:
             last_due = due_dates[-1]

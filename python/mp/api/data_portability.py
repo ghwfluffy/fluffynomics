@@ -31,6 +31,7 @@ from mp.schema.account import (
     Organization,
     Stock,
 )
+from mp.schema.audit_log import AuditLogEvent
 from mp.schema.contract import Contract, ContractPosting
 from mp.schema.expense import Expense
 from mp.schema.investment import Investment
@@ -40,7 +41,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 9
+PAYLOAD_SCHEMA_VERSION = 10
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -74,6 +75,7 @@ class ImportResponseSchema(BaseModel):
     imported_history_points: int
     imported_net_worth_snapshots: int
     imported_account_transfers: int
+    imported_audit_log_events: int
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -1569,6 +1571,7 @@ def _convert_legacy_payload_to_latest(
         "account_value_history": [],
         "net_worth_daily_snapshot": [],
         "account_transfers": [],
+        "audit_log_events": [],
     }
 
 
@@ -1639,6 +1642,12 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             AccountTransfer.queued_at.asc(),
             AccountTransfer.id.asc(),
         )
+        .all()
+    )
+    audit_log_events = (
+        db.query(AuditLogEvent)
+        .filter(AuditLogEvent.user_id == user_id)
+        .order_by(AuditLogEvent.occurred_at.asc(), AuditLogEvent.id.asc())
         .all()
     )
 
@@ -1920,6 +1929,17 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             }
             for transfer in account_transfers
         ],
+        "audit_log_events": [
+            {
+                "id": str(event.id),
+                "trigger_type": event.trigger_type,
+                "event_type": event.event_type,
+                "message": event.message,
+                "details": event.details_json or {},
+                "occurred_at": _serialize_datetime(event.occurred_at),
+            }
+            for event in audit_log_events
+        ],
     }
 
 
@@ -2055,6 +2075,14 @@ def _upgrade_payload_v8_to_v9(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v9_to_v10(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 10
+    if "audit_log_events" not in upgraded:
+        upgraded["audit_log_events"] = []
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2065,6 +2093,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     6: _upgrade_payload_v6_to_v7,
     7: _upgrade_payload_v7_to_v8,
     8: _upgrade_payload_v8_to_v9,
+    9: _upgrade_payload_v9_to_v10,
 }
 
 
@@ -2219,6 +2248,9 @@ def _replace_user_data(
     account_transfers = _required_list(
         payload.get("account_transfers", []), "account_transfers"
     )
+    audit_log_events = _required_list(
+        payload.get("audit_log_events", []), "audit_log_events"
+    )
 
     db.query(Expense).filter(Expense.user_id == user_id).delete(
         synchronize_session=False
@@ -2233,6 +2265,9 @@ def _replace_user_data(
         synchronize_session=False
     )
     db.query(AccountTransfer).filter(AccountTransfer.user_id == user_id).delete(
+        synchronize_session=False
+    )
+    db.query(AuditLogEvent).filter(AuditLogEvent.user_id == user_id).delete(
         synchronize_session=False
     )
     db.query(NetWorthDailySnapshot).filter(
@@ -2809,6 +2844,7 @@ def _replace_user_data(
 
     imported_snapshots = 0
     imported_account_transfers = 0
+    imported_audit_log_events = 0
     for raw in net_worth_snapshots:
         item = _required_dict(raw, "net_worth_daily_snapshot[]")
         snapshot_date = _parse_optional_date(
@@ -2911,6 +2947,35 @@ def _replace_user_data(
         )
         imported_account_transfers += 1
 
+    for raw in audit_log_events:
+        item = _required_dict(raw, "audit_log_events[]")
+        trigger_type = str(item.get("trigger_type") or "").strip()
+        if trigger_type not in {"user", "cron", "system"}:
+            raise HTTPException(
+                status_code=400,
+                detail="audit_log_events[].trigger_type is invalid",
+            )
+        details = item.get("details", {})
+        if not isinstance(details, dict):
+            raise HTTPException(
+                status_code=400, detail="audit_log_events[].details must be an object"
+            )
+        db.add(
+            AuditLogEvent(
+                id=uuid4(),
+                user_id=user_id,
+                trigger_type=trigger_type,
+                event_type=str(item.get("event_type") or "").strip(),
+                message=str(item.get("message") or "").strip(),
+                details_json=details,
+                occurred_at=_parse_optional_datetime(
+                    item.get("occurred_at"), "audit_log_events[].occurred_at"
+                )
+                or datetime.now(tz=timezone.utc),
+            )
+        )
+        imported_audit_log_events += 1
+
     return ImportResponseSchema(
         schema_version=PAYLOAD_SCHEMA_VERSION,
         imported_icons=imported_icons,
@@ -2923,6 +2988,7 @@ def _replace_user_data(
         imported_history_points=imported_history_points,
         imported_net_worth_snapshots=imported_snapshots,
         imported_account_transfers=imported_account_transfers,
+        imported_audit_log_events=imported_audit_log_events,
     )
 
 

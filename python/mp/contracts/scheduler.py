@@ -24,6 +24,7 @@ def _run_once() -> None:
                 date.today(),
                 apply=True,
                 lock=True,
+                trigger_type="cron",
             )
             run_expense_simulation(
                 db,
@@ -31,6 +32,7 @@ def _run_once() -> None:
                 date.today(),
                 apply=True,
                 lock=True,
+                trigger_type="cron",
             )
             run_investment_simulation(
                 db,
@@ -38,6 +40,7 @@ def _run_once() -> None:
                 date.today(),
                 apply=True,
                 lock=True,
+                trigger_type="cron",
             )
         db.commit()
     finally:

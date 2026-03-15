@@ -9,10 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from mp.db.account_history import record_account_value_history
+from mp.db.audit_log import format_cents, record_audit_log
 from mp.models.recurring_period import RecurringPeriod, parse_recurring_period
 from mp.schema.account import (
     Account,
 )
+from mp.schema.audit_log import AuditLogTriggerType
 from mp.schema.contract import Contract, ContractPosting
 from mp.schema.user import User
 
@@ -118,6 +120,10 @@ def _balance_field(account: Account) -> str | None:
     return "balance_cents"
 
 
+def _account_name(account: Account) -> str:
+    return account.name.strip() or "Unnamed account"
+
+
 def _delta_for_contract(
     contract: Contract, linked_account: Account | None = None
 ) -> int:
@@ -142,6 +148,7 @@ def run_contract_simulation(
     *,
     apply: bool,
     lock: bool = False,
+    trigger_type: AuditLogTriggerType = "system",
 ) -> ContractSimulation:
     if lock:
         acquired = db.execute(
@@ -338,6 +345,48 @@ def run_contract_simulation(
                     assert source is not None
                     record_account_value_history(db, source, recorded_at=now)
                 record_account_value_history(db, linked, recorded_at=now)
+                if contract.type == "transfer":
+                    assert source is not None
+                    record_audit_log(
+                        db,
+                        user_id,
+                        trigger_type=trigger_type,
+                        event_type="recurring_contract_applied",
+                        message=(
+                            f"Recurring contract {contract.name} moved "
+                            f"{format_cents(int(contract.amount_cents or 0))} from "
+                            f"{_account_name(source)} to {_account_name(linked)}."
+                        ),
+                        details={
+                            "contract_name": contract.name,
+                            "contract_type": contract.type,
+                            "source_account_name": _account_name(source),
+                            "destination_account_name": _account_name(linked),
+                            "amount_cents": int(contract.amount_cents or 0),
+                            "effective_date": due_date.isoformat(),
+                        },
+                        occurred_at=now,
+                    )
+                else:
+                    record_audit_log(
+                        db,
+                        user_id,
+                        trigger_type=trigger_type,
+                        event_type="recurring_contract_applied",
+                        message=(
+                            f"Recurring contract {contract.name} applied "
+                            f"{format_cents(delta, signed=True)} to "
+                            f"{_account_name(linked)}."
+                        ),
+                        details={
+                            "contract_name": contract.name,
+                            "contract_type": contract.type,
+                            "account_name": _account_name(linked),
+                            "delta_cents": delta,
+                            "effective_date": due_date.isoformat(),
+                        },
+                        occurred_at=now,
+                    )
 
         if apply and contract.id in projected_last_payment:
             contract.last_payment_date = projected_last_payment[contract.id]

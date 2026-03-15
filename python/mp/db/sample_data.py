@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from mp.db.core import SessionLocal
+from mp.schema.audit_log import AuditLogEvent
 from mp.schema.account import (
     Account,
     AccountTransfer,
@@ -263,6 +264,40 @@ def _ensure_account_transfer(
             transfer_kind=transfer_kind,
             queued_at=queued_at,
             effective_at=effective_at or _next_business_day_noon(queued_at),
+        )
+    )
+
+
+def _ensure_audit_log(
+    db: Session,
+    user: User,
+    *,
+    trigger_type: str,
+    event_type: str,
+    message: str,
+    occurred_at: datetime,
+    details_json: dict | None = None,
+) -> None:
+    existing = (
+        db.query(AuditLogEvent)
+        .filter(
+            AuditLogEvent.user_id == user.id,
+            AuditLogEvent.event_type == event_type,
+            AuditLogEvent.message == message,
+            AuditLogEvent.occurred_at == occurred_at,
+        )
+        .first()
+    )
+    if existing is not None:
+        return
+    db.add(
+        AuditLogEvent(
+            user_id=user.id,
+            trigger_type=trigger_type,
+            event_type=event_type,
+            message=message,
+            details_json=details_json or {},
+            occurred_at=occurred_at,
         )
     )
 
@@ -786,6 +821,61 @@ def ensure_example_data_for_user(db: Session, user: User) -> None:
             "last_invested_date": date.today().replace(day=5) - timedelta(days=31),
             "next_investment_date": date.today().replace(day=5),
             "next_date_is_static": False,
+        },
+    )
+    _ensure_audit_log(
+        db,
+        user,
+        trigger_type="user",
+        event_type="account_value_updated",
+        message="Updated value for Household Checking from $4,720.00 to $4,850.00.",
+        occurred_at=now - timedelta(hours=3),
+        details_json={
+            "account_name": "Household Checking",
+            "previous_value_cents": 472000,
+            "updated_value_cents": 485000,
+        },
+    )
+    _ensure_audit_log(
+        db,
+        user,
+        trigger_type="cron",
+        event_type="recurring_contract_applied",
+        message="Recurring contract Example Paycheck applied +$3,250.00 to Household Checking.",
+        occurred_at=now - timedelta(days=1, hours=2),
+        details_json={
+            "contract_name": "Example Paycheck",
+            "account_name": "Household Checking",
+            "delta_cents": 325000,
+            "effective_date": (date.today() - timedelta(days=1)).isoformat(),
+        },
+    )
+    _ensure_audit_log(
+        db,
+        user,
+        trigger_type="cron",
+        event_type="recurring_investment_applied",
+        message="Recurring investment moved $250.00 from Household Checking to Emergency Savings.",
+        occurred_at=now - timedelta(days=2, hours=4),
+        details_json={
+            "source_account_name": "Household Checking",
+            "destination_account_name": "Emergency Savings",
+            "amount_cents": 25000,
+            "effective_date": (date.today() - timedelta(days=2)).isoformat(),
+        },
+    )
+    _ensure_audit_log(
+        db,
+        user,
+        trigger_type="system",
+        event_type="transfer_settled",
+        message="Settled credit card payment of $1,492.00 from Household Checking to Daily Rewards Card.",
+        occurred_at=now - timedelta(hours=8),
+        details_json={
+            "transfer_kind": "credit_card_payment",
+            "source_account_name": "Household Checking",
+            "destination_account_name": "Daily Rewards Card",
+            "amount_cents": 149200,
         },
     )
 

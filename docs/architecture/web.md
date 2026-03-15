@@ -22,10 +22,16 @@ Dashboard top-level tabs are now:
 - `Contracts`
 - `Expenses`
 - `Investments`
+- `Logs`
 - `Calendar`
 
 `Overview` is the default tab on dashboard load.
 On narrow screens, the desktop tab bar is replaced with a top-of-page section dropdown that drives the same dashboard tab state.
+
+Logs tab behavior:
+- shows newest-first audit events for the signed-in user.
+- each row should clearly distinguish `User`, `Cron`, and `System` origins.
+- event copy should already be human-readable from the API; frontend should render it directly instead of reconstructing finance text client-side.
 
 Calendar tab behavior:
 - shows month view with previous/next month navigation.
@@ -118,11 +124,13 @@ Trend widget behavior:
 - Exclusion rule: expired contracts, closed fee-bearing accounts, and disabled expenses must be excluded from both the live proration math and the overview summaries/rate widgets that explain that math.
 - In live mode, the prorated value refreshes every 5 seconds; when a forecast date is set, proration is evaluated at that fixed date instead of live time.
 - Contract, expense, and investment create/edit/update/delete actions must refresh the overview proration data immediately in-page; the user should not need a full page reload to see the net-worth summary and projected-flow widgets update.
-- Overview also includes derived rate widgets under the trend chart:
-  - projected net-worth flow from contracts + expenses + recurring account fees + account yield (`per year/month/week/day`, dollar-rounded),
+  - Overview also includes derived rate widgets under the trend chart:
+  - projected net-worth flow (`per year/month/week/day`, dollar-rounded) should be derived from the same anchor-to-+1-year history/forecast path used by the projection bars, so it stays aligned with forecast-date changes and includes investment-fed yield growth instead of relying on a simplified annualized formula,
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
   - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
+  - projected acceleration estimate (`$/month²`) shown in the same card, derived from the next-year APY-yield premium curve rather than the full net-worth forecast. It should measure acceleration from savings APY / implicit investment yield, with recurring investments feeding destination principal, instead of treating contract/expense step changes as acceleration.
   - a net-worth projection bar chart for the anchor month/year plus the calculated `+1 year`, `+5 year`, and `+10 year` month/year targets.
+  - the projection bar chart anchor column should use the same history/forecast lookup path as the future columns rather than a separate live-only value source.
   - a 60-day biggest-changes widget showing the first two positive events and first two negative events whose absolute value is at least `$1,000`, with each pair displayed in chronological order.
   - upcoming-change widgets merge simulation output with locally derived non-automatic recurring contract occurrences so manual contracts appear in both the 30-day breakdown and the 60-day biggest-changes card.
   - projection bars stay in chronological order, but their green fill shades are assigned by relative value from lightest (least value) to darkest (greatest value).

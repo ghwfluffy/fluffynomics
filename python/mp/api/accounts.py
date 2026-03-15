@@ -12,6 +12,7 @@ from mp.db.account_history import (
     compute_account_value_cents as _compute_account_value_cents,
     record_account_value_history as _record_account_value_history,
 )
+from mp.db.audit_log import format_cents as _format_cents, record_audit_log
 from mp.api.auth import get_current_user
 from mp.contracts.engine import run_contract_simulation
 from mp.expenses.engine import run_expense_simulation
@@ -57,6 +58,7 @@ from mp.schema.account import (
     StockSchema,
     StockUpdateSchema,
 )
+from mp.schema.audit_log import AuditLogTriggerType
 from mp.schema.contract import Contract
 from mp.schema.investment import Investment
 from mp.schema.user import User
@@ -82,6 +84,25 @@ LEGACY_RECURRING_PERIODS = {"daily", "weekly", "biweekly", "monthly", "yearly"}
 LIABILITY_ACCOUNT_TYPES = {"credit_card", "line_of_credit", "loan"}
 TRANSFER_KINDS = {"standard", "credit_card_payment"}
 IMPLIED_INVESTMENT_APY = 0.055
+
+
+def _audit_account_name(account: Account) -> str:
+    return account.name.strip() or "Unnamed account"
+
+
+def _audit_transfer_kind_label(transfer_kind: str) -> str:
+    if transfer_kind == "credit_card_payment":
+        return "credit card payment"
+    return "transfer"
+
+
+def _format_audit_timestamp(value: datetime) -> str:
+    moment = (
+        value.astimezone(timezone.utc)
+        if value.tzinfo
+        else value.replace(tzinfo=timezone.utc)
+    )
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _validate_account_type(account_type: str) -> None:
@@ -867,7 +888,12 @@ def _account_last4_digits(account_number: str | None) -> str:
     return digits[-4:] if len(digits) >= 4 else ""
 
 
-def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
+def _settle_due_account_transfers(
+    db: Session,
+    user_id: UUID,
+    *,
+    trigger_type: AuditLogTriggerType = "system",
+) -> bool:
     due_transfers = (
         db.query(AccountTransfer)
         .filter(
@@ -920,6 +946,25 @@ def _settle_due_account_transfers(db: Session, user_id: UUID) -> bool:
         if not bool(transfer.instant_deposit):
             destination_account.last_update = now
             _record_account_value_history(db, destination_account)
+        record_audit_log(
+            db,
+            user_id,
+            trigger_type=trigger_type,
+            event_type="transfer_settled",
+            message=(
+                f"Settled {_audit_transfer_kind_label(transfer.transfer_kind)} of "
+                f"{_format_cents(amount)} from {_audit_account_name(source_account)} "
+                f"to {_audit_account_name(destination_account)}."
+            ),
+            details={
+                "transfer_kind": transfer.transfer_kind,
+                "source_account_name": _audit_account_name(source_account),
+                "destination_account_name": _audit_account_name(destination_account),
+                "amount_cents": amount,
+                "instant_deposit": bool(transfer.instant_deposit),
+            },
+            occurred_at=now,
+        )
         changed = True
     return changed
 
@@ -1548,6 +1593,20 @@ def create_account(
     if crypto_positions:
         _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     _record_account_value_history(db, account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="account_created",
+        message=(
+            f"Created account {_audit_account_name(account)} with opening value "
+            f"{_format_cents(_compute_account_value_cents(db, account))}."
+        ),
+        details={
+            "account_name": _audit_account_name(account),
+            "account_type": account.type,
+        },
+    )
 
     db.commit()
     db.refresh(account)
@@ -1589,6 +1648,7 @@ def update_account(
     )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    account_name_before = _audit_account_name(account)
 
     data = payload.model_dump(exclude_unset=True)
     account_type = data.get("type", account.type)
@@ -1763,6 +1823,18 @@ def update_account(
     if crypto_positions:
         _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     _record_account_value_history(db, account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="account_updated",
+        message=f"Updated account details for {account_name_before}.",
+        details={
+            "account_name": account_name_before,
+            "account_type": account.type,
+            "fields": sorted(data.keys()),
+        },
+    )
 
     db.commit()
     db.refresh(account)
@@ -2010,6 +2082,7 @@ def update_account_value(
     )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    previous_value_cents = _compute_account_value_cents(db, account)
 
     data = payload.model_dump(exclude_unset=True)
     if not data:
@@ -2067,6 +2140,23 @@ def update_account_value(
         _propagate_crypto_rates_for_user(db, current_user.id, crypto_positions)
     account.last_update = datetime.utcnow()
     _record_account_value_history(db, account)
+    updated_value_cents = _compute_account_value_cents(db, account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="account_value_updated",
+        message=(
+            f"Updated value for {_audit_account_name(account)} from "
+            f"{_format_cents(previous_value_cents)} to "
+            f"{_format_cents(updated_value_cents)}."
+        ),
+        details={
+            "account_name": _audit_account_name(account),
+            "previous_value_cents": previous_value_cents,
+            "updated_value_cents": updated_value_cents,
+        },
+    )
     db.commit()
     db.refresh(account)
     return _apply_active_account_transfers(
@@ -2101,6 +2191,7 @@ async def import_robinhood_statement(
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Statement file is empty")
+    previous_value_cents = _compute_account_value_cents(db, account)
 
     try:
         statement = parse_robinhood_statement(raw)
@@ -2129,6 +2220,23 @@ async def import_robinhood_statement(
         account.balance_cents = statement.stock_cash_cents
     account.last_update = now
     _record_account_value_history(db, account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="account_statement_imported",
+        message=(
+            f"Imported Robinhood statement for {_audit_account_name(account)} and "
+            f"updated value from {_format_cents(previous_value_cents)} to "
+            f"{_format_cents(_compute_account_value_cents(db, account))}."
+        ),
+        details={
+            "account_name": _audit_account_name(account),
+            "provider": "Robinhood",
+            "statement_type": "stocks",
+        },
+        occurred_at=now,
+    )
 
     if statement.has_crypto_section:
         crypto_account = _get_robinhood_crypto_exchange_account(db, current_user.id)
@@ -2160,6 +2268,22 @@ async def import_robinhood_statement(
         crypto_account.usd_balance_cents = 0
         crypto_account.last_update = now
         _record_account_value_history(db, crypto_account)
+        record_audit_log(
+            db,
+            current_user.id,
+            trigger_type="user",
+            event_type="account_statement_imported",
+            message=(
+                f"Imported Robinhood crypto holdings into "
+                f"{_audit_account_name(crypto_account)}."
+            ),
+            details={
+                "account_name": _audit_account_name(crypto_account),
+                "provider": "Robinhood",
+                "statement_type": "crypto",
+            },
+            occurred_at=now,
+        )
 
     db.commit()
     db.refresh(account)
@@ -2230,9 +2354,27 @@ async def import_wells_fargo_statement(
         field = _account_balance_field(matched.type)
         if field is None:
             continue
+        previous_value_cents = _compute_account_value_cents(db, matched)
         setattr(matched, field, imported.balance_cents)
         matched.last_update = now
         _record_account_value_history(db, matched)
+        record_audit_log(
+            db,
+            current_user.id,
+            trigger_type="user",
+            event_type="account_statement_imported",
+            message=(
+                f"Imported Wells Fargo statement for {_audit_account_name(matched)} "
+                f"and updated value from {_format_cents(previous_value_cents)} to "
+                f"{_format_cents(_compute_account_value_cents(db, matched))}."
+            ),
+            details={
+                "account_name": _audit_account_name(matched),
+                "provider": "Wells Fargo",
+                "statement_type": "balance_sync",
+            },
+            occurred_at=now,
+        )
         if matched.id not in updated_ids:
             updated_ids.add(matched.id)
             updated_accounts.append(matched)
@@ -2315,6 +2457,17 @@ def queue_credit_card_payment(
     credit_card.last_update = datetime.utcnow()
     if payment_cents == 0:
         _record_account_value_history(db, credit_card)
+        record_audit_log(
+            db,
+            current_user.id,
+            trigger_type="user",
+            event_type="credit_card_balance_updated",
+            message=(
+                f"Updated credit card balance for {_audit_account_name(credit_card)} "
+                f"without queuing a payment."
+            ),
+            details={"account_name": _audit_account_name(credit_card)},
+        )
         db.commit()
         db.refresh(credit_card)
         return _apply_active_account_transfers(
@@ -2337,6 +2490,24 @@ def queue_credit_card_payment(
         )
     )
     _record_account_value_history(db, credit_card)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="credit_card_payment_queued",
+        message=(
+            f"Queued credit card payment of {_format_cents(payment_cents)} from "
+            f"{_audit_account_name(funding_account)} to "
+            f"{_audit_account_name(credit_card)} for "
+            f"{_format_audit_timestamp(effective_at)}."
+        ),
+        details={
+            "source_account_name": _audit_account_name(funding_account),
+            "destination_account_name": _audit_account_name(credit_card),
+            "amount_cents": payment_cents,
+        },
+        occurred_at=queued_at,
+    )
     db.commit()
     db.refresh(credit_card)
     return _apply_active_account_transfers(
@@ -2404,6 +2575,15 @@ def update_queued_credit_card_payment(
     if payment_cents == 0:
         db.delete(active_existing)
         _record_account_value_history(db, credit_card)
+        record_audit_log(
+            db,
+            current_user.id,
+            trigger_type="user",
+            event_type="credit_card_payment_canceled",
+            message=f"Canceled queued credit card payment for {_audit_account_name(credit_card)}.",
+            details={"account_name": _audit_account_name(credit_card)},
+            occurred_at=now,
+        )
         db.commit()
         db.refresh(credit_card)
         return _apply_active_account_transfers(
@@ -2417,6 +2597,23 @@ def update_queued_credit_card_payment(
     active_existing.effective_at = _next_business_day_noon(now)
     active_existing.instant_deposit = False
     _record_account_value_history(db, credit_card)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="credit_card_payment_updated",
+        message=(
+            f"Updated queued credit card payment to {_format_cents(payment_cents)} "
+            f"from {_audit_account_name(funding_account)} to "
+            f"{_audit_account_name(credit_card)}."
+        ),
+        details={
+            "source_account_name": _audit_account_name(funding_account),
+            "destination_account_name": _audit_account_name(credit_card),
+            "amount_cents": payment_cents,
+        },
+        occurred_at=now,
+    )
     db.commit()
     db.refresh(credit_card)
     return _apply_active_account_transfers(
@@ -2498,6 +2695,25 @@ def create_account_transfer(
             int(payload.amount_cents),
             queued_at,
         )
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="transfer_created",
+        message=(
+            f"Queued transfer of {_format_cents(int(payload.amount_cents))} from "
+            f"{_audit_account_name(source_account)} to "
+            f"{_audit_account_name(destination_account)}"
+            f"{' with instant deposit' if bool(payload.instant_deposit) else ''}."
+        ),
+        details={
+            "source_account_name": _audit_account_name(source_account),
+            "destination_account_name": _audit_account_name(destination_account),
+            "amount_cents": int(payload.amount_cents),
+            "instant_deposit": bool(payload.instant_deposit),
+        },
+        occurred_at=queued_at,
+    )
     db.commit()
     db.refresh(transfer)
     return _build_transfer_schema(
@@ -2588,6 +2804,24 @@ def update_account_transfer(
             amount_cents,
             datetime.utcnow(),
         )
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="transfer_updated",
+        message=(
+            f"Updated {_audit_transfer_kind_label(transfer.transfer_kind)} to "
+            f"{_format_cents(amount_cents)} from {_audit_account_name(source_account)} "
+            f"to {_audit_account_name(destination_account)}."
+        ),
+        details={
+            "transfer_kind": transfer.transfer_kind,
+            "source_account_name": _audit_account_name(source_account),
+            "destination_account_name": _audit_account_name(destination_account),
+            "amount_cents": amount_cents,
+            "instant_deposit": bool(transfer.instant_deposit),
+        },
+    )
     db.commit()
     db.refresh(transfer)
     return _build_transfer_schema(
@@ -2631,6 +2865,45 @@ def delete_account_transfer(
                 datetime.utcnow(),
                 reverse=True,
             )
+    source_name = "Unknown account"
+    destination_name = "Unknown account"
+    source_account = (
+        db.query(Account)
+        .filter(
+            Account.id == transfer.source_account_id,
+            Account.user_id == current_user.id,
+        )
+        .first()
+    )
+    destination_account = (
+        db.query(Account)
+        .filter(
+            Account.id == transfer.destination_account_id,
+            Account.user_id == current_user.id,
+        )
+        .first()
+    )
+    if source_account is not None:
+        source_name = _audit_account_name(source_account)
+    if destination_account is not None:
+        destination_name = _audit_account_name(destination_account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="transfer_deleted",
+        message=(
+            f"Deleted queued {_audit_transfer_kind_label(transfer.transfer_kind)} of "
+            f"{_format_cents(int(transfer.amount_cents or 0))} from {source_name} "
+            f"to {destination_name}."
+        ),
+        details={
+            "transfer_kind": transfer.transfer_kind,
+            "source_account_name": source_name,
+            "destination_account_name": destination_name,
+            "amount_cents": int(transfer.amount_cents or 0),
+        },
+    )
     db.delete(transfer)
     db.commit()
 
@@ -2648,6 +2921,15 @@ def delete_account(
     )
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    account_name = _audit_account_name(account)
+    record_audit_log(
+        db,
+        current_user.id,
+        trigger_type="user",
+        event_type="account_deleted",
+        message=f"Deleted account {account_name}.",
+        details={"account_name": account_name, "account_type": account.type},
+    )
     db.delete(account)
     db.commit()
     return None
