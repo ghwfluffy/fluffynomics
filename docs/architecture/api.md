@@ -11,6 +11,7 @@
 - `mp.api.auth` mounted at `/auth`
 - `mp.api.admin` mounted at `/admin`
 - `mp.api.accounts` mounted at `/`
+- `mp.api.widgets` mounted at `/widgets`
 - `mp.api.contracts` mounted at `/`
 - `mp.api.data_portability` mounted at `/data`
 - `mp.api.investments` mounted at `/`
@@ -25,6 +26,7 @@
   - once at least one user exists, `POST /auth/register` requires `registration_code`.
   - registration codes are looked up case-insensitively (normalized uppercase) and must exist + be unexpired.
 - Profile updates are in `python/mp/api/auth.py` via `PUT /auth/profile`.
+- Widget URL rotation is in `python/mp/api/auth.py` via `POST /auth/widget-url/regenerate`.
 - Self account deletion is in `python/mp/api/auth.py` via `POST /auth/delete-account`.
 - Session model is encrypted+signed token (Fernet) containing:
   - `user_id`
@@ -39,6 +41,9 @@
   - `avatar_icon_id`
   - `paypal_account_id`
   - `google_pay_account_id`
+  - `widget_token`
+  - `widget_last_accessed_at`
+  - `widget_last_net_worth_cents`
   - `last_login_at`
   - `password_changed_at`
 - Login updates `last_login_at`.
@@ -51,6 +56,11 @@
   - avatar selection/clearing (`avatar_icon_id`, using icon library/default ownership rules)
   - password change (`current_password`, `new_password`)
   - digital wallet links (`paypal_account_id`, `google_pay_account_id`) to owned accounts
+  - widget URL rotation via `POST /auth/widget-url/regenerate`
+- Widget URL rotation rule:
+  - regenerating creates a new URL-safe random token for the signed-in user.
+  - the old widget URL becomes invalid immediately.
+  - widget hit-history fields are cleared when the token rotates so the next render starts from a fresh baseline.
 - Account deletion endpoint (`POST /auth/delete-account`):
   - requires current authenticated session and `current_password`.
   - uses the same brute-force/lockout controls as login/password change.
@@ -153,6 +163,11 @@ Defined in `python/mp/api/accounts.py`.
 - `DELETE /accounts/{account_id}`
 - `GET /organizations`
   - returns organization suggestions (default organizations + user organizations)
+- `GET /widgets/net-worth.png?token=...`
+  - public PNG widget endpoint; does not require session auth
+  - token is matched against `users.widget_token`
+  - every successful hit renders a fresh `351x485` PNG containing prorated net worth, change since the previous hit, elapsed time between hits, and the branded cat artwork
+  - successful hits persist `widget_last_accessed_at` and `widget_last_net_worth_cents` on the owning user row
 - `GET /logs`
   - returns recent per-user audit-log events in newest-first order
   - each event includes:

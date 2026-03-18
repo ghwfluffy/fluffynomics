@@ -199,6 +199,19 @@
                 Digital Wallets
               </button>
             </li>
+            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'widget' }" role="presentation">
+              <button
+                id="tab-profile-widget"
+                class="cds--tabs__nav-link"
+                role="tab"
+                type="button"
+                :aria-selected="profileTab === 'widget'"
+                aria-controls="panel-profile-widget"
+                @click="profileTab = 'widget'"
+              >
+                Widget
+              </button>
+            </li>
             <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'delete' }" role="presentation">
               <button
                 id="tab-profile-delete"
@@ -308,6 +321,41 @@
           />
         </div>
         <div
+          v-if="profileTab === 'widget'"
+          id="panel-profile-widget"
+          class="profile-widget-section"
+          role="tabpanel"
+          aria-labelledby="tab-profile-widget"
+        >
+          <h4>Widget URL</h4>
+          <p>
+            Generate a private PNG URL for your widget client. Regenerating the URL invalidates the old token and resets its hit history.
+          </p>
+          <div class="modal-form-grid">
+            <label class="bank-label" for="profile-widget-url">Current Widget URL</label>
+            <input
+              id="profile-widget-url"
+              class="cds--text-input"
+              type="text"
+              :value="profileWidgetUrl || 'No widget URL generated yet'"
+              readonly
+            />
+          </div>
+          <div class="profile-widget-actions">
+            <button class="cds--btn cds--btn--secondary" type="button" :disabled="profileBusy" @click="regenerateProfileWidgetUrl">
+              {{ profileBusy ? 'Generating...' : (profileWidgetUrl ? 'Generate New Widget URL' : 'Generate Widget URL') }}
+            </button>
+            <button
+              class="cds--btn cds--btn--ghost"
+              type="button"
+              :disabled="profileBusy || !profileWidgetUrl"
+              @click="copyProfileWidgetUrl"
+            >
+              {{ profileWidgetCopied ? 'Copied' : 'Copy URL' }}
+            </button>
+          </div>
+        </div>
+        <div
           v-if="profileTab === 'delete'"
           id="panel-profile-delete"
           class="profile-delete-section"
@@ -349,7 +397,7 @@
             Cancel
           </button>
           <button
-            v-if="profileTab !== 'delete'"
+            v-if="profileTab !== 'delete' && profileTab !== 'widget'"
             class="cds--btn cds--btn--primary"
             type="button"
             :disabled="profileBusy"
@@ -662,7 +710,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { currentUser, deleteOwnAccount, logout, updateProfile } from '@/lib/auth'
+import { currentUser, deleteOwnAccount, logout, regenerateWidgetUrl, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { enableMaskedMode, maskedModeEnabled } from '@/lib/maskedMode'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
@@ -682,12 +730,13 @@ const profileMenuRef = ref<HTMLElement | null>(null)
 const profileMenuOpen = ref(false)
 const profileDialogOpen = ref(false)
 const profileBusy = ref(false)
-const profileTab = ref<'info' | 'password' | 'wallets' | 'delete'>('info')
+const profileTab = ref<'info' | 'password' | 'wallets' | 'widget' | 'delete'>('info')
 const profileCurrentPassword = ref('')
 const profileNewPassword = ref('')
 const profileDraftAvatarIconId = ref<string | null>(null)
 const profilePaypalAccountId = ref('')
 const profileGooglePayAccountId = ref('')
+const profileWidgetCopied = ref(false)
 const profileDeletePassword = ref('')
 const profileDeleteConfirm = ref(false)
 const showProfileIconLibrary = ref(false)
@@ -783,6 +832,21 @@ const profileAvatarUrl = computed(() => {
   return iconId ? iconUrl(iconId) : ''
 })
 
+const profileWidgetUrl = computed(() => {
+  const token = currentUser.value?.widget_token
+  if (!token) {
+    return ''
+  }
+  try {
+    return new URL(
+      `${apiBase}/widgets/net-worth.png?token=${encodeURIComponent(token)}`,
+      window.location.origin,
+    ).toString()
+  } catch {
+    return `${apiBase}/widgets/net-worth.png?token=${encodeURIComponent(token)}`
+  }
+})
+
 const formatDateTime = (value?: string | null) => {
   if (!value) {
     return 'Never'
@@ -815,6 +879,7 @@ const onProfileManageClick = async () => {
   profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
   profilePaypalAccountId.value = currentUser.value?.paypal_account_id || ''
   profileGooglePayAccountId.value = currentUser.value?.google_pay_account_id || ''
+  profileWidgetCopied.value = false
   profileDeletePassword.value = ''
   profileDeleteConfirm.value = false
   showProfileIconLibrary.value = false
@@ -1216,6 +1281,32 @@ const onProfileAvatarUpload = async (event: Event) => {
 
 const clearProfileAvatar = () => {
   profileDraftAvatarIconId.value = null
+}
+
+const copyProfileWidgetUrl = async () => {
+  if (!profileWidgetUrl.value) {
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(profileWidgetUrl.value)
+    profileWidgetCopied.value = true
+    window.setTimeout(() => {
+      profileWidgetCopied.value = false
+    }, 1600)
+  } catch {
+    errorMessage.value = 'Unable to copy the widget URL'
+    snackbar.value = true
+  }
+}
+
+const regenerateProfileWidgetUrl = async () => {
+  profileBusy.value = true
+  try {
+    await regenerateWidgetUrl()
+    profileWidgetCopied.value = false
+  } finally {
+    profileBusy.value = false
+  }
 }
 
 const saveProfile = async () => {
@@ -1759,6 +1850,28 @@ const runImport = async () => {
 
 .password-section h4 {
   margin: 0 0 10px;
+}
+
+.profile-widget-section {
+  border-top: 1px solid var(--cds-border-subtle-01);
+  padding-top: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.profile-widget-section h4,
+.profile-widget-section p {
+  margin: 0;
+}
+
+.profile-widget-section p {
+  color: var(--cds-text-secondary);
+}
+
+.profile-widget-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .profile-delete-section {

@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -171,6 +172,15 @@ def _seconds_until_unlock(user: User, now: datetime) -> int:
         return 0
     remaining = (lockout_until - now).total_seconds()
     return max(0, int(remaining + 0.999))
+
+
+def _generate_widget_token(db: Session) -> str:
+    for _ in range(10):
+        candidate = secrets.token_urlsafe(24)
+        exists = db.query(User.id).filter(User.widget_token == candidate).first()
+        if exists is None:
+            return candidate
+    raise RuntimeError("Unable to generate a unique widget token")
 
 
 def _record_failed_password_attempt(user: User, now: datetime) -> None:
@@ -409,6 +419,22 @@ def update_profile(
         db.add(current_user)
         db.commit()
         db.refresh(current_user)
+    return current_user
+
+
+@router.post("/widget-url/regenerate", response_model=UserSchema)
+def regenerate_widget_url(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    now = datetime.now(tz=timezone.utc)
+    current_user.widget_token = _generate_widget_token(db)
+    current_user.widget_last_accessed_at = None
+    current_user.widget_last_net_worth_cents = None
+    current_user.updated_at = now
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 

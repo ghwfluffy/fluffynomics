@@ -33,6 +33,13 @@ class User(Base):
         ForeignKey("accounts.id", ondelete="SET NULL"),
         nullable=True,
     )
+    widget_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    widget_last_accessed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    widget_last_net_worth_cents: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -64,6 +71,9 @@ class UserSchema(BaseModel):
     avatar_icon_id: Optional[UUID] = None
     paypal_account_id: Optional[UUID] = None
     google_pay_account_id: Optional[UUID] = None
+    widget_token: Optional[str] = None
+    widget_last_accessed_at: Optional[datetime] = None
+    widget_last_net_worth_cents: Optional[int] = None
     last_login_at: Optional[datetime] = None
     password_changed_at: Optional[datetime] = None
     created_at: datetime

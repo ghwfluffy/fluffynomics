@@ -165,7 +165,11 @@ Masked mode UX:
     - `Info`: avatar selection (icon library / upload / clear) + account-created/last-login/last-password-change info
     - `Password`: password change flow (`current password` + `new password`)
     - `Digital Wallets`: maps `PayPal` / `Google Pay` aliases to concrete accounts
+    - `Widget`: generates, displays, and copies the user's tokenized public widget URL
     - `Delete Account`: requires current password + explicit confirmation checkbox, then permanently deletes the signed-in user account
+  - widget profile rule:
+    - widget URL generation is an immediate action inside the `Widget` tab and is not part of the general `Save Profile` submit button
+    - regenerating the URL invalidates the old token and resets widget hit-history state
 - `Manage Users` (admin users only)
   - opens admin user-management modal with Carbon tabs:
     - `Users`

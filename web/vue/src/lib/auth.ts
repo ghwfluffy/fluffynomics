@@ -10,6 +10,9 @@ export interface User {
   avatar_icon_id: string | null
   paypal_account_id: string | null
   google_pay_account_id: string | null
+  widget_token: string | null
+  widget_last_accessed_at: string | null
+  widget_last_net_worth_cents: number | null
   last_login_at: string | null
   password_changed_at: string | null
   created_at: string
@@ -85,6 +88,13 @@ export async function updateProfile(payload: {
   new_password?: string
 }): Promise<User> {
   const user = await request.put<User>('/auth/profile', payload)
+  currentUser.value = user
+  syncMaskedModeForUser(user.id)
+  return user
+}
+
+export async function regenerateWidgetUrl(): Promise<User> {
+  const user = await request.post<User>('/auth/widget-url/regenerate')
   currentUser.value = user
   syncMaskedModeForUser(user.id)
   return user

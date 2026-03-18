@@ -24,6 +24,7 @@ for name in [
     "auth",
     "admin",
     "accounts",
+    "widgets",
     "contracts",
     "expenses",
     "investments",

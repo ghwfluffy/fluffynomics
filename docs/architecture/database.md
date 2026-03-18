@@ -208,12 +208,18 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 - `users.avatar_icon_id` (nullable FK -> `icon_assets.id`, `ON DELETE SET NULL`)
 - `users.paypal_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)
 - `users.google_pay_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)
+- `users.widget_token` (nullable text, unique when present)
+- `users.widget_last_accessed_at` (nullable timestamp)
+- `users.widget_last_net_worth_cents` (nullable integer)
 - `users.last_login_at` (nullable timestamp)
 - `users.password_changed_at` (nullable timestamp)
 - `users.failed_password_attempts` (non-null integer, default `0`)
 - `users.password_lockout_until` (nullable timestamp for short lockout window)
 - `users.is_admin` (non-null boolean, default `false`)
   - first registered user is assigned admin privileges
+- Widget state rule:
+  - each user owns at most one active public widget token at a time
+  - the previous successful widget render is stored on the user row (`widget_last_accessed_at`, `widget_last_net_worth_cents`) so the next render can compute delta and elapsed-time text without a separate widget-hits table
 
 ### Registration codes
 

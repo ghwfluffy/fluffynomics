@@ -41,7 +41,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 11
+PAYLOAD_SCHEMA_VERSION = 12
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -1556,6 +1556,9 @@ def _convert_legacy_payload_to_latest(
             "avatar_icon_id": None,
             "paypal_account_id": None,
             "google_pay_account_id": None,
+            "widget_token": None,
+            "widget_last_accessed_at": None,
+            "widget_last_net_worth_cents": None,
             "last_login_at": None,
             "password_changed_at": None,
             "created_at": user.created_at.isoformat() if user.created_at else now_iso,
@@ -1733,6 +1736,15 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
             "google_pay_account_id": str(user.google_pay_account_id)
             if user.google_pay_account_id is not None
             else None,
+            "widget_token": user.widget_token,
+            "widget_last_accessed_at": _serialize_datetime(
+                user.widget_last_accessed_at
+            ),
+            "widget_last_net_worth_cents": (
+                int(user.widget_last_net_worth_cents)
+                if user.widget_last_net_worth_cents is not None
+                else None
+            ),
             "last_login_at": _serialize_datetime(user.last_login_at),
             "password_changed_at": _serialize_datetime(user.password_changed_at),
             "created_at": _serialize_datetime(user.created_at),
@@ -2098,6 +2110,20 @@ def _upgrade_payload_v10_to_v11(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v11_to_v12(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 12
+    profile = _required_dict(upgraded.get("user_profile"), "user_profile")
+    if "widget_token" not in profile:
+        profile["widget_token"] = None
+    if "widget_last_accessed_at" not in profile:
+        profile["widget_last_accessed_at"] = None
+    if "widget_last_net_worth_cents" not in profile:
+        profile["widget_last_net_worth_cents"] = None
+    upgraded["user_profile"] = profile
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2110,6 +2136,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     8: _upgrade_payload_v8_to_v9,
     9: _upgrade_payload_v9_to_v10,
     10: _upgrade_payload_v10_to_v11,
+    11: _upgrade_payload_v11_to_v12,
 }
 
 
@@ -2349,7 +2376,30 @@ def _replace_user_data(
         user_profile.get("google_pay_account_id"),
         "user_profile.google_pay_account_id",
     )
+    raw_widget_token = user_profile.get("widget_token")
+    if raw_widget_token is not None and not isinstance(raw_widget_token, str):
+        raise HTTPException(
+            status_code=400,
+            detail="user_profile.widget_token must be a string or null",
+        )
     user.avatar_icon_id = resolve_import_icon_id(raw_avatar_icon_id)
+    user.widget_token = (
+        raw_widget_token.strip()
+        if isinstance(raw_widget_token, str) and raw_widget_token.strip()
+        else None
+    )
+    user.widget_last_accessed_at = _parse_optional_datetime(
+        user_profile.get("widget_last_accessed_at"),
+        "user_profile.widget_last_accessed_at",
+    )
+    user.widget_last_net_worth_cents = (
+        _parse_int(
+            user_profile.get("widget_last_net_worth_cents"),
+            "user_profile.widget_last_net_worth_cents",
+        )
+        if user_profile.get("widget_last_net_worth_cents") is not None
+        else None
+    )
     user.last_login_at = _parse_optional_datetime(
         user_profile.get("last_login_at"), "user_profile.last_login_at"
     )
