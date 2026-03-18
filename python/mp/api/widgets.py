@@ -36,6 +36,7 @@ WIDGET_POSITIVE_COLOR = (0, 255, 0, 255)
 WIDGET_NEGATIVE_COLOR = (255, 0, 0, 255)
 WIDGET_CHANGE_POSITIVE_COLOR = (19, 167, 0, 255)
 WIDGET_CHANGE_NEGATIVE_COLOR = (204, 0, 0, 255)
+WIDGET_TEXT_SHADOW = (255, 255, 255, 170)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CAT_IMAGE_PATH = _REPO_ROOT / "static" / "cat.png"
 _FONT_PATH = _REPO_ROOT / "static" / "DejaVuSans.ttf"
@@ -380,7 +381,75 @@ def _draw_right_aligned_text(
     text_width = text_bounds[2] - text_bounds[0]
     x = right_edge - text_width
     y = top
+    draw.text((x + 2, y + 2), text, font=font, fill=WIDGET_TEXT_SHADOW)
     draw.text((x, y), text, font=font, fill=fill)
+
+
+def _draw_background(image: Image.Image) -> None:
+    width, height = image.size
+    base_draw = ImageDraw.Draw(image)
+    top_color = (234, 229, 216)
+    bottom_color = (214, 223, 232)
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        row = tuple(
+            int(top_color[i] + (bottom_color[i] - top_color[i]) * ratio)
+            for i in range(3)
+        )
+        base_draw.line((0, y, width, y), fill=(*row, 255))
+
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    overlay_draw.ellipse(
+        (-70, -30, 190, 180),
+        fill=(255, 228, 163, 95),
+    )
+    overlay_draw.ellipse(
+        (155, -40, 380, 165),
+        fill=(193, 238, 198, 85),
+    )
+    overlay_draw.rounded_rectangle(
+        (14, 10, 337, 165),
+        radius=28,
+        fill=(255, 255, 255, 118),
+    )
+    overlay_draw.pieslice(
+        (-40, 360, 160, 560),
+        start=230,
+        end=360,
+        fill=(255, 215, 110, 48),
+    )
+    overlay_draw.pieslice(
+        (240, 310, 410, 520),
+        start=180,
+        end=320,
+        fill=(128, 221, 142, 40),
+    )
+    image.alpha_composite(overlay)
+
+
+def _prepare_cat_image() -> Image.Image:
+    cat_image = _load_cat_image().copy()
+    remapped: list[tuple[int, int, int, int]] = []
+    for r, g, b, a in list(cat_image.getdata()):
+        if a == 0:
+            remapped.append((r, g, b, a))
+            continue
+        min_channel = min(r, g, b)
+        max_channel = max(r, g, b)
+        # Knock out the baked-in white background while preserving the cat's
+        # cream fur and coin highlights.
+        if min_channel >= 246 and max_channel - min_channel <= 10:
+            remapped.append((r, g, b, 0))
+        elif min_channel >= 236 and max_channel - min_channel <= 12:
+            remapped.append((r, g, b, int(a * 0.2)))
+        else:
+            remapped.append((r, g, b, a))
+    cat_image.putdata(remapped)
+    alpha_bbox = cat_image.getchannel("A").getbbox()
+    if alpha_bbox is not None:
+        cat_image = cat_image.crop(alpha_bbox)
+    return cat_image
 
 
 def _render_widget_png(
@@ -390,6 +459,7 @@ def _render_widget_png(
     elapsed_seconds: int,
 ) -> bytes:
     image = Image.new("RGBA", (WIDGET_WIDTH, WIDGET_HEIGHT), (255, 255, 255, 255))
+    _draw_background(image)
     draw = ImageDraw.Draw(image)
 
     value_text = format_cents(net_worth_cents)
@@ -446,7 +516,7 @@ def _render_widget_png(
         fill=WIDGET_TEXT_COLOR,
     )
 
-    cat_image = _load_cat_image().copy()
+    cat_image = _prepare_cat_image()
     cat_image = cat_image.resize((290, 290), Image.Resampling.LANCZOS)
     cat_x = 29
     cat_y = 173
