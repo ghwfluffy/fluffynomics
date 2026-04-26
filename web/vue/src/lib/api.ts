@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import { ref } from 'vue'
+import { apiBasePath } from '@/lib/paths'
 
 export const errorMessage = ref('')
 export const snackbar = ref(false)
@@ -10,7 +11,7 @@ type RequestConfig = AxiosRequestConfig & {
 }
 
 const instance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: apiBasePath,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',

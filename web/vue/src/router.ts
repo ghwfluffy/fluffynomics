@@ -3,6 +3,7 @@ import AppShell from '@/AppShell.vue'
 import LandingPage from '@/auth/LandingPage.vue'
 import AccountsPage from '@/accounts/AccountsPage.vue'
 import { currentUser, refreshSession } from '@/lib/auth'
+import { appBasePath } from '@/lib/paths'
 
 const routes = [
   { path: '/', name: 'Landing', component: LandingPage, meta: { public: true } },
@@ -15,7 +16,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(appBasePath),
   routes,
 })
 

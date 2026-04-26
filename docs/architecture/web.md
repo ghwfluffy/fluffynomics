@@ -5,6 +5,9 @@
 - Vue 3 + TypeScript + Vite
 - Carbon CSS base styles (`@carbon/styles`)
 - Axios wrapper in `web/vue/src/lib/api.ts`
+- Deployment base path is controlled by `VITE_APP_BASE_PATH`, normally set to the same value as backend `APP_BASE_PATH`.
+- Frontend URL helpers live in `web/vue/src/lib/paths.ts`; use them for app assets, API URLs, and public absolute URLs instead of hardcoding root-relative `/api/...` or `/asset.png` paths.
+- Vite `base`, Vue Router history, generated API URLs, static public asset references, and widget URLs all derive from that base path so the app can run under prefixes like `/fluffynomics/`.
 
 ## Core Pages
 

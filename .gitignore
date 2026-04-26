@@ -6,3 +6,4 @@ python/venv
 outfile.tmp
 backups/*
 !backups/backup_loop.sh
+publish.sh

@@ -21,6 +21,11 @@
 ## Auth + Session Model
 
 - Registration/login/logout/me are in `python/mp/api/auth.py`.
+- Public deployment pathing is configured with:
+  - `PUBLIC_URL`: externally visible scheme/host/port used for public absolute URLs.
+  - `APP_BASE_PATH`: externally visible app prefix, normalized to leading/trailing slash form (for example `/fluffynomics/`).
+- FastAPI runs behind NGINX with external API URLs under `<APP_BASE_PATH>api/...`; NGINX strips that external prefix before proxying to FastAPI routers.
+- Session cookies use `APP_BASE_PATH` as their cookie path so subpath deployments remain scoped to the mounted app prefix.
 - Registration rule:
   - first account can register without a code.
   - once at least one user exists, `POST /auth/register` requires `registration_code`.

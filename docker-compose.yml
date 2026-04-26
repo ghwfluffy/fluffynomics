@@ -17,6 +17,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       SESSION_KEY: ${SESSION_KEY}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8081}
+      APP_BASE_PATH: ${APP_BASE_PATH:-/}
     depends_on:
       - database
     volumes:
@@ -29,9 +31,11 @@ services:
       context: .
       dockerfile: ./web/Dockerfile
     ports:
-      - "443:443"
+      - "${BIND_ADDRESS:-0.0.0.0}:8081:80"
     depends_on:
       - api
+    environment:
+      APP_BASE_PATH: ${APP_BASE_PATH:-/}
     volumes:
       - ./web/pki:/etc/nginx/pki:ro
 
@@ -42,8 +46,10 @@ services:
     command: sh -c "npm install && npm run dev -- --host"
     environment:
       VITE_DEV_API_TARGET: http://api:8000
+      VITE_APP_BASE_PATH: ${VITE_APP_BASE_PATH:-${APP_BASE_PATH:-/}}
+      VITE_PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8081}
     ports:
-      - "8080:5173"
+      - "${BIND_ADDRESS:-0.0.0.0}:8080:5173"
     depends_on:
       - api
     volumes:

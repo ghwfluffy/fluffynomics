@@ -77,7 +77,7 @@
             </button>
             <img
               v-if="contract.automatic"
-              src="/automatic.png"
+              :src="assetUrl('automatic.png')"
               class="tile-automatic-icon"
               :title="nextPaymentTooltip(contract)"
               alt="Automatic contract"
@@ -329,6 +329,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import { apiUrl, assetUrl } from '@/lib/paths'
 import { formatMaskedCurrencyCents, guardMaskedMode } from '@/lib/maskedMode'
 import AddTypePickerButton from '@/components/AddTypePickerButton.vue'
 import BankField from '@/components/BankField.vue'
@@ -722,11 +723,11 @@ const selectedFormIconUrl = computed(() =>
 const cents = (value?: number) => formatMaskedCurrencyCents(value)
 
 const normalizedUrl = (raw?: string) => (!raw?.trim() ? '#' : /^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
-const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
+const iconUrl = (iconId?: string) => (iconId ? apiUrl(`icons/${iconId}`) : '')
 const generatedIconUrl = (iconType: 'Letters' | 'Gravatar', organization?: string) => {
   const seed = (organization || '').trim() || 'Organization'
   const encoded = encodeURIComponent(seed)
-  return iconType === 'Letters' ? `/api/icons/lettered/${encoded}` : `/api/icons/gravatar/${encoded}`
+  return iconType === 'Letters' ? apiUrl(`icons/lettered/${encoded}`) : apiUrl(`icons/gravatar/${encoded}`)
 }
 const resolveIconUrl = (iconId?: string, iconType?: 'Letters' | 'Gravatar' | 'Icon', organization?: string) =>
   iconType === 'Letters' || iconType === 'Gravatar' ? generatedIconUrl(iconType, organization) : iconUrl(iconId)

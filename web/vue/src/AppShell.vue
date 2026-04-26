@@ -2,7 +2,7 @@
   <div class="app-shell">
     <header class="shell-header cds--header">
       <div class="shell-brand">
-        <img src="/cat_small.png" alt="Fluffynomics cat" class="brand-cat" />
+        <img :src="assetUrl('cat_small.png')" alt="Fluffynomics cat" class="brand-cat" />
         <span>Fluffynomics - Wealth Tracker</span>
       </div>
       <div class="shell-actions">
@@ -713,6 +713,7 @@ import { useRouter } from 'vue-router'
 import { currentUser, deleteOwnAccount, logout, regenerateWidgetUrl, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { enableMaskedMode, maskedModeEnabled } from '@/lib/maskedMode'
+import { absolutePublicUrl, apiUrl, assetUrl } from '@/lib/paths'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
 const router = useRouter()
@@ -821,9 +822,7 @@ const avatarInitials = computed(() => {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 })
 
-const apiBase = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
-
-const iconUrl = (iconId: string) => `${apiBase}/icons/${iconId}`
+const iconUrl = (iconId: string) => apiUrl(`icons/${iconId}`)
 
 const profileAvatarUrl = computed(() => {
   const iconId = profileDialogOpen.value
@@ -837,14 +836,7 @@ const profileWidgetUrl = computed(() => {
   if (!token) {
     return ''
   }
-  try {
-    return new URL(
-      `${apiBase}/widgets/net-worth.png?token=${encodeURIComponent(token)}`,
-      window.location.origin,
-    ).toString()
-  } catch {
-    return `${apiBase}/widgets/net-worth.png?token=${encodeURIComponent(token)}`
-  }
+  return absolutePublicUrl(apiUrl(`widgets/net-worth.png?token=${encodeURIComponent(token)}`))
 })
 
 const formatDateTime = (value?: string | null) => {

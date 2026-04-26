@@ -204,6 +204,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { request } from '@/lib/api'
+import { apiUrl } from '@/lib/paths'
 import { formatMaskedCurrencyCents, guardMaskedMode } from '@/lib/maskedMode'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
@@ -338,11 +339,11 @@ const destinationTypeLabel = (accountId?: string) => destinationTypeLabelFromTyp
 const investmentDestinationDisplay = (item: Investment) =>
   item.enabled ? destinationTypeLabel(item.destination_account_id) : `Disabled ${destinationTypeLabel(item.destination_account_id)}`
 
-const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
+const iconUrl = (iconId?: string) => (iconId ? apiUrl(`icons/${iconId}`) : '')
 const generatedIconUrl = (iconType: 'Letters' | 'Gravatar', seed: string) =>
   iconType === 'Letters'
-    ? `/api/icons/lettered/${encodeURIComponent(seed || 'Investment')}`
-    : `/api/icons/gravatar/${encodeURIComponent(seed || 'Investment')}`
+    ? apiUrl(`icons/lettered/${encodeURIComponent(seed || 'Investment')}`)
+    : apiUrl(`icons/gravatar/${encodeURIComponent(seed || 'Investment')}`)
 
 const resolveIconUrl = (iconId?: string, iconType?: 'Letters' | 'Gravatar' | 'Icon', seed?: string) => {
   if (iconType === 'Letters' || iconType === 'Gravatar') {

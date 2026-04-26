@@ -3,6 +3,7 @@ from importlib import import_module
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from mp.config import external_api_root_path, public_url_origin
 from mp.db import run_database_upgrades
 from mp.api.auth import initialize_session_signing_key
 from mp.contracts.scheduler import start_contract_scheduler, stop_contract_scheduler
@@ -10,11 +11,13 @@ from mp.organization_defaults import ensure_default_organizations_loaded
 from mp.db.sample_data import ensure_example_data_for_opted_in_users
 
 # FastAPI
-app: FastAPI = FastAPI()
+configured_public_origin = public_url_origin()
+cors_origins = [configured_public_origin] if configured_public_origin else ["*"]
+app: FastAPI = FastAPI(root_path=external_api_root_path())
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

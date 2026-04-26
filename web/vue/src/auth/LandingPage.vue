@@ -1,7 +1,7 @@
 <template>
   <div class="landing">
     <div class="hero">
-      <img src="/banner.png" alt="Fluffynomics banner" class="hero-banner" />
+      <img :src="assetUrl('banner.png')" alt="Fluffynomics banner" class="hero-banner" />
       <h1>Budgeting and money planning software for real life.</h1>
       <p>
         Fluffynomics brings your accounts and investments together so you can
@@ -83,6 +83,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { login, register } from '@/lib/auth'
+import { assetUrl } from '@/lib/paths'
 
 const router = useRouter()
 const mode = ref<'login' | 'register'>('login')

@@ -2,6 +2,26 @@
 
 set -eux -o pipefail
 
+PRESET_APP_BASE_PATH="${APP_BASE_PATH-}"
+PRESET_PUBLIC_URL="${PUBLIC_URL-}"
+PRESET_VITE_APP_BASE_PATH="${VITE_APP_BASE_PATH-}"
+PRESET_VITE_PUBLIC_URL="${VITE_PUBLIC_URL-}"
+
+if [ -f ../.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ../.env
+    set +a
+fi
+
+[ -n "$PRESET_APP_BASE_PATH" ] && APP_BASE_PATH="$PRESET_APP_BASE_PATH"
+[ -n "$PRESET_PUBLIC_URL" ] && PUBLIC_URL="$PRESET_PUBLIC_URL"
+[ -n "$PRESET_VITE_APP_BASE_PATH" ] && VITE_APP_BASE_PATH="$PRESET_VITE_APP_BASE_PATH"
+[ -n "$PRESET_VITE_PUBLIC_URL" ] && VITE_PUBLIC_URL="$PRESET_VITE_PUBLIC_URL"
+
+export VITE_APP_BASE_PATH="${VITE_APP_BASE_PATH:-${APP_BASE_PATH:-/}}"
+export VITE_PUBLIC_URL="${VITE_PUBLIC_URL:-${PUBLIC_URL:-}}"
+
 cd vue
 npm install
 npm run build

@@ -240,6 +240,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { request } from '@/lib/api'
+import { apiUrl } from '@/lib/paths'
 import { formatMaskedCurrencyCents, guardMaskedMode } from '@/lib/maskedMode'
 import ViewModeToggle from '@/components/ViewModeToggle.vue'
 import DataTableControls from '@/components/DataTableControls.vue'
@@ -550,11 +551,11 @@ const frequencyLabel = (raw?: string) => {
   return 'Custom'
 }
 
-const iconUrl = (iconId?: string) => (iconId ? `/api/icons/${iconId}` : '')
+const iconUrl = (iconId?: string) => (iconId ? apiUrl(`icons/${iconId}`) : '')
 const generatedIconUrl = (iconType: 'Letters' | 'Gravatar', seed: string) =>
   iconType === 'Letters'
-    ? `/api/icons/lettered/${encodeURIComponent(seed || 'Expense')}`
-    : `/api/icons/gravatar/${encodeURIComponent(seed || 'Expense')}`
+    ? apiUrl(`icons/lettered/${encodeURIComponent(seed || 'Expense')}`)
+    : apiUrl(`icons/gravatar/${encodeURIComponent(seed || 'Expense')}`)
 
 const resolveIconUrl = (iconId?: string, iconType?: 'Letters' | 'Gravatar' | 'Icon', seed?: string) => {
   if (iconType === 'Letters' || iconType === 'Gravatar') {

@@ -1,9 +1,30 @@
+Budget TODO
+[\] Move over to porkbun
+    [ ] Add tracking for ghwiz.com (expires 2027-04-12)
+    Network solutions downtime
+    [ ] ghwsec.com
+    Godaddy
+    [ ] spjinc.org
+    [ ] fullercode.com
+        [ ] email
+        [ ] domain
+[ ] Misc Expenses
+    [ ] Apartment application fee
+Improvements TODO
+[ ] Tabs are routes in url
+[ ] Mobile app view
+    [\] Create API that downloads png
+        - net worth
+        - portfolio mix
+        - generate URL w/ randomized token for user
+    [ ] Cleanup naming/wording
+    [ ] Stage git (separate repo?)
+README
+[ ] Add UI pictures
+[ ] Mention carbon
 Security
 [ ] Encrypt account info at rest with PBE
-Prod deployment
-[ ] Domain
-[ ] Site
-[ ] Lets encrypt w/ ACME
+[ ] 15 minute inactivity timeout
 Nice to have
 [ ] Stock dividens
 [ ] Pull crypto/stock prices automatically
@@ -20,7 +41,6 @@ Nice to have
     [ ] Digital
         - Domains
         - Emails
-[ ] Receivables / One-offs (Non-contract income, non-recurring expenses)
-    - Tax return
-    - Apartment application fee
 [ ] Bonds/CD
+[ ] Emails & domains tracking?
+    - Separate app to track digital assets?

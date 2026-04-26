@@ -12,6 +12,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
+from mp.config import session_cookie_path
 from mp.db import get_db
 from mp.db.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
@@ -319,6 +320,7 @@ def login(
         value=cookie_value,
         max_age=session_seconds,
         httponly=True,
+        path=session_cookie_path(),
         samesite="lax",
         secure=False,
     )
@@ -330,7 +332,7 @@ def login(
 
 @router.post("/logout", status_code=204)
 def logout(response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.delete_cookie(SESSION_COOKIE_NAME, path=session_cookie_path())
     return None
 
 
@@ -498,5 +500,5 @@ def delete_account(
     db.query(Stock).filter(Stock.user_id == user_id).delete(synchronize_session=False)
     db.delete(current_user)
     db.commit()
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.delete_cookie(SESSION_COOKIE_NAME, path=session_cookie_path())
     return None
