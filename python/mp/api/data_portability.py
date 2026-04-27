@@ -1718,9 +1718,13 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
         if expense.icon_type == "Icon" and expense.icon_id is not None:
             referenced_icon_ids.add(expense.icon_id)
     icons = (
-        db.query(IconAsset).filter(IconAsset.id.in_(list(referenced_icon_ids))).all()
-        if referenced_icon_ids
-        else []
+        db.query(IconAsset)
+        .filter(
+            (IconAsset.created_by_user_id == user_id)
+            | (IconAsset.id.in_(list(referenced_icon_ids)))
+        )
+        .order_by(IconAsset.created_at.asc(), IconAsset.id.asc())
+        .all()
     )
 
     return {
@@ -2352,6 +2356,24 @@ def _replace_user_data(
             )
             db.add(existing)
             db.flush()
+        elif existing.created_by_user_id is None:
+            is_default_icon = (
+                db.query(DefaultIcon.id)
+                .filter(DefaultIcon.icon_id == existing.id)
+                .first()
+                is not None
+            ) or (
+                db.query(Organization.id)
+                .filter(
+                    Organization.icon_id == existing.id,
+                    Organization.is_default.is_(True),
+                )
+                .first()
+                is not None
+            )
+            if not is_default_icon:
+                existing.created_by_user_id = user_id
+                db.add(existing)
         icon_id_map[old_id] = existing.id
         imported_icons += 1
 

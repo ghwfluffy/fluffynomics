@@ -350,7 +350,7 @@ Defined in `python/mp/api/data_portability.py`.
 - `POST /data/export`
   - builds a versioned JSON package of current user data:
     - user profile metadata (avatar + profile timestamps; excludes credentials)
-    - icons referenced by user records
+    - icons uploaded by the user plus icons referenced by user records
     - stocks
     - accounts (+ stock/crypto/cash sub-records)
     - contracts
@@ -395,7 +395,7 @@ Defined in `python/mp/api/data_portability.py`.
 - If payload version is newer than server-supported version, import is rejected.
 - Initial migration compatibility:
   - payloads with missing `schema_version` are treated as legacy v0 and upgraded to v1.
-- Current payload schema version: `5`.
+- Current payload schema version: `12`.
 - Security metadata rule:
   - brute-force lockout state (`failed_password_attempts`, `password_lockout_until`) is intentionally not exported/imported and remains local runtime state.
 - Digital-wallet link rule:

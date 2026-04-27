@@ -258,6 +258,7 @@ Icon handling during import:
 - imported icon records are looked up by `icon_assets.hash` first (global dedupe),
 - existing matching hash rows are reused,
 - missing hashes create new rows,
+- modern exports include both assigned icon references and unassigned user-uploaded icons so the user's icon library survives export/import,
 - imported account/contract/expense `icon_id` references are remapped to resolved icon rows.
 
 ## Example Data Contract
