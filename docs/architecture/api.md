@@ -401,6 +401,8 @@ Defined in `python/mp/api/data_portability.py`.
 - Digital-wallet link rule:
   - user wallet links (`paypal_account_id`, `google_pay_account_id`) and contract `linked_wallet` are exported/imported.
   - legacy YAML import also maps wallet-like payment-account aliases (for example `PayPal`, `Google Pay.*`, `gpay`) into contract `linked_wallet` when possible.
+- Contract expiration rule:
+  - modern export/import preserves `contracts.expiration_date` exactly; the far-future-to-expired cleanup is only for legacy YAML conversion.
 - Schema-change rule:
   - backend schema/API changes that affect user data must update both:
     - DB migration/ORM model paths, and

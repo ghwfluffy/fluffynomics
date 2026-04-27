@@ -2692,8 +2692,6 @@ def _replace_user_data(
             item.get("expiration_date", item.get("expirationDate")),
             "contracts[].expiration_date",
         )
-        if _is_far_future_date(parsed_contract_expiration_date):
-            parsed_contract_expiration_date = date.today() - timedelta(days=1)
         contract = Contract(
             id=uuid4(),
             user_id=user_id,
