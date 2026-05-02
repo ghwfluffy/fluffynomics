@@ -387,4 +387,5 @@ Color mapping:
 - API requests should go through `/api/*` via NGINX proxy.
 - Edge rate limiting is enforced in `web/nginx.conf`:
   - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),
+  - high-burst per-IP limits for `/api/icons/*` image/generated-icon fetches so dashboard icon fan-out does not randomly 429 during page render,
   - broader per-IP request + connection limits for `/api/*`.
