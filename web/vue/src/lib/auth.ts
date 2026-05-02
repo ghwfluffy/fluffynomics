@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { request } from '@/lib/api'
 import { clearMaskedMode, syncMaskedModeForUser } from '@/lib/maskedMode'
+import { apiUrl, authMode } from '@/lib/paths'
 
 export interface User {
   id: string
@@ -8,6 +9,7 @@ export interface User {
   example_data: boolean
   is_admin: boolean
   avatar_icon_id: string | null
+  central_avatar_url: string | null
   paypal_account_id: string | null
   google_pay_account_id: string | null
   widget_token: string | null
@@ -42,6 +44,10 @@ export async function refreshSession(): Promise<User | null> {
 }
 
 export async function login(username: string, password: string, sessionSeconds?: number): Promise<User> {
+  if (authMode === 'oauth') {
+    window.location.assign(apiUrl('/auth/oauth/login'))
+    throw new Error('Redirecting to auth provider')
+  }
   const response = await request.post<LoginResponse>('/auth/login', {
     username,
     password,
@@ -59,6 +65,10 @@ export async function register(
   addExampleData = false,
   registrationCode?: string,
 ): Promise<User> {
+  if (authMode === 'oauth') {
+    window.location.assign(apiUrl('/auth/oauth/login'))
+    throw new Error('Redirecting to auth provider')
+  }
   return request.post<User>('/auth/register', {
     username,
     password,

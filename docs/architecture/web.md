@@ -210,6 +210,11 @@ Register form behavior:
 - first account can leave it blank.
 - once users exist, backend requires a valid non-expired code.
 
+Optional central-auth behavior:
+- `VITE_AUTH_MODE=local` is the default and keeps the built-in login/register/profile/user-management UI.
+- `VITE_AUTH_MODE=oauth` changes the landing page to a central sign-in action and sends profile plus user-management menu actions to `VITE_AUTH_BASE_URL`.
+- Finance-domain features such as backups, export/import, masked mode, widgets, accounts, contracts, expenses, and investments remain local app features.
+
 Password is optional in both flows. It is required only for encrypted packages.
 
 ## Dashboard Interaction Patterns

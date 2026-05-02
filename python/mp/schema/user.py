@@ -3,7 +3,15 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -13,12 +21,22 @@ from mp.schema.base import Base
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint(
+            "identity_provider",
+            "external_subject",
+            name="uq_users_identity_provider_external_subject",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_provider: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_subject: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    central_avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     example_data: Mapped[bool] = mapped_column(default=False, nullable=False)
     avatar_icon_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("icon_assets.id"), nullable=True
@@ -69,6 +87,7 @@ class UserSchema(BaseModel):
     example_data: bool
     is_admin: bool
     avatar_icon_id: Optional[UUID] = None
+    central_avatar_url: Optional[str] = None
     paypal_account_id: Optional[UUID] = None
     google_pay_account_id: Optional[UUID] = None
     widget_token: Optional[str] = None

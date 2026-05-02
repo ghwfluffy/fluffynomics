@@ -205,6 +205,8 @@ Current UI grouping is by `type + category` for active contracts, plus a trailin
 
 ### User profile fields
 
+- `users.identity_provider` and `users.external_subject` are nullable identity-link fields used only when `AUTH_MODE=oauth`.
+- `users.central_avatar_url` stores the central profile image URL returned by OAuth userinfo.
 - `users.avatar_icon_id` (nullable FK -> `icon_assets.id`, `ON DELETE SET NULL`)
 - `users.paypal_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)
 - `users.google_pay_account_id` (nullable FK -> `accounts.id`, `ON DELETE SET NULL`)

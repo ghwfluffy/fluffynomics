@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from mp.api.auth import _hash_password, get_current_user
+from mp.config import auth_mode
 from mp.db import get_db
 from mp.schema.account import Account, AccountValueHistory, NetWorthDailySnapshot, Stock
 from mp.schema.contract import Contract, ContractPosting
@@ -30,6 +31,14 @@ ADMIN_LOCKOUT_YEARS = 100
 def _require_admin(current_user: User) -> None:
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _require_local_user_management() -> None:
+    if auth_mode() == "oauth":
+        raise HTTPException(
+            status_code=409,
+            detail="User and registration-code management is handled by the configured auth site",
+        )
 
 
 class AdminUserSchema(BaseModel):
@@ -103,6 +112,7 @@ def list_users(
     current_user: User = Depends(get_current_user),
 ) -> list[AdminUserSchema]:
     _require_admin(current_user)
+    _require_local_user_management()
     users = db.query(User).order_by(User.created_at.asc()).all()
     return [AdminUserSchema.model_validate(user) for user in users]
 
@@ -115,6 +125,7 @@ def admin_update_user_password(
     current_user: User = Depends(get_current_user),
 ) -> None:
     _require_admin(current_user)
+    _require_local_user_management()
     new_password = payload.new_password.strip()
     if not new_password:
         raise HTTPException(status_code=400, detail="new_password cannot be empty")
@@ -138,6 +149,7 @@ def admin_update_user_lock(
     current_user: User = Depends(get_current_user),
 ) -> None:
     _require_admin(current_user)
+    _require_local_user_management()
     target_user = _get_target_user(db, user_id)
     now = datetime.now(tz=timezone.utc)
     if payload.locked:
@@ -162,6 +174,7 @@ def admin_update_user_admin(
     current_user: User = Depends(get_current_user),
 ) -> None:
     _require_admin(current_user)
+    _require_local_user_management()
     target_user = _get_target_user(db, user_id)
     if target_user.is_admin == payload.is_admin:
         return None
@@ -181,6 +194,7 @@ def admin_delete_user(
     current_user: User = Depends(get_current_user),
 ) -> None:
     _require_admin(current_user)
+    _require_local_user_management()
     if current_user.id == user_id:
         raise HTTPException(
             status_code=400,
@@ -201,6 +215,7 @@ def list_registration_codes(
     current_user: User = Depends(get_current_user),
 ) -> list[RegistrationCodeSchema]:
     _require_admin(current_user)
+    _require_local_user_management()
     rows = db.query(RegistrationCode).order_by(RegistrationCode.created_at.desc()).all()
     return [RegistrationCodeSchema.model_validate(item) for item in rows]
 
@@ -212,6 +227,7 @@ def create_registration_code(
     current_user: User = Depends(get_current_user),
 ) -> RegistrationCodeSchema:
     _require_admin(current_user)
+    _require_local_user_management()
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
@@ -255,6 +271,7 @@ def update_registration_code(
     current_user: User = Depends(get_current_user),
 ) -> RegistrationCodeSchema:
     _require_admin(current_user)
+    _require_local_user_management()
     record = db.get(RegistrationCode, code_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Registration code not found")
@@ -283,6 +300,7 @@ def delete_registration_code(
     current_user: User = Depends(get_current_user),
 ) -> None:
     _require_admin(current_user)
+    _require_local_user_management()
     record = db.get(RegistrationCode, code_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Registration code not found")

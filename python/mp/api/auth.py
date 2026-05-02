@@ -6,13 +6,23 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 from uuid import UUID
 
+import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from mp.config import session_cookie_path
+from mp.config import (
+    auth_mode,
+    central_auth_base_url,
+    oauth_client_id,
+    oauth_redirect_uri,
+    oauth_scope,
+    session_cookie_path,
+)
 from mp.db import get_db
 from mp.db.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
@@ -32,7 +42,8 @@ from mp.schema.user import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-SESSION_COOKIE_NAME = "mp_session"
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "mp_session")
+OAUTH_STATE_COOKIE_NAME = os.getenv("OAUTH_STATE_COOKIE_NAME", "mp_oauth_state")
 DEFAULT_SESSION_SECONDS = 24 * 60 * 60
 MAX_SESSION_SECONDS = 30 * 24 * 60 * 60
 _fernet: Fernet | None = None
@@ -101,6 +112,153 @@ def _create_session_cookie(user_id: UUID, session_seconds: int) -> str:
         separators=(",", ":"),
     )
     return _get_fernet().encrypt(payload.encode("utf-8")).decode("utf-8")
+
+
+def _set_session_cookie(
+    response: Response, cookie_value: str, session_seconds: int
+) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=cookie_value,
+        max_age=session_seconds,
+        httponly=True,
+        path=session_cookie_path(),
+        samesite="lax",
+        secure=False,
+    )
+
+
+def _require_local_auth_mode() -> None:
+    if auth_mode() == "oauth":
+        raise HTTPException(
+            status_code=409,
+            detail="Local authentication is disabled while AUTH_MODE=oauth",
+        )
+
+
+def _base64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _pkce_challenge(verifier: str) -> str:
+    return _base64url(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def _encode_oauth_state(payload: dict[str, str]) -> str:
+    return (
+        _get_fernet()
+        .encrypt(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        .decode("utf-8")
+    )
+
+
+def _decode_oauth_state(cookie_value: str | None) -> dict[str, str] | None:
+    if not cookie_value:
+        return None
+    try:
+        payload = json.loads(
+            _get_fernet().decrypt(cookie_value.encode("utf-8")).decode("utf-8")
+        )
+    except (InvalidToken, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in payload.items()
+    ):
+        return None
+    return payload
+
+
+def _exchange_oauth_code(code: str, verifier: str) -> dict[str, object]:
+    token_response = httpx.post(
+        f"{central_auth_base_url()}/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": oauth_client_id(),
+            "code": code,
+            "redirect_uri": oauth_redirect_uri(),
+            "code_verifier": verifier,
+        },
+        timeout=10,
+    )
+    token_response.raise_for_status()
+    access_token = token_response.json().get("access_token")
+    if not isinstance(access_token, str):
+        raise ValueError("OAuth token response did not include an access token")
+    userinfo_response = httpx.get(
+        f"{central_auth_base_url()}/oauth/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    userinfo_response.raise_for_status()
+    userinfo = userinfo_response.json()
+    if not isinstance(userinfo, dict):
+        raise ValueError("OAuth userinfo response was invalid")
+    return userinfo
+
+
+def _oauth_text(userinfo: dict[str, object], key: str) -> str:
+    value = userinfo.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"OAuth userinfo missing {key}")
+    return value.strip()
+
+
+def _unique_oauth_username(db: Session, username: str) -> str:
+    base = username[:80] or "oauth-user"
+    candidate = base
+    suffix = 1
+    while db.query(User.id).filter(User.username == candidate).first() is not None:
+        suffix += 1
+        candidate = f"{base}-{suffix}"
+    return candidate
+
+
+def _find_or_create_oauth_user(db: Session, userinfo: dict[str, object]) -> User:
+    subject = _oauth_text(userinfo, "sub")
+    username = _oauth_text(userinfo, "preferred_username")
+    provider = central_auth_base_url()
+    user = (
+        db.query(User)
+        .filter_by(identity_provider=provider, external_subject=subject)
+        .first()
+    )
+    if user is None:
+        user = (
+            db.query(User)
+            .filter(
+                User.username == username,
+                User.identity_provider.is_(None),
+                User.external_subject.is_(None),
+            )
+            .first()
+        )
+        if user is None:
+            now = datetime.now(tz=timezone.utc)
+            user = User(
+                username=_unique_oauth_username(db, username),
+                password_hash=_hash_password(secrets.token_urlsafe(32)),
+                example_data=False,
+                password_changed_at=now,
+                is_admin=bool(userinfo.get("is_admin")),
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(user)
+        user.identity_provider = provider
+        user.external_subject = subject
+    picture = userinfo.get("picture")
+    user.central_avatar_url = (
+        picture if isinstance(picture, str) and picture.strip() else None
+    )
+    user.is_admin = bool(userinfo.get("is_admin"))
+    user.last_login_at = datetime.now(tz=timezone.utc)
+    user.updated_at = user.last_login_at
+    db.add(user)
+    db.flush()
+    return user
 
 
 def _is_icon_selectable_for_user(db: Session, user_id: UUID, icon_id: UUID) -> bool:
@@ -236,6 +394,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 @router.post("/register", response_model=UserSchema)
 def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
+    _require_local_auth_mode()
     existing = db.query(User).filter_by(username=payload.username).first()
     if existing is not None:
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -279,6 +438,7 @@ def register(payload: UserCreateSchema, db: Session = Depends(get_db)) -> User:
 def login(
     payload: LoginSchema, response: Response, db: Session = Depends(get_db)
 ) -> LoginResponseSchema:
+    _require_local_auth_mode()
     now = datetime.now(tz=timezone.utc)
     user = db.query(User).filter_by(username=payload.username).first()
     if user is None:
@@ -315,19 +475,75 @@ def login(
     session_seconds = payload.session_seconds or DEFAULT_SESSION_SECONDS
     session_seconds = max(1, min(session_seconds, MAX_SESSION_SECONDS))
     cookie_value = _create_session_cookie(user.id, session_seconds)
+    _set_session_cookie(response, cookie_value, session_seconds)
+    return LoginResponseSchema(
+        user=UserSchema.model_validate(user),
+        session_token=cookie_value,
+    )
+
+
+@router.get("/oauth/login")
+def oauth_login() -> RedirectResponse:
+    if auth_mode() != "oauth":
+        raise HTTPException(status_code=404, detail="OAuth mode is not enabled")
+    state = secrets.token_urlsafe(24)
+    verifier = secrets.token_urlsafe(32)
+    response = RedirectResponse(
+        f"{central_auth_base_url()}/oauth/authorize?"
+        + urlencode(
+            {
+                "response_type": "code",
+                "client_id": oauth_client_id(),
+                "redirect_uri": oauth_redirect_uri(),
+                "scope": oauth_scope(),
+                "state": state,
+                "code_challenge": _pkce_challenge(verifier),
+                "code_challenge_method": "S256",
+            }
+        ),
+        status_code=302,
+    )
     response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=cookie_value,
-        max_age=session_seconds,
+        key=OAUTH_STATE_COOKIE_NAME,
+        value=_encode_oauth_state({"state": state, "verifier": verifier}),
+        max_age=300,
         httponly=True,
         path=session_cookie_path(),
         samesite="lax",
         secure=False,
     )
-    return LoginResponseSchema(
-        user=UserSchema.model_validate(user),
-        session_token=cookie_value,
-    )
+    return response
+
+
+@router.get("/oauth/callback")
+def oauth_callback(
+    code: str,
+    state: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    if auth_mode() != "oauth":
+        raise HTTPException(status_code=404, detail="OAuth mode is not enabled")
+    state_payload = _decode_oauth_state(request.cookies.get(OAUTH_STATE_COOKIE_NAME))
+    if state_payload is None or state_payload.get("state") != state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    verifier = state_payload.get("verifier")
+    if verifier is None:
+        raise HTTPException(status_code=400, detail="Invalid OAuth verifier")
+    try:
+        userinfo = _exchange_oauth_code(code, verifier)
+        user = _find_or_create_oauth_user(db, userinfo)
+        db.commit()
+    except (httpx.HTTPError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="OAuth login failed") from exc
+
+    session_seconds = DEFAULT_SESSION_SECONDS
+    cookie_value = _create_session_cookie(user.id, session_seconds)
+    redirect = RedirectResponse("/app", status_code=302)
+    _set_session_cookie(redirect, cookie_value, session_seconds)
+    redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_cookie_path())
+    return redirect
 
 
 @router.post("/logout", status_code=204)
@@ -350,6 +566,13 @@ def update_profile(
     now = datetime.now(tz=timezone.utc)
     changed = False
     data = payload.model_dump(exclude_unset=True)
+    if auth_mode() == "oauth" and (
+        "avatar_icon_id" in data or "new_password" in data or "current_password" in data
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Profile image and password changes are handled by the configured auth site",
+        )
 
     if "avatar_icon_id" in data:
         avatar_icon_id = payload.avatar_icon_id
@@ -447,6 +670,11 @@ def delete_account(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
+    if auth_mode() == "oauth":
+        raise HTTPException(
+            status_code=409,
+            detail="Account deletion is handled by the configured auth site",
+        )
     now = datetime.now(tz=timezone.utc)
     if _is_password_locked(current_user, now):
         raise HTTPException(

@@ -19,6 +19,11 @@ services:
       SESSION_KEY: ${SESSION_KEY}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8081}
       APP_BASE_PATH: ${APP_BASE_PATH:-/}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://localhost:8090/auth}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-money-planner}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-mp_session}
+      SESSION_COOKIE_PATH: ${SESSION_COOKIE_PATH:-${APP_BASE_PATH:-/}}
     depends_on:
       - database
     volumes:
@@ -48,6 +53,8 @@ services:
       VITE_DEV_API_TARGET: http://api:8000
       VITE_APP_BASE_PATH: ${VITE_APP_BASE_PATH:-${APP_BASE_PATH:-/}}
       VITE_PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8081}
+      VITE_AUTH_MODE: ${VITE_AUTH_MODE:-local}
+      VITE_AUTH_BASE_URL: ${VITE_AUTH_BASE_URL:-http://localhost:8090/auth}
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:8080:5173"
     depends_on:

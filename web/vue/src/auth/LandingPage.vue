@@ -10,7 +10,16 @@
     </div>
 
     <section class="auth-panel cds--tile">
-      <div class="tab-row" role="tablist" aria-label="Authentication mode">
+      <button
+        v-if="usesCentralAuth"
+        type="button"
+        class="cds--btn cds--btn--primary submit-btn"
+        @click="submitLogin"
+      >
+        Sign In
+      </button>
+
+      <div v-else class="tab-row" role="tablist" aria-label="Authentication mode">
         <button
           class="tab-btn"
           :class="{ 'tab-btn--active': mode === 'login' }"
@@ -33,7 +42,7 @@
         </button>
       </div>
 
-      <form v-if="mode === 'login'" class="form-grid" @submit.prevent="submitLogin">
+      <form v-if="!usesCentralAuth && mode === 'login'" class="form-grid" @submit.prevent="submitLogin">
         <div class="cds--form-item">
           <label for="login-username" class="cds--label">Username</label>
           <input id="login-username" v-model="loginForm.username" class="cds--text-input" required />
@@ -45,7 +54,7 @@
         <button type="submit" class="cds--btn cds--btn--primary submit-btn">Sign In</button>
       </form>
 
-      <form v-else class="form-grid" @submit.prevent="submitRegister">
+      <form v-else-if="!usesCentralAuth" class="form-grid" @submit.prevent="submitRegister">
         <div class="cds--form-item">
           <label for="register-username" class="cds--label">Username</label>
           <input id="register-username" v-model="registerForm.username" class="cds--text-input" required />
@@ -83,10 +92,11 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { login, register } from '@/lib/auth'
-import { assetUrl } from '@/lib/paths'
+import { authMode, assetUrl } from '@/lib/paths'
 
 const router = useRouter()
 const mode = ref<'login' | 'register'>('login')
+const usesCentralAuth = authMode === 'oauth'
 
 const loginForm = ref({
   username: '',

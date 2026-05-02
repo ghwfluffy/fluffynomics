@@ -52,6 +52,8 @@ const normalizePublicUrl = (value?: string) => {
 }
 
 export const publicUrl = normalizePublicUrl(import.meta.env.VITE_PUBLIC_URL)
+export const authMode = import.meta.env.VITE_AUTH_MODE === 'oauth' ? 'oauth' : 'local'
+export const centralAuthBaseUrl = (import.meta.env.VITE_AUTH_BASE_URL || '/auth').replace(/\/+$/, '')
 
 export const assetUrl = (path: string) => `${appBasePath}${path.replace(/^\/+/, '')}`
 

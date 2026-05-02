@@ -14,7 +14,7 @@
             aria-haspopup="menu"
             @click="toggleProfileMenu"
           >
-            <img v-if="currentUser?.avatar_icon_id" :src="iconUrl(currentUser.avatar_icon_id)" class="profile-avatar" alt="Profile avatar" />
+            <img v-if="headerAvatarUrl" :src="headerAvatarUrl" class="profile-avatar" alt="Profile avatar" />
             <span v-else class="profile-avatar">{{ avatarInitials }}</span>
             <span class="shell-user">{{ currentUser?.username }}</span>
             <span class="profile-caret" aria-hidden="true">▾</span>
@@ -713,7 +713,7 @@ import { useRouter } from 'vue-router'
 import { currentUser, deleteOwnAccount, logout, regenerateWidgetUrl, updateProfile } from '@/lib/auth'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { enableMaskedMode, maskedModeEnabled } from '@/lib/maskedMode'
-import { absolutePublicUrl, apiUrl, assetUrl } from '@/lib/paths'
+import { absolutePublicUrl, apiUrl, assetUrl, authMode, centralAuthBaseUrl } from '@/lib/paths'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 
 const router = useRouter()
@@ -806,6 +806,7 @@ const managePasswordVerifyDraft = ref('')
 const manageUserDeleteDialogOpen = ref(false)
 const manageDeleteTargetUserId = ref('')
 const manageDeleteTargetUsername = ref('')
+const usesCentralAuth = authMode === 'oauth'
 
 const avatarInitials = computed(() => {
   const username = (currentUser.value?.username || '').trim()
@@ -824,7 +825,17 @@ const avatarInitials = computed(() => {
 
 const iconUrl = (iconId: string) => apiUrl(`icons/${iconId}`)
 
+const headerAvatarUrl = computed(() => {
+  if (currentUser.value?.central_avatar_url) {
+    return currentUser.value.central_avatar_url
+  }
+  return currentUser.value?.avatar_icon_id ? iconUrl(currentUser.value.avatar_icon_id) : ''
+})
+
 const profileAvatarUrl = computed(() => {
+  if (currentUser.value?.central_avatar_url) {
+    return currentUser.value.central_avatar_url
+  }
   const iconId = profileDialogOpen.value
     ? profileDraftAvatarIconId.value
     : (currentUser.value?.avatar_icon_id || null)
@@ -865,6 +876,10 @@ const closeProfileMenu = () => {
 
 const onProfileManageClick = async () => {
   closeProfileMenu()
+  if (usesCentralAuth) {
+    window.location.assign(centralAuthBaseUrl)
+    return
+  }
   profileTab.value = 'info'
   profileCurrentPassword.value = ''
   profileNewPassword.value = ''
@@ -888,6 +903,10 @@ const onAdministrationClick = () => {
 
 const onManageUsersClick = async () => {
   closeProfileMenu()
+  if (usesCentralAuth) {
+    window.location.assign(centralAuthBaseUrl)
+    return
+  }
   manageUsersTab.value = 'users'
   manageUsersDialogOpen.value = true
   await loadManagedUsers()

@@ -21,11 +21,15 @@
 ## Auth + Session Model
 
 - Registration/login/logout/me are in `python/mp/api/auth.py`.
+- Default auth mode is local standalone auth. Setting `AUTH_MODE=oauth` enables central OAuth login through the configured `AUTH_BASE_URL`.
+- OAuth mode keeps a local Fluffynomics session cookie after callback, but disables local password login, registration, password changes, profile avatar changes, user CRUD, and registration-code CRUD.
+- First OAuth login links an existing unlinked local username when possible; otherwise it creates a local user linked by central issuer and subject.
 - Public deployment pathing is configured with:
   - `PUBLIC_URL`: externally visible scheme/host/port used for public absolute URLs.
   - `APP_BASE_PATH`: externally visible app prefix, normalized to leading/trailing slash form (for example `/fluffynomics/`).
 - FastAPI runs behind NGINX with external API URLs under `<APP_BASE_PATH>api/...`; NGINX strips that external prefix before proxying to FastAPI routers.
 - Session cookies use `APP_BASE_PATH` as their cookie path so subpath deployments remain scoped to the mounted app prefix.
+- `SESSION_COOKIE_NAME` and `SESSION_COOKIE_PATH` may be set explicitly to avoid same-host cookie collisions.
 - Registration rule:
   - first account can register without a code.
   - once at least one user exists, `POST /auth/register` requires `registration_code`.

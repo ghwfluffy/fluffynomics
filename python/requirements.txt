@@ -2,6 +2,7 @@ cryptography
 apscheduler
 fastapi
 flake8
+httpx
 mypy
 pillow
 pdfplumber
