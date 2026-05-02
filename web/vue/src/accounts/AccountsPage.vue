@@ -2155,6 +2155,26 @@ const buildPortfolioTimelinePoints = (
   })
 }
 
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) => {
+  const results = new Array<R>(items.length)
+  let nextIndex = 0
+  const workerCount = Math.min(Math.max(1, limit), items.length)
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex
+        nextIndex += 1
+        results[index] = await mapper(items[index], index)
+      }
+    }),
+  )
+  return results
+}
+
 const expenseMixPalette = ['#9a3412', '#c2410c', '#ea580c', '#f59e0b', '#dc2626', '#b91c1c', '#fb7185', '#7c2d12']
 
 const expenseMixSlices = computed<DonutSlice[]>(() => {
@@ -3455,11 +3475,13 @@ const loadWidgets = async () => {
     const next30Target = shiftDays(anchor, 30)
     const next60Target = shiftDays(anchor, 60)
     const projectionTarget = addYears(anchor, 10)
-    const accountHistoryRequest = Promise.all(
-      accounts.value.map(async (account) => ({
+    const accountHistoryRequest = mapWithConcurrency(
+      accounts.value,
+      8,
+      async (account) => ({
         account,
         history: await request.get<AccountHistoryPoint[]>(`/accounts/${account.id}/history`).catch(() => [] as AccountHistoryPoint[]),
-      })),
+      }),
     )
     const [
       netWorthHistory,

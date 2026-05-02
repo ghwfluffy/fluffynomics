@@ -393,4 +393,4 @@ Color mapping:
   - NGINX trusts private/container ingress proxies via `X-Forwarded-For` before applying per-IP limit zones, so limits key by the external client IP instead of the ingress container IP,
   - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),
   - no edge rate/connection limits for `/api/icons/*` image/generated-icon fetches so dashboard icon fan-out does not randomly 429 during page render,
-  - broader per-IP request + connection limits for `/api/*`.
+  - broader per-IP request + connection limits for `/api/*`; these must tolerate normal dashboard fan-out, including bounded account-history reads for overview charts.

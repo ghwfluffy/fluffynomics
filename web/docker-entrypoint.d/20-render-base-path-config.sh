@@ -32,8 +32,10 @@ set_real_ip_from fc00::/7;
 real_ip_header X-Forwarded-For;
 real_ip_recursive on;
 
-# Global per-IP zones for edge abuse protection.
-limit_req_zone \$binary_remote_addr zone=api_per_ip:20m rate=100r/s;
+# Global per-IP zones for edge abuse protection. Normal API pages can fan out
+# many read calls on dashboard load, so keep auth stricter and give app reads
+# enough room to burst without tripping normal usage.
+limit_req_zone \$binary_remote_addr zone=api_per_ip:20m rate=300r/s;
 limit_req_zone \$binary_remote_addr zone=auth_per_ip:10m rate=30r/m;
 limit_conn_zone \$binary_remote_addr zone=conn_per_ip:10m;
 
@@ -81,8 +83,8 @@ cat >>/etc/nginx/conf.d/default.conf <<EOF
     }
 
     location ^~ ${api_prefix}/widgets/ {
-        limit_req zone=api_per_ip burst=60 nodelay;
-        limit_conn conn_per_ip 20;
+        limit_req zone=api_per_ip burst=150 nodelay;
+        limit_conn conn_per_ip 40;
 
         proxy_cache off;
         proxy_no_cache 1;
@@ -113,8 +115,8 @@ cat >>/etc/nginx/conf.d/default.conf <<EOF
     }
 
     location ^~ ${api_prefix}/ {
-        limit_req zone=api_per_ip burst=60 nodelay;
-        limit_conn conn_per_ip 20;
+        limit_req zone=api_per_ip burst=300 nodelay;
+        limit_conn conn_per_ip 80;
 
         rewrite ^${escaped_api_prefix}/(.*)\$ /\$1 break;
         proxy_pass http://api:8000;
