@@ -173,6 +173,10 @@
           </div>
           <VChart class="widget-trend-echart" :option="trendChartOption" autoresize />
         </article>
+        <article class="widget-slot widget-card">
+          <h3>Portfolio Over Time</h3>
+          <VChart class="widget-portfolio-timeline-echart" :option="portfolioTimelineChartOption" autoresize />
+        </article>
         <article class="widget-slot widget-card widget-card--split">
           <section class="widget-split-panel">
             <div class="widget-card-head">
@@ -195,6 +199,42 @@
         <article class="widget-slot widget-card">
           <h3>Net-Worth Projection</h3>
           <VChart class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
+        </article>
+      </div>
+      <div class="widget-derived-grid">
+        <article class="widget-slot widget-card">
+          <h3>Projected Net-Worth Flow</h3>
+          <p class="widget-subtext">Average net-worth change over the next year</p>
+          <ul class="widget-rate-list">
+            <li v-for="row in projectedRateRows" :key="`proj-${row.key}`">
+              <span>{{ row.label }}</span>
+              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
+            </li>
+          </ul>
+          <div class="widget-acceleration-row">
+            <span>Acceleration</span>
+            <strong :class="deltaClass(projectedAccelerationCentsPerMonth2)">
+              {{ formatDollarPerMonthSquared(projectedAccelerationCentsPerMonth2) }}
+            </strong>
+          </div>
+          <p class="widget-subtext">Using the next {{ projectedAccelerationWindowWeeks }} week{{ projectedAccelerationWindowWeeks === 1 ? '' : 's' }} forecast window</p>
+        </article>
+        <article class="widget-slot widget-card">
+          <h3>Historical Net-Worth Flow</h3>
+          <p class="widget-subtext">{{ historicalWindowLabel }}</p>
+          <ul class="widget-rate-list">
+            <li v-for="row in historicalRateRows" :key="`hist-${row.key}`">
+              <span>{{ row.label }}</span>
+              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
+            </li>
+          </ul>
+          <div class="widget-acceleration-row">
+            <span>Acceleration</span>
+            <strong :class="deltaClass(historicalAccelerationCentsPerMonth2)">
+              {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
+            </strong>
+          </div>
+          <p class="widget-subtext">Change in $/month trend over {{ historicalWindowWeeks }} week{{ historicalWindowWeeks === 1 ? '' : 's' }}</p>
         </article>
         <article class="widget-slot widget-card">
           <h3>Net Change (Next 30 Days)</h3>
@@ -225,41 +265,6 @@
             {{ hasPast30SnapshotData ? signedCents(netChangePast30) : 'No data' }}
           </div>
           <p class="widget-subtext">Compared to 30 days before {{ widgetAnchorLabel }}</p>
-        </article>
-      </div>
-      <div class="widget-derived-grid">
-        <article class="widget-slot widget-card">
-          <h3>Projected Net-Worth Flow</h3>
-          <p class="widget-subtext">Average net-worth change over the next year</p>
-          <ul class="widget-rate-list">
-            <li v-for="row in projectedRateRows" :key="`proj-${row.key}`">
-              <span>{{ row.label }}</span>
-              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
-            </li>
-          </ul>
-        </article>
-        <article class="widget-slot widget-card">
-          <h3>Historical Net-Worth Flow</h3>
-          <p class="widget-subtext">{{ historicalWindowLabel }}</p>
-          <ul class="widget-rate-list">
-            <li v-for="row in historicalRateRows" :key="`hist-${row.key}`">
-              <span>{{ row.label }}</span>
-              <strong :class="deltaClass(row.valueCents)">{{ formatDollarRate(row.valueCents) }}</strong>
-            </li>
-          </ul>
-        </article>
-        <article class="widget-slot widget-card">
-          <h3>Historical Acceleration</h3>
-          <p class="widget-subtext">Change in $/month trend over {{ historicalWindowWeeks }} week{{ historicalWindowWeeks === 1 ? '' : 's' }}</p>
-          <div class="widget-kpi" :class="deltaClass(historicalAccelerationCentsPerMonth2)">
-            {{ formatDollarPerMonthSquared(historicalAccelerationCentsPerMonth2) }}
-          </div>
-          <div class="widget-change-stack-divider"></div>
-          <h3>Projected Acceleration</h3>
-          <p class="widget-subtext">Using the next {{ projectedAccelerationWindowWeeks }} week{{ projectedAccelerationWindowWeeks === 1 ? '' : 's' }} forecast window</p>
-          <div class="widget-kpi" :class="deltaClass(projectedAccelerationCentsPerMonth2)">
-            {{ formatDollarPerMonthSquared(projectedAccelerationCentsPerMonth2) }}
-          </div>
         </article>
         <article class="widget-slot widget-card">
           <h3>Biggest Changes (Next 60 Days)</h3>
@@ -1610,6 +1615,17 @@ const netWorthAnchorCents = ref(0)
 const netWorthPast30Cents = ref(0)
 const netWorthNext30Cents = ref(0)
 const trendSnapshots = ref<Array<{ key: string; label: string; value_cents: number; forecast: boolean }>>([])
+const portfolioTimelinePoints = ref<
+  Array<{
+    key: string
+    label: string
+    net_worth_cents: number
+    cash_assets_cents: number
+    liquid_assets_cents: number
+    hard_assets_cents: number
+    debt_cents: number
+  }>
+>([])
 const netWorthProjectionPoints = ref<Array<{ key: string; label: string; value_cents: number; snapshot_date: string }>>([])
 const projectedNetWorthDailyRateCents = ref(0)
 const historicalNetWorthDailyRateCents = ref(0)
@@ -2039,6 +2055,106 @@ const mixSlices = computed(() => {
     }))
 })
 
+const portfolioTimelineSeries = [
+  { key: 'net_worth_cents', label: 'Net', color: '#0f62fe' },
+  { key: 'cash_assets_cents', label: 'Cash', color: '#16a34a' },
+  { key: 'liquid_assets_cents', label: 'Liquid', color: '#38bdf8' },
+  { key: 'hard_assets_cents', label: 'Hard', color: '#7c3aed' },
+  { key: 'debt_cents', label: 'Debt', color: '#dc2626' },
+] as const
+
+type PortfolioTimelineSeriesKey = (typeof portfolioTimelineSeries)[number]['key']
+
+const portfolioTimelineCategory = (type: AccountType): Exclude<PortfolioTimelineSeriesKey, 'net_worth_cents'> | null => {
+  if (['checking', 'savings', 'cash'].includes(type)) {
+    return 'cash_assets_cents'
+  }
+  if (['stocks_account', 'investment_fund', 'crypto_exchange', 'crypto_wallet'].includes(type)) {
+    return 'liquid_assets_cents'
+  }
+  if (type === 'retirement') {
+    return 'hard_assets_cents'
+  }
+  if (isLiabilityAccountType(type)) {
+    return 'debt_cents'
+  }
+  return null
+}
+
+const buildPortfolioTimelinePoints = (
+  netWorthHistory: NetWorthHistoryPoint[],
+  accountHistoryRows: Array<{ account: AccountPayload; history: AccountHistoryPoint[] }>,
+) => {
+  const dailyNetWorth = netWorthHistory
+    .map((point) => ({
+      at: parseDateOnly(point.snapshot_date),
+      value_cents: intOrZero(point.value_cents),
+    }))
+    .filter((point): point is { at: Date; value_cents: number } => point.at !== null)
+    .sort((a, b) => a.at.getTime() - b.at.getTime())
+
+  const sampledNetWorth =
+    dailyNetWorth.length <= 180
+      ? dailyNetWorth
+      : Array.from(
+          dailyNetWorth.reduce((byMonth, entry) => {
+            const monthKey = `${entry.at.getFullYear()}-${String(entry.at.getMonth() + 1).padStart(2, '0')}`
+            byMonth.set(monthKey, entry)
+            return byMonth
+          }, new Map<string, { at: Date; value_cents: number }>()),
+        ).map(([, entry]) => entry)
+
+  const samples = sampledNetWorth.length
+    ? sampledNetWorth
+    : [{ at: startOfDay(new Date()), value_cents: baseNetWorthCents.value }]
+
+  const histories = accountHistoryRows.map(({ account, history }) => ({
+    account,
+    category: portfolioTimelineCategory(account.type),
+    points: [
+      ...history
+        .map((point) => ({
+          at: startOfDay(new Date(point.recorded_at)),
+          value_cents: intOrZero(point.value_cents),
+        }))
+        .filter((point) => !Number.isNaN(point.at.getTime()))
+        .sort((a, b) => a.at.getTime() - b.at.getTime()),
+      { at: startOfDay(new Date()), value_cents: Math.abs(tableBalanceCents(account)) },
+    ],
+  }))
+
+  return samples.map((sample) => {
+    const row: Record<PortfolioTimelineSeriesKey, number> = {
+      net_worth_cents: sample.value_cents,
+      cash_assets_cents: 0,
+      liquid_assets_cents: 0,
+      hard_assets_cents: 0,
+      debt_cents: 0,
+    }
+    for (const item of histories) {
+      if (!item.category) {
+        continue
+      }
+      let value: number | null = null
+      for (const point of item.points) {
+        if (point.at.getTime() <= sample.at.getTime()) {
+          value = point.value_cents
+        } else {
+          break
+        }
+      }
+      if (value !== null) {
+        row[item.category] += Math.abs(value)
+      }
+    }
+    return {
+      key: localIsoDate(sample.at),
+      label: sample.at.toLocaleString('en-US', samples.length <= 180 ? { month: 'short', day: 'numeric' } : { month: 'short', year: '2-digit' }),
+      ...row,
+    }
+  })
+}
+
 const expenseMixPalette = ['#9a3412', '#c2410c', '#ea580c', '#f59e0b', '#dc2626', '#b91c1c', '#fb7185', '#7c2d12']
 
 const expenseMixSlices = computed<DonutSlice[]>(() => {
@@ -2307,6 +2423,69 @@ const trendChartOption = computed(() => {
     ],
   }
 })
+
+const maskedPortfolioTimelinePoints = computed(() =>
+  portfolioTimelinePoints.value.map((point) => {
+    const masked = { ...point } as typeof point & Record<`masked_${PortfolioTimelineSeriesKey}`, number>
+    for (const series of portfolioTimelineSeries) {
+      masked[`masked_${series.key}`] = maskCurrencyCents(point[series.key], `portfolio-timeline:${series.key}:${point.key}`)
+    }
+    return masked
+  }),
+)
+
+const portfolioTimelineChartOption = computed(() => ({
+  color: portfolioTimelineSeries.map((series) => series.color),
+  grid: { left: 58, right: 12, top: 18, bottom: 46 },
+  tooltip: {
+    trigger: 'axis',
+    confine: true,
+    position: clampedChartTooltipPosition,
+    formatter: (params: Array<{ axisValue: string; seriesName: string; data: number }>) => {
+      if (!params?.length) {
+        return ''
+      }
+      const rows = params
+        .map((item) => `${escapeTooltipHtml(item.seriesName)}: ${cents(Math.round(item.data * 100))}`)
+        .join('<br/>')
+      return `${params[0].axisValue}<br/>${rows}`
+    },
+  },
+  legend: {
+    type: 'scroll',
+    bottom: 0,
+    itemWidth: 10,
+    itemHeight: 8,
+    textStyle: { color: '#64748b', fontSize: 9 },
+  },
+  xAxis: {
+    type: 'category',
+    data: maskedPortfolioTimelinePoints.value.map((item) => item.label),
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: '#94a3b8' } },
+    axisLabel: { color: '#64748b', fontSize: 10 },
+  },
+  yAxis: {
+    type: 'value',
+    axisTick: { show: false },
+    axisLine: { lineStyle: { color: '#94a3b8' } },
+    splitLine: { lineStyle: { color: '#e2e8f0' } },
+    axisLabel: {
+      color: '#64748b',
+      fontSize: 9,
+      formatter: (value: number) => formatDollarInteger(Math.round(value * 100)),
+    },
+  },
+  series: portfolioTimelineSeries.map((series) => ({
+    name: series.label,
+    type: 'line',
+    data: maskedPortfolioTimelinePoints.value.map((item) => item[`masked_${series.key}`] / 100),
+    showSymbol: false,
+    smooth: true,
+    lineStyle: { width: series.key === 'net_worth_cents' ? 2.4 : 2, color: series.color },
+    emphasis: { focus: 'series' },
+  })),
+}))
 
 const netWorthProjectionBars = computed(() => {
   const palette = ['#bbf7d0', '#86efac', '#4ade80', '#15803d']
@@ -3276,7 +3455,22 @@ const loadWidgets = async () => {
     const next30Target = shiftDays(anchor, 30)
     const next60Target = shiftDays(anchor, 60)
     const projectionTarget = addYears(anchor, 10)
-    const [netWorthHistory, contracts, expenses, investments, next60Preview, next30ForecastSeries, projectionForecastSeries] = await Promise.all([
+    const accountHistoryRequest = Promise.all(
+      accounts.value.map(async (account) => ({
+        account,
+        history: await request.get<AccountHistoryPoint[]>(`/accounts/${account.id}/history`).catch(() => [] as AccountHistoryPoint[]),
+      })),
+    )
+    const [
+      netWorthHistory,
+      contracts,
+      expenses,
+      investments,
+      next60Preview,
+      next30ForecastSeries,
+      projectionForecastSeries,
+      accountHistoryRows,
+    ] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
       request.get<ContractCalendarPayload[]>('/contracts'),
       request.get<ExpenseCalendarPayload[]>('/expenses'),
@@ -3292,6 +3486,7 @@ const loadWidgets = async () => {
             params: { through_date: localIsoDate(projectionTarget) },
           })
         : Promise.resolve([] as NetWorthForecastPoint[]),
+      accountHistoryRequest,
     ])
     const forecastSeries =
       anchor.getTime() > Date.now()
@@ -3306,6 +3501,7 @@ const loadWidgets = async () => {
       .map((item) => ({ at: parseDateOnly(item.snapshot_date), value: intOrZero(item.value_cents) }))
       .filter((item): item is { at: Date; value: number } => item.at !== null)
       .sort((a, b) => a.at.getTime() - b.at.getTime())
+    portfolioTimelinePoints.value = buildPortfolioTimelinePoints(netWorthHistory, accountHistoryRows)
     const lookupHistoryAsOf = (target: Date) => {
       let found: number | null = null
       for (const point of historyPoints) {
@@ -5658,6 +5854,25 @@ watch(
   border-top: 1px solid var(--cds-border-subtle-01);
 }
 
+.widget-acceleration-row {
+  margin-top: 0.95rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--cds-border-subtle-01);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.widget-acceleration-row span {
+  color: var(--cds-text-secondary);
+}
+
+.widget-acceleration-row strong {
+  font-size: 1rem;
+}
+
 .delta-positive {
   color: #047857;
 }
@@ -5772,6 +5987,12 @@ watch(
   height: 190px;
 }
 
+.widget-portfolio-timeline-echart {
+  width: 100%;
+  height: 190px;
+  margin-top: 0.25rem;
+}
+
 .widget-projection-echart {
   width: 100%;
   height: 190px;
@@ -5872,6 +6093,13 @@ watch(
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
+}
+
+@media (min-width: 1100px) {
+  .widget-grid,
+  .widget-derived-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .widget-rate-list {

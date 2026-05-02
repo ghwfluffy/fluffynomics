@@ -110,7 +110,8 @@ Trend widget behavior:
 - Endpoint returns daily snapshots; frontend should preserve daily points for normal recent-history ranges and only collapse to coarser monthly points once the history gets long enough to need bucketing.
 - When forecast date is in the future, frontend also fetches `GET /accounts/net-worth/forecast` and merges intermediate forecast event points so trend shows each projected contract-impact step.
 - This ensures trend expands to full available history instead of fixed recent-window snapshots.
-- On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, a split donut card second, then last-30 change and next-30 change.
+- On desktop widths, the overview top widget grid holds four cards with the net-worth trend card first, a simplified portfolio-mix-over-time line chart second, the split donut card third, and the net-worth projection bars fourth.
+- The simplified portfolio-mix-over-time line chart shows actual net worth, cash assets, liquid assets, hard assets, and debt using account value history carried forward across the same sampled dates as the net-worth history chart.
 - The split donut card contains:
   - `Portfolio Mix`, grouped by account type / rewards,
   - `Expense Mix`, grouped by recurring outflow category using contract categories, expense categories, and a combined `Account fees` bucket.
@@ -134,8 +135,9 @@ Trend widget behavior:
   - Overview also includes derived rate widgets under the trend chart:
   - projected net-worth flow (`per year/month/week/day`, dollar-rounded) should be derived from the same anchor-to-+1-year history/forecast path used by the projection bars, so it stays aligned with forecast-date changes and includes investment-fed yield growth instead of relying on a simplified annualized formula,
   - historical 12-month net-worth flow rates (`per year/month/week/day`),
-  - historical acceleration estimate (`$/month²`) derived from change in monthly slope over the historical window.
-  - projected acceleration estimate (`$/month²`) shown in the same card, derived from the next-year APY-yield premium curve rather than the full net-worth forecast. It should measure acceleration from savings APY / implicit investment yield, with recurring investments feeding destination principal, instead of treating contract/expense step changes as acceleration.
+  - historical acceleration estimate (`$/month²`) shown at the bottom of the historical net-worth flow card, derived from change in monthly slope over the historical window.
+  - projected acceleration estimate (`$/month²`) shown at the bottom of the projected net-worth flow card, derived from the next-year APY-yield premium curve rather than the full net-worth forecast. It should measure acceleration from savings APY / implicit investment yield, with recurring investments feeding destination principal, instead of treating contract/expense step changes as acceleration.
+  - the last/next 30-day net-change widget appears in the derived widget grid alongside the flow and biggest-change cards.
   - a net-worth projection bar chart for the anchor month/year plus the calculated `+1 year`, `+5 year`, and `+10 year` month/year targets.
   - the projection bar chart anchor column should use the same history/forecast lookup path as the future columns rather than a separate live-only value source.
   - a 60-day biggest-changes widget showing the first two positive events and first two negative events whose absolute value is at least `$1,000`, with each pair displayed in chronological order.
