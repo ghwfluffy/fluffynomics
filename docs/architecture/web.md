@@ -89,6 +89,7 @@ Forecast-date UX:
 - This is read-only simulation mode; write endpoints do not use forecast date.
 
 View mode UX:
+- Dashboard tab/view state is mirrored in the route query as `tab` and `view` (for example `/app?tab=accounts&view=icons`) so refresh and browser navigation preserve the selected section and shared view mode.
 - Accounts/Contracts/Expenses/Investments share one `Tiles` / `Icons` / `Table` mode state.
 - Toggling view mode in one tab applies to the other tabs for consistency.
 - `Icons` is the default dashboard view mode.

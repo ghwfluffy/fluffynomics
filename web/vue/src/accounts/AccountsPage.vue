@@ -1240,6 +1240,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { apiUrl } from '@/lib/paths'
 import { currentUser } from '@/lib/auth'
@@ -1479,6 +1480,7 @@ type ExpensesTabExpose = {
 }
 
 type DashboardTab = 'overview' | 'accounts' | 'transfers' | 'contracts' | 'expenses' | 'investments' | 'logs' | 'calendar'
+type DashboardViewMode = 'tiles' | 'icons' | 'table'
 
 interface Section {
   key: string
@@ -1559,6 +1561,8 @@ const makeCreateForm = (): CreateAccountPayload => ({
   cash_bills: [],
 })
 
+const route = useRoute()
+const router = useRouter()
 const accounts = ref<AccountPayload[]>([])
 const transfers = ref<AccountTransferPayload[]>([])
 const auditLogs = ref<AuditLogEventPayload[]>([])
@@ -1572,10 +1576,26 @@ const dashboardTabs: Array<{ value: DashboardTab; label: string }> = [
   { value: 'logs', label: 'Logs' },
   { value: 'calendar', label: 'Calendar' },
 ]
+const dashboardTabValues = new Set<DashboardTab>(dashboardTabs.map((tab) => tab.value))
+const dashboardViewModeValues = new Set<DashboardViewMode>(['tiles', 'icons', 'table'])
 const activeTab = ref<DashboardTab>('overview')
 const forecastDate = ref<string>('')
 const showForecastControls = ref(false)
-const dashboardViewMode = ref<'tiles' | 'icons' | 'table'>('icons')
+const dashboardViewMode = ref<DashboardViewMode>('icons')
+const routeQueryString = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return typeof value[0] === 'string' ? value[0] : ''
+  }
+  return typeof value === 'string' ? value : ''
+}
+const routeDashboardTab = (value: unknown): DashboardTab | null => {
+  const tab = routeQueryString(value)
+  return dashboardTabValues.has(tab as DashboardTab) ? (tab as DashboardTab) : null
+}
+const routeDashboardViewMode = (value: unknown): DashboardViewMode | null => {
+  const view = routeQueryString(value)
+  return dashboardViewModeValues.has(view as DashboardViewMode) ? (view as DashboardViewMode) : null
+}
 const expandedAccountIconIds = ref<Set<string>>(new Set())
 const closedAccountsSectionOpen = ref(false)
 const widgetLoading = ref(false)
@@ -5364,6 +5384,36 @@ onUnmounted(() => {
   }
   window.removeEventListener('click', onWindowClick)
   window.removeEventListener('keydown', onWindowKeyDown)
+})
+
+watch(
+  () => [route.query.tab, route.query.view],
+  () => {
+    const nextTab = routeDashboardTab(route.query.tab)
+    if (nextTab && activeTab.value !== nextTab) {
+      activeTab.value = nextTab
+    }
+    const nextViewMode = routeDashboardViewMode(route.query.view)
+    if (nextViewMode && dashboardViewMode.value !== nextViewMode) {
+      dashboardViewMode.value = nextViewMode
+    }
+  },
+  { immediate: true },
+)
+
+watch([activeTab, dashboardViewMode], () => {
+  const tab = routeQueryString(route.query.tab)
+  const view = routeQueryString(route.query.view)
+  if (tab === activeTab.value && view === dashboardViewMode.value) {
+    return
+  }
+  void router.replace({
+    query: {
+      ...route.query,
+      tab: activeTab.value,
+      view: dashboardViewMode.value,
+    },
+  })
 })
 
 watch(
