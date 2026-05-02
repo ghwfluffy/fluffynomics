@@ -8,6 +8,7 @@
 - Deployment base path is controlled by `VITE_APP_BASE_PATH`, normally set to the same value as backend `APP_BASE_PATH`.
 - Frontend URL helpers live in `web/vue/src/lib/paths.ts`; use them for app assets, API URLs, and public absolute URLs instead of hardcoding root-relative `/api/...` or `/asset.png` paths.
 - Vite `base`, Vue Router history, generated API URLs, static public asset references, and widget URLs all derive from that base path so the app can run under prefixes like `/fluffynomics/`.
+- Browser-side same-host absolute API/public URLs are normalized to the current origin/path form at runtime so an `http` build-time public URL cannot cause mixed-content API/icon requests on HTTPS deployments.
 
 ## Core Pages
 
