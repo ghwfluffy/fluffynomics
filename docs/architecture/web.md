@@ -374,7 +374,8 @@ Color mapping:
 
 ## Serving / Proxy
 
-- Built web app served by NGINX (`web/Dockerfile`, `web/nginx.conf`).
+- Built web app is served by NGINX (`web/Dockerfile`).
+- NGINX reverse-proxy config is rendered at container startup by `web/docker-entrypoint.d/20-render-base-path-config.sh`; this template is the source of truth for base-path routing, API proxying, and edge limits.
 
 ## Agent Handoff Notes
 
@@ -386,7 +387,8 @@ Color mapping:
   - `Manage Users` owns user operations and registration code CRUD.
 - Use in-app Carbon-styled modals for destructive confirmations; do not add browser `alert`/`confirm`.
 - API requests should go through `/api/*` via NGINX proxy.
-- Edge rate limiting is enforced in `web/nginx.conf`:
+- Edge rate limiting is enforced in `web/docker-entrypoint.d/20-render-base-path-config.sh`:
+  - NGINX trusts private/container ingress proxies via `X-Forwarded-For` before applying per-IP limit zones, so limits key by the external client IP instead of the ingress container IP,
   - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),
   - no edge rate/connection limits for `/api/icons/*` image/generated-icon fetches so dashboard icon fan-out does not randomly 429 during page render,
   - broader per-IP request + connection limits for `/api/*`.
