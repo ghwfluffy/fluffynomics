@@ -40,6 +40,13 @@ def central_auth_base_url() -> str:
     return raw
 
 
+def oauth_server_base_url() -> str:
+    raw = os.getenv("OAUTH_SERVER_BASE_URL", "").strip().rstrip("/")
+    if raw:
+        return raw
+    return central_auth_base_url()
+
+
 def oauth_client_id() -> str:
     return os.getenv("OAUTH_CLIENT_ID", "money-planner")
 

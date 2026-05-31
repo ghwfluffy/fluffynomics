@@ -26,8 +26,9 @@
 - Failed or expired OAuth callbacks redirect back to the landing page with an
   `oauth_error` query value so the web app can show a notification instead of
   leaving users on an API error response.
-- Relative `AUTH_BASE_URL` values are resolved against `PUBLIC_URL` for backend
-  token and userinfo calls.
+- `AUTH_BASE_URL` is the public browser/issuer base, while
+  `OAUTH_SERVER_BASE_URL` can point backend token and userinfo calls at an
+  internal auth API URL.
 - First OAuth login links an existing unlinked local username when possible; otherwise it creates a local user linked by central issuer and subject.
 - Public deployment pathing is configured with:
   - `PUBLIC_URL`: externally visible scheme/host/port used for public absolute URLs.

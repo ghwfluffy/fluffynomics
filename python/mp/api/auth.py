@@ -22,6 +22,7 @@ from mp.config import (
     oauth_client_id,
     oauth_redirect_uri,
     oauth_scope,
+    oauth_server_base_url,
     session_cookie_path,
 )
 from mp.db import get_db
@@ -190,7 +191,7 @@ def _decode_oauth_state(cookie_value: str | None) -> dict[str, str] | None:
 
 def _exchange_oauth_code(code: str, verifier: str) -> dict[str, object]:
     token_response = httpx.post(
-        f"{central_auth_base_url()}/oauth/token",
+        f"{oauth_server_base_url()}/oauth/token",
         data={
             "grant_type": "authorization_code",
             "client_id": oauth_client_id(),
@@ -205,7 +206,7 @@ def _exchange_oauth_code(code: str, verifier: str) -> dict[str, object]:
     if not isinstance(access_token, str):
         raise ValueError("OAuth token response did not include an access token")
     userinfo_response = httpx.get(
-        f"{central_auth_base_url()}/oauth/userinfo",
+        f"{oauth_server_base_url()}/oauth/userinfo",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=10,
     )
