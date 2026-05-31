@@ -154,6 +154,13 @@ def _safe_next_path(value: str | None) -> str:
     return stripped
 
 
+def _oauth_error_redirect(reason: str) -> RedirectResponse:
+    return RedirectResponse(
+        f"{app_base_path_no_trailing_slash()}/?{urlencode({'oauth_error': reason})}",
+        status_code=302,
+    )
+
+
 def _encode_oauth_state(payload: dict[str, str]) -> str:
     return (
         _get_fernet()
@@ -493,7 +500,9 @@ def login(
 
 
 @router.get("/oauth/login")
-def oauth_login(next_path: str = Query(default="/app", alias="next")) -> RedirectResponse:
+def oauth_login(
+    next_path: str = Query(default="/app", alias="next"),
+) -> RedirectResponse:
     if auth_mode() != "oauth":
         raise HTTPException(status_code=404, detail="OAuth mode is not enabled")
     state = secrets.token_urlsafe(24)
@@ -516,7 +525,9 @@ def oauth_login(next_path: str = Query(default="/app", alias="next")) -> Redirec
     )
     response.set_cookie(
         key=OAUTH_STATE_COOKIE_NAME,
-        value=_encode_oauth_state({"state": state, "verifier": verifier, "next": safe_next}),
+        value=_encode_oauth_state(
+            {"state": state, "verifier": verifier, "next": safe_next}
+        ),
         max_age=300,
         httponly=True,
         path=session_cookie_path(),
@@ -537,17 +548,23 @@ def oauth_callback(
         raise HTTPException(status_code=404, detail="OAuth mode is not enabled")
     state_payload = _decode_oauth_state(request.cookies.get(OAUTH_STATE_COOKIE_NAME))
     if state_payload is None or state_payload.get("state") != state:
-        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+        redirect = _oauth_error_redirect("oauth_state")
+        redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_cookie_path())
+        return redirect
     verifier = state_payload.get("verifier")
     if verifier is None:
-        raise HTTPException(status_code=400, detail="Invalid OAuth verifier")
+        redirect = _oauth_error_redirect("oauth_state")
+        redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_cookie_path())
+        return redirect
     try:
         userinfo = _exchange_oauth_code(code, verifier)
         user = _find_or_create_oauth_user(db, userinfo)
         db.commit()
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         db.rollback()
-        raise HTTPException(status_code=400, detail="OAuth login failed") from exc
+        redirect = _oauth_error_redirect("oauth_failed")
+        redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_cookie_path())
+        return redirect
 
     session_seconds = DEFAULT_SESSION_SECONDS
     cookie_value = _create_session_cookie(user.id, session_seconds)

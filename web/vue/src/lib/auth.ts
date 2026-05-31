@@ -29,8 +29,9 @@ interface LoginResponse {
 export const currentUser = ref<User | null>(null)
 export const sessionToken = ref<string | null>(null)
 
-export function beginOAuthLogin(nextPath = '/app'): void {
-  window.location.assign(apiUrl(`/auth/oauth/login?next=${encodeURIComponent(nextPath)}`))
+export function beginOAuthLogin(nextPath: unknown = '/app'): void {
+  const safeNextPath = typeof nextPath === 'string' ? nextPath : '/app'
+  window.location.assign(apiUrl(`/auth/oauth/login?next=${encodeURIComponent(safeNextPath)}`))
 }
 
 export async function refreshSession(): Promise<User | null> {

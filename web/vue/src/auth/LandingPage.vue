@@ -14,7 +14,7 @@
         v-if="usesCentralAuth"
         type="button"
         class="cds--btn cds--btn--primary submit-btn"
-        @click="beginOAuthLogin"
+        @click="beginOAuthLogin()"
       >
         Sign in
       </button>
@@ -89,12 +89,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { beginOAuthLogin, login, register } from '@/lib/auth'
+import { errorMessage, snackbar } from '@/lib/api'
 import { authMode, assetUrl } from '@/lib/paths'
 
 const router = useRouter()
+const route = useRoute()
 const mode = ref<'login' | 'register'>('login')
 const usesCentralAuth = authMode === 'oauth'
 
@@ -132,6 +134,21 @@ const submitRegister = async () => {
   registerForm.value.password = ''
   registerForm.value.registrationCode = ''
 }
+
+onMounted(() => {
+  const oauthError = typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''
+  if (!oauthError) {
+    return
+  }
+  errorMessage.value =
+    oauthError === 'oauth_state'
+      ? 'Central sign-in expired. Please start again.'
+      : 'Central sign-in could not be completed. Please try again.'
+  snackbar.value = true
+  const query = { ...route.query }
+  delete query.oauth_error
+  void router.replace({ path: route.path, query })
+})
 </script>
 
 <style scoped>

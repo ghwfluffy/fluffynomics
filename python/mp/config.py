@@ -31,7 +31,13 @@ def auth_mode() -> str:
 
 
 def central_auth_base_url() -> str:
-    return os.getenv("AUTH_BASE_URL", "http://localhost:8090/auth").rstrip("/")
+    raw = os.getenv("AUTH_BASE_URL", "http://localhost:8090/auth").strip().rstrip("/")
+    if raw.startswith(("http://", "https://")):
+        return raw
+    origin = public_url_origin()
+    if origin and raw.startswith("/"):
+        return f"{origin}{raw}"
+    return raw
 
 
 def oauth_client_id() -> str:

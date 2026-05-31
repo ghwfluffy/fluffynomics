@@ -213,6 +213,9 @@ Register form behavior:
 Optional central-auth behavior:
 - `VITE_AUTH_MODE=local` is the default and keeps the built-in login/register/profile/user-management UI.
 - `VITE_AUTH_MODE=oauth` changes the landing page to a central sign-in action and sends profile plus user-management menu actions to `VITE_AUTH_BASE_URL`.
+- OAuth callback failures return to the landing page with an `oauth_error` query
+  value; the landing page consumes it, removes it from the URL, and shows the
+  existing error notification.
 - Finance-domain features such as backups, export/import, masked mode, widgets, accounts, contracts, expenses, and investments remain local app features.
 
 Password is optional in both flows. It is required only for encrypted packages.
