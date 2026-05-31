@@ -14,9 +14,9 @@
         v-if="usesCentralAuth"
         type="button"
         class="cds--btn cds--btn--primary submit-btn"
-        @click="submitLogin"
+        @click="beginOAuthLogin"
       >
-        Sign In
+        Sign in
       </button>
 
       <div v-else class="tab-row" role="tablist" aria-label="Authentication mode">
@@ -91,7 +91,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { login, register } from '@/lib/auth'
+import { beginOAuthLogin, login, register } from '@/lib/auth'
 import { authMode, assetUrl } from '@/lib/paths'
 
 const router = useRouter()

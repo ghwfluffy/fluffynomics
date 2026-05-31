@@ -29,6 +29,10 @@ interface LoginResponse {
 export const currentUser = ref<User | null>(null)
 export const sessionToken = ref<string | null>(null)
 
+export function beginOAuthLogin(nextPath = '/app'): void {
+  window.location.assign(apiUrl(`/auth/oauth/login?next=${encodeURIComponent(nextPath)}`))
+}
+
 export async function refreshSession(): Promise<User | null> {
   try {
     const user = await request.get<User>('/auth/me', { suppressError: true })
@@ -45,7 +49,7 @@ export async function refreshSession(): Promise<User | null> {
 
 export async function login(username: string, password: string, sessionSeconds?: number): Promise<User> {
   if (authMode === 'oauth') {
-    window.location.assign(apiUrl('/auth/oauth/login'))
+    beginOAuthLogin()
     throw new Error('Redirecting to auth provider')
   }
   const response = await request.post<LoginResponse>('/auth/login', {
@@ -66,7 +70,7 @@ export async function register(
   registrationCode?: string,
 ): Promise<User> {
   if (authMode === 'oauth') {
-    window.location.assign(apiUrl('/auth/oauth/login'))
+    beginOAuthLogin()
     throw new Error('Redirecting to auth provider')
   }
   return request.post<User>('/auth/register', {

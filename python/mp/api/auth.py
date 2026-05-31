@@ -11,11 +11,12 @@ from uuid import UUID
 
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from mp.config import (
+    app_base_path_no_trailing_slash,
     auth_mode,
     central_auth_base_url,
     oauth_client_id,
@@ -142,6 +143,15 @@ def _base64url(data: bytes) -> str:
 
 def _pkce_challenge(verifier: str) -> str:
     return _base64url(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def _safe_next_path(value: str | None) -> str:
+    if value is None:
+        return "/app"
+    stripped = value.strip()
+    if not stripped.startswith("/") or stripped.startswith("//"):
+        return "/app"
+    return stripped
 
 
 def _encode_oauth_state(payload: dict[str, str]) -> str:
@@ -483,11 +493,12 @@ def login(
 
 
 @router.get("/oauth/login")
-def oauth_login() -> RedirectResponse:
+def oauth_login(next_path: str = Query(default="/app", alias="next")) -> RedirectResponse:
     if auth_mode() != "oauth":
         raise HTTPException(status_code=404, detail="OAuth mode is not enabled")
     state = secrets.token_urlsafe(24)
     verifier = secrets.token_urlsafe(32)
+    safe_next = _safe_next_path(next_path)
     response = RedirectResponse(
         f"{central_auth_base_url()}/oauth/authorize?"
         + urlencode(
@@ -505,7 +516,7 @@ def oauth_login() -> RedirectResponse:
     )
     response.set_cookie(
         key=OAUTH_STATE_COOKIE_NAME,
-        value=_encode_oauth_state({"state": state, "verifier": verifier}),
+        value=_encode_oauth_state({"state": state, "verifier": verifier, "next": safe_next}),
         max_age=300,
         httponly=True,
         path=session_cookie_path(),
@@ -540,7 +551,8 @@ def oauth_callback(
 
     session_seconds = DEFAULT_SESSION_SECONDS
     cookie_value = _create_session_cookie(user.id, session_seconds)
-    redirect = RedirectResponse("/app", status_code=302)
+    redirect_path = f"{app_base_path_no_trailing_slash()}{_safe_next_path(state_payload.get('next'))}"
+    redirect = RedirectResponse(redirect_path, status_code=302)
     _set_session_cookie(redirect, cookie_value, session_seconds)
     redirect.delete_cookie(OAUTH_STATE_COOKIE_NAME, path=session_cookie_path())
     return redirect
