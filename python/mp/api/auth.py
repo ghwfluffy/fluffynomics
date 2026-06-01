@@ -25,6 +25,8 @@ from mp.config import (
     oauth_server_base_url,
     session_cookie_path,
 )
+from mp.api.agent_tokens import TOKEN_PREFIX as AGENT_TOKEN_PREFIX
+from mp.api.agent_tokens import user_from_agent_token
 from mp.db import get_db
 from mp.db.sample_data import ensure_example_data_for_user
 from mp.schema.account import Account, DefaultIcon, IconAsset, Organization
@@ -398,6 +400,14 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token: str | None = None
     if auth_header and auth_header.lower().startswith("bearer "):
         token = auth_header[7:].strip()
+        if token.startswith(f"{AGENT_TOKEN_PREFIX}."):
+            user = user_from_agent_token(request, db, token)
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid agent token",
+                )
+            return user
     if token is None:
         token = request.cookies.get(SESSION_COOKIE_NAME)
 

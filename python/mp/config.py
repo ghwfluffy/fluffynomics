@@ -60,6 +60,10 @@ def oauth_redirect_uri() -> str:
     return f"{origin}{external_api_root_path()}/auth/oauth/callback"
 
 
+def agent_integration_token_secret() -> str:
+    return os.getenv("AGENT_INTEGRATION_TOKEN_SECRET", "").strip()
+
+
 def public_url_origin() -> str | None:
     public_url = os.getenv("PUBLIC_URL", "").strip()
     if not public_url:
