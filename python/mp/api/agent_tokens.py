@@ -14,7 +14,7 @@ from mp.config import agent_integration_token_secret, central_auth_base_url
 from mp.schema.user import User
 
 TOKEN_PREFIX = "agent-v1"
-ISSUER = "ghwiz-agent"
+ISSUER = "agent-service"
 AUDIENCE = "budget"
 
 

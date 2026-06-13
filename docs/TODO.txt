@@ -1,6 +1,6 @@
 Budget TODO
 [\] Move over to porkbun
-    [ ] Add tracking for ghwiz.com (expires 2027-04-12)
+    [ ] Add tracking for primary deployment domain (expires 2027-04-12)
     Network solutions downtime
     [ ] ghwsec.com
     Godaddy

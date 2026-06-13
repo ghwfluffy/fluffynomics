@@ -52,7 +52,7 @@
 - In omnisite mode, the AI assistant can call selected read/write finance APIs
   with short-lived agent-scoped bearer tokens. Set
   `AGENT_INTEGRATION_TOKEN_SECRET` to the same ignored secret value used by the
-  agent service. Agent tokens must be issued by `ghwiz-agent`, use audience
+  agent service. Agent tokens must be issued by `agent-service`, use audience
   `budget`, carry the current user's central OAuth subject, and include the
   exact allowed action scope such as `budget.list_accounts`. They map only to
   users that already have a central OAuth-linked local account and are not
