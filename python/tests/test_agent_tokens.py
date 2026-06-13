@@ -84,7 +84,13 @@ class AgentTokenTests(unittest.TestCase):
             ("PUT", "/api/accounts/account-1/value", "budget.update_account_value"),
             ("GET", "/api/transfers", "budget.list_transfers"),
             ("GET", "/api/contracts", "budget.list_contracts"),
+            ("POST", "/api/contracts", "budget.create_contract"),
+            ("PUT", "/api/contracts/contract-1", "budget.update_contract"),
+            ("DELETE", "/api/contracts/contract-1", "budget.delete_contract"),
             ("GET", "/api/expenses", "budget.list_expenses"),
+            ("POST", "/api/expenses", "budget.create_expense"),
+            ("PUT", "/api/expenses/expense-1", "budget.update_expense"),
+            ("DELETE", "/api/expenses/expense-1", "budget.delete_expense"),
             ("GET", "/api/investments", "budget.list_investments"),
             ("GET", "/api/logs", "budget.list_audit_logs"),
         ]

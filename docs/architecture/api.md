@@ -56,7 +56,12 @@
   `budget`, carry the current user's central OAuth subject, and include the
   exact allowed action scope such as `budget.list_accounts`. They map only to
   users that already have a central OAuth-linked local account and are not
-  accepted for auth/admin/profile/backup APIs.
+  accepted for auth/admin/profile/backup APIs. Allowed scoped actions include
+  account reads/value updates, net-worth history/forecast reads, transfer reads,
+  investment/log reads, and contract/expense list/create/update/delete actions.
+  Contract and expense write scopes exist so the agent can queue approved
+  projection changes such as recurring subscriptions or observed spending
+  patterns without broad API access.
 - Login returns both:
   - cookie (set-cookie)
   - `session_token` in JSON for API clients

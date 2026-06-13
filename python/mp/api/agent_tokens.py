@@ -130,8 +130,20 @@ def required_agent_scope(request: Request) -> str | None:
         return "budget.list_transfers"
     if segments == ["contracts"] and method == "GET":
         return "budget.list_contracts"
+    if segments == ["contracts"] and method == "POST":
+        return "budget.create_contract"
+    if len(segments) == 2 and segments[0] == "contracts" and method == "PUT":
+        return "budget.update_contract"
+    if len(segments) == 2 and segments[0] == "contracts" and method == "DELETE":
+        return "budget.delete_contract"
     if segments == ["expenses"] and method == "GET":
         return "budget.list_expenses"
+    if segments == ["expenses"] and method == "POST":
+        return "budget.create_expense"
+    if len(segments) == 2 and segments[0] == "expenses" and method == "PUT":
+        return "budget.update_expense"
+    if len(segments) == 2 and segments[0] == "expenses" and method == "DELETE":
+        return "budget.delete_expense"
     if segments == ["investments"] and method == "GET":
         return "budget.list_investments"
     if segments == ["logs"] and method == "GET":
