@@ -138,6 +138,9 @@ const submitRegister = async () => {
 onMounted(() => {
   const oauthError = typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''
   if (!oauthError) {
+    if (usesCentralAuth) {
+      beginOAuthLogin()
+    }
     return
   }
   errorMessage.value =
