@@ -1,84 +1,18 @@
 <template>
   <div class="app-shell">
     <FederatedBanner
-      v-if="usesCentralAuth && currentUser"
+      v-if="currentUser"
       app-name="Fluffynomics"
       :app-url="assetUrl('')"
       current-app-slug="money-planner"
       :account-settings-url="bannerAccountSettingsUrl"
-      :app-items="federatedAppMenuItems"
+      :account-items="bannerAccountItems"
+      :app-items="bannerAppMenuItems"
       :sites="bannerSites"
       :user="bannerUser"
       @action="onFederatedBannerAction"
       @sign-out="signOut"
     />
-    <header v-else class="shell-header cds--header">
-      <div class="shell-brand">
-        <img :src="assetUrl('cat_small.png')" alt="Fluffynomics cat" class="brand-cat" />
-        <span>Fluffynomics - Wealth Tracker</span>
-      </div>
-      <div class="shell-actions">
-        <div ref="profileMenuRef" class="profile-menu-wrap">
-          <button
-            class="profile-trigger"
-            type="button"
-            :aria-expanded="profileMenuOpen ? 'true' : 'false'"
-            aria-haspopup="menu"
-            @click="toggleProfileMenu"
-          >
-            <img v-if="headerAvatarUrl" :src="headerAvatarUrl" class="profile-avatar" alt="Profile avatar" />
-            <span v-else class="profile-avatar">{{ avatarInitials }}</span>
-            <span class="shell-user">{{ currentUser?.username }}</span>
-            <span class="profile-caret" aria-hidden="true">▾</span>
-          </button>
-          <div v-if="profileMenuOpen" class="profile-menu cds--tile" role="menu">
-            <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileManageClick">
-              Profile
-            </button>
-            <button
-              v-if="currentUser?.is_admin"
-              class="profile-menu-item"
-              type="button"
-              role="menuitem"
-              @click="onManageUsersClick"
-            >
-              Manage Users
-            </button>
-            <button
-              v-if="currentUser?.is_admin"
-              class="profile-menu-item"
-              type="button"
-              role="menuitem"
-              @click="onAdministrationClick"
-            >
-              Administration
-            </button>
-            <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileExportClick">
-              Export Data
-            </button>
-            <button class="profile-menu-item" type="button" role="menuitem" @click="onProfileImportClick">
-              Import Data
-            </button>
-            <button
-              v-if="!maskedModeEnabled"
-              class="profile-menu-item"
-              type="button"
-              role="menuitem"
-              @click="onEnableMaskedModeClick"
-            >
-              Masked Mode
-            </button>
-            <div v-else class="profile-menu-item profile-menu-item--disabled" role="menuitem" aria-disabled="true">
-              Masked Mode On
-              <span class="profile-menu-item-note">Logout to exit</span>
-            </div>
-            <button class="profile-menu-item profile-menu-item--danger" type="button" role="menuitem" @click="onProfileLogoutClick">
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    </header>
 
     <main class="shell-main">
       <div v-if="maskedModeEnabled" class="masked-mode-banner">MASKED MODE ENABLED. VALUES ARE NOT REAL.</div>
@@ -746,8 +680,6 @@ const importBusy = ref(false)
 const importFileName = ref('')
 const importPackageData = ref<Record<string, unknown> | string | null>(null)
 const importFileInput = ref<HTMLInputElement | null>(null)
-const profileMenuRef = ref<HTMLElement | null>(null)
-const profileMenuOpen = ref(false)
 const profileDialogOpen = ref(false)
 const profileBusy = ref(false)
 const profileTab = ref<'info' | 'password' | 'wallets' | 'widget' | 'delete'>('info')
@@ -827,18 +759,23 @@ const manageDeleteTargetUserId = ref('')
 const manageDeleteTargetUsername = ref('')
 const usesCentralAuth = authMode === 'oauth'
 
-const bannerSites = computed(() =>
-  createGhwizFederatedSites({
+const bannerSites = computed(() => {
+  if (!usesCentralAuth) {
+    return []
+  }
+  return createGhwizFederatedSites({
     authBaseUrl: centralAuthBaseUrl,
     goalsBaseUrl: import.meta.env.VITE_GOALS_BASE_URL,
     moneyPlannerBaseUrl: import.meta.env.VITE_MONEY_PLANNER_BASE_URL,
     agentBaseUrl: import.meta.env.VITE_AGENT_BASE_URL,
     apartmentGateBaseUrl: import.meta.env.VITE_APARTMENT_GATE_BASE_URL,
     fileShareBaseUrl: import.meta.env.VITE_FILE_SHARE_BASE_URL,
-  }),
-)
+  })
+})
 
-const bannerAccountSettingsUrl = computed(() => accountSettingsUrl(centralAuthBaseUrl))
+const bannerAccountSettingsUrl = computed(() => (
+  usesCentralAuth ? accountSettingsUrl(centralAuthBaseUrl) : '#'
+))
 
 const bannerUser = computed<FederatedBannerUser | null>(() => {
   if (!currentUser.value) {
@@ -853,11 +790,23 @@ const bannerUser = computed<FederatedBannerUser | null>(() => {
   }
 })
 
-const federatedAppMenuItems = computed<FederatedBannerMenuItem[]>(() => {
+const bannerAccountItems = computed<FederatedBannerMenuItem[]>(() => {
+  if (usesCentralAuth) {
+    return []
+  }
+  return [
+    { id: 'change-password', label: 'Change Password' },
+  ]
+})
+
+const bannerAppMenuItems = computed<FederatedBannerMenuItem[]>(() => {
   const items: FederatedBannerMenuItem[] = [
-    { id: 'fluffynomics-settings', label: 'Fluffynomics Settings' },
+    { id: 'fluffynomics-settings', label: 'Edit Profile' },
   ]
   if (currentUser.value?.is_admin) {
+    if (!usesCentralAuth) {
+      items.push({ id: 'manage-users', label: 'Manage Users' })
+    }
     items.push({ id: 'administration', label: 'Administration' })
   }
   items.push(
@@ -868,6 +817,9 @@ const federatedAppMenuItems = computed<FederatedBannerMenuItem[]>(() => {
     items.push({ id: 'masked-mode', label: 'Masked Mode' })
   } else {
     items.push({ id: 'masked-mode-on', label: 'Masked Mode On', disabled: true })
+  }
+  if (!usesCentralAuth) {
+    items.push({ id: 'delete-account', label: 'Delete Account', danger: true })
   }
   return items
 })
@@ -930,21 +882,11 @@ const signOut = async () => {
   await router.push('/')
 }
 
-const toggleProfileMenu = () => {
-  profileMenuOpen.value = !profileMenuOpen.value
-}
+const closeProfileMenu = () => {}
 
-const closeProfileMenu = () => {
-  profileMenuOpen.value = false
-}
-
-const onProfileManageClick = async () => {
+const openProfileDialog = async (tab: typeof profileTab.value) => {
   closeProfileMenu()
-  if (usesCentralAuth) {
-    window.location.assign(centralAuthBaseUrl)
-    return
-  }
-  profileTab.value = 'info'
+  profileTab.value = tab
   profileCurrentPassword.value = ''
   profileNewPassword.value = ''
   profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
@@ -955,28 +897,28 @@ const onProfileManageClick = async () => {
   profileDeleteConfirm.value = false
   showProfileIconLibrary.value = false
   profileDialogOpen.value = true
+  if (usesCentralAuth) {
+    await loadProfileWalletAccounts()
+    return
+  }
   await Promise.all([loadProfileIcons(), loadProfileWalletAccounts()])
 }
 
 const openFluffynomicsSettings = async () => {
-  closeProfileMenu()
-  profileTab.value = 'wallets'
-  profileCurrentPassword.value = ''
-  profileNewPassword.value = ''
-  profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
-  profilePaypalAccountId.value = currentUser.value?.paypal_account_id || ''
-  profileGooglePayAccountId.value = currentUser.value?.google_pay_account_id || ''
-  profileWidgetCopied.value = false
-  profileDeletePassword.value = ''
-  profileDeleteConfirm.value = false
-  showProfileIconLibrary.value = false
-  profileDialogOpen.value = true
-  await loadProfileWalletAccounts()
+  await openProfileDialog(usesCentralAuth ? 'wallets' : 'info')
 }
 
 const onFederatedBannerAction = async (action: string) => {
   if (action === 'fluffynomics-settings') {
     await openFluffynomicsSettings()
+    return
+  }
+  if (action === 'change-password') {
+    await openProfileDialog('password')
+    return
+  }
+  if (action === 'manage-users') {
+    await onManageUsersClick()
     return
   }
   if (action === 'administration') {
@@ -993,6 +935,10 @@ const onFederatedBannerAction = async (action: string) => {
   }
   if (action === 'masked-mode') {
     onEnableMaskedModeClick()
+    return
+  }
+  if (action === 'delete-account') {
+    await openProfileDialog('delete')
   }
 }
 
@@ -1027,11 +973,6 @@ const onProfileImportClick = () => {
 const onEnableMaskedModeClick = () => {
   enableMaskedMode(currentUser.value?.id)
   closeProfileMenu()
-}
-
-const onProfileLogoutClick = async () => {
-  closeProfileMenu()
-  await signOut()
 }
 
 const closeAdminDialog = () => {
@@ -1472,17 +1413,6 @@ const submitDeleteAccount = async () => {
   }
 }
 
-const onWindowPointerDown = (event: Event) => {
-  if (!profileMenuOpen.value) {
-    return
-  }
-  const target = event.target as Node | null
-  if (target && profileMenuRef.value?.contains(target)) {
-    return
-  }
-  closeProfileMenu()
-}
-
 const onWindowKeyDown = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') {
     return
@@ -1515,18 +1445,13 @@ const onWindowKeyDown = (event: KeyboardEvent) => {
     closeExportDialog()
     return
   }
-  if (profileMenuOpen.value) {
-    closeProfileMenu()
-  }
 }
 
 onMounted(() => {
-  window.addEventListener('pointerdown', onWindowPointerDown)
   window.addEventListener('keydown', onWindowKeyDown)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('pointerdown', onWindowPointerDown)
   window.removeEventListener('keydown', onWindowKeyDown)
 })
 

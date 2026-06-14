@@ -165,8 +165,10 @@ Masked mode UX:
 
 ## Data Portability UX
 
-`AppShell.vue` header uses a profile trigger (avatar + username) with a dropdown menu that provides:
-- `Profile`
+`AppShell.vue` uses the shared `vendor/federated-banner` header in both local
+and OAuth modes. Local mode passes no federated app links, but the account menu
+keeps the same placement and provides:
+- `Edit Profile`
   - opens profile-management modal
   - uses Carbon tabs:
     - `Info`: avatar selection (icon library / upload / clear) + account-created/last-login/last-password-change info
@@ -212,7 +214,7 @@ Register form behavior:
 
 Optional central-auth behavior:
 - `VITE_AUTH_MODE=local` is the default and keeps the built-in login/register/profile/user-management UI.
-- `VITE_AUTH_MODE=oauth` auto-starts central sign-in from the landing page and sends profile plus user-management menu actions to `VITE_AUTH_BASE_URL`.
+- `VITE_AUTH_MODE=oauth` auto-starts central sign-in from the landing page and sends shared identity, password, avatar, and user-management actions to central Account Settings.
 - In OAuth mode the shared federated banner comes from `vendor/federated-banner`
   and owns cross-app switching, central Account Settings, and sign-out placement.
   Fluffynomics-specific settings remain local: digital wallet mappings, widget
