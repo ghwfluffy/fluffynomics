@@ -1,6 +1,18 @@
 <template>
   <div class="app-shell">
-    <header class="shell-header cds--header">
+    <FederatedBanner
+      v-if="usesCentralAuth && currentUser"
+      app-name="Fluffynomics"
+      :app-url="assetUrl('')"
+      current-app-slug="money-planner"
+      :account-settings-url="bannerAccountSettingsUrl"
+      :app-items="federatedAppMenuItems"
+      :sites="bannerSites"
+      :user="bannerUser"
+      @action="onFederatedBannerAction"
+      @sign-out="signOut"
+    />
+    <header v-else class="shell-header cds--header">
       <div class="shell-brand">
         <img :src="assetUrl('cat_small.png')" alt="Fluffynomics cat" class="brand-cat" />
         <span>Fluffynomics - Wealth Tracker</span>
@@ -160,7 +172,7 @@
         <h3>Profile</h3>
         <div class="cds--tabs" role="navigation" aria-label="Profile sections">
           <ul class="cds--tabs__nav" role="tablist">
-            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'info' }" role="presentation">
+            <li v-if="!usesCentralAuth" class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'info' }" role="presentation">
               <button
                 id="tab-profile-info"
                 class="cds--tabs__nav-link"
@@ -173,7 +185,7 @@
                 Info
               </button>
             </li>
-            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'password' }" role="presentation">
+            <li v-if="!usesCentralAuth" class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'password' }" role="presentation">
               <button
                 id="tab-profile-password"
                 class="cds--tabs__nav-link"
@@ -212,7 +224,7 @@
                 Widget
               </button>
             </li>
-            <li class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'delete' }" role="presentation">
+            <li v-if="!usesCentralAuth" class="cds--tabs__nav-item" :class="{ 'cds--tabs__nav-item--selected': profileTab === 'delete' }" role="presentation">
               <button
                 id="tab-profile-delete"
                 class="cds--tabs__nav-link"
@@ -228,7 +240,7 @@
           </ul>
         </div>
 
-        <div v-if="profileTab === 'info'" id="panel-profile-info" role="tabpanel" aria-labelledby="tab-profile-info">
+        <div v-if="!usesCentralAuth && profileTab === 'info'" id="panel-profile-info" role="tabpanel" aria-labelledby="tab-profile-info">
           <div class="profile-meta-grid">
             <div class="profile-avatar-section">
               <div class="profile-avatar-large-wrap">
@@ -272,7 +284,7 @@
         </div>
 
         <div
-          v-if="profileTab === 'password'"
+          v-if="!usesCentralAuth && profileTab === 'password'"
           id="panel-profile-password"
           class="password-section"
           role="tabpanel"
@@ -356,7 +368,7 @@
           </div>
         </div>
         <div
-          v-if="profileTab === 'delete'"
+          v-if="!usesCentralAuth && profileTab === 'delete'"
           id="panel-profile-delete"
           class="profile-delete-section"
           role="tabpanel"
@@ -708,6 +720,13 @@
 </template>
 
 <script setup lang="ts">
+import {
+  FederatedBanner,
+  accountSettingsUrl,
+  createGhwizFederatedSites,
+  type FederatedBannerMenuItem,
+  type FederatedBannerUser,
+} from '@ghwiz/federated-banner'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { currentUser, deleteOwnAccount, logout, regenerateWidgetUrl, updateProfile } from '@/lib/auth'
@@ -808,6 +827,51 @@ const manageDeleteTargetUserId = ref('')
 const manageDeleteTargetUsername = ref('')
 const usesCentralAuth = authMode === 'oauth'
 
+const bannerSites = computed(() =>
+  createGhwizFederatedSites({
+    authBaseUrl: centralAuthBaseUrl,
+    goalsBaseUrl: import.meta.env.VITE_GOALS_BASE_URL,
+    moneyPlannerBaseUrl: import.meta.env.VITE_MONEY_PLANNER_BASE_URL,
+    agentBaseUrl: import.meta.env.VITE_AGENT_BASE_URL,
+    apartmentGateBaseUrl: import.meta.env.VITE_APARTMENT_GATE_BASE_URL,
+    fileShareBaseUrl: import.meta.env.VITE_FILE_SHARE_BASE_URL,
+  }),
+)
+
+const bannerAccountSettingsUrl = computed(() => accountSettingsUrl(centralAuthBaseUrl))
+
+const bannerUser = computed<FederatedBannerUser | null>(() => {
+  if (!currentUser.value) {
+    return null
+  }
+  return {
+    displayName: currentUser.value.username,
+    username: currentUser.value.username,
+    avatarUrl: headerAvatarUrl.value || null,
+    avatarFallback: avatarInitials.value,
+    isAdmin: currentUser.value.is_admin,
+  }
+})
+
+const federatedAppMenuItems = computed<FederatedBannerMenuItem[]>(() => {
+  const items: FederatedBannerMenuItem[] = [
+    { id: 'fluffynomics-settings', label: 'Fluffynomics Settings' },
+  ]
+  if (currentUser.value?.is_admin) {
+    items.push({ id: 'administration', label: 'Administration' })
+  }
+  items.push(
+    { id: 'export-data', label: 'Export Data' },
+    { id: 'import-data', label: 'Import Data' },
+  )
+  if (!maskedModeEnabled.value) {
+    items.push({ id: 'masked-mode', label: 'Masked Mode' })
+  } else {
+    items.push({ id: 'masked-mode-on', label: 'Masked Mode On', disabled: true })
+  }
+  return items
+})
+
 const avatarInitials = computed(() => {
   const username = (currentUser.value?.username || '').trim()
   if (!username) {
@@ -892,6 +956,44 @@ const onProfileManageClick = async () => {
   showProfileIconLibrary.value = false
   profileDialogOpen.value = true
   await Promise.all([loadProfileIcons(), loadProfileWalletAccounts()])
+}
+
+const openFluffynomicsSettings = async () => {
+  closeProfileMenu()
+  profileTab.value = 'wallets'
+  profileCurrentPassword.value = ''
+  profileNewPassword.value = ''
+  profileDraftAvatarIconId.value = currentUser.value?.avatar_icon_id || null
+  profilePaypalAccountId.value = currentUser.value?.paypal_account_id || ''
+  profileGooglePayAccountId.value = currentUser.value?.google_pay_account_id || ''
+  profileWidgetCopied.value = false
+  profileDeletePassword.value = ''
+  profileDeleteConfirm.value = false
+  showProfileIconLibrary.value = false
+  profileDialogOpen.value = true
+  await loadProfileWalletAccounts()
+}
+
+const onFederatedBannerAction = async (action: string) => {
+  if (action === 'fluffynomics-settings') {
+    await openFluffynomicsSettings()
+    return
+  }
+  if (action === 'administration') {
+    onAdministrationClick()
+    return
+  }
+  if (action === 'export-data') {
+    onProfileExportClick()
+    return
+  }
+  if (action === 'import-data') {
+    onProfileImportClick()
+    return
+  }
+  if (action === 'masked-mode') {
+    onEnableMaskedModeClick()
+  }
 }
 
 const onAdministrationClick = () => {

@@ -213,6 +213,12 @@ Register form behavior:
 Optional central-auth behavior:
 - `VITE_AUTH_MODE=local` is the default and keeps the built-in login/register/profile/user-management UI.
 - `VITE_AUTH_MODE=oauth` auto-starts central sign-in from the landing page and sends profile plus user-management menu actions to `VITE_AUTH_BASE_URL`.
+- In OAuth mode the shared federated banner comes from `vendor/federated-banner`
+  and owns cross-app switching, central Account Settings, and sign-out placement.
+  Fluffynomics-specific settings remain local: digital wallet mappings, widget
+  URL generation, export/import, administration, and masked mode must stay
+  available through the app menu and must not be removed when central identity
+  fields move to Account Settings.
 - OAuth callback failures return to the landing page with an `oauth_error` query
   value; the landing page consumes it, removes it from the URL, and shows the
   existing error notification instead of immediately starting another redirect.
