@@ -221,9 +221,11 @@ Optional central-auth behavior:
   URL generation, export/import, administration, and masked mode must stay
   available through the app menu and must not be removed when central identity
   fields move to Account Settings.
-- OAuth callback failures return to the landing page with an `oauth_error` query
-  value; the landing page consumes it, removes it from the URL, and shows the
-  existing error notification instead of immediately starting another redirect.
+- OAuth expired-state callbacks return to the landing page with an
+  `oauth_error` query value; the landing page consumes it, removes it from the
+  URL, and performs one automatic OAuth retry so central Remember Me can restore
+  the session. If that retry also fails, or the failure is not an expired state,
+  the landing page shows the existing error notification instead of looping.
 - Finance-domain features such as backups, export/import, masked mode, widgets, accounts, contracts, expenses, and investments remain local app features.
 
 Password is optional in both flows. It is required only for encrypted packages.

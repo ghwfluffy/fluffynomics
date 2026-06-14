@@ -23,9 +23,12 @@
 - Registration/login/logout/me are in `python/mp/api/auth.py`.
 - Default auth mode is local standalone auth. Setting `AUTH_MODE=oauth` enables central OAuth login through the configured `AUTH_BASE_URL`.
 - OAuth mode keeps a local Fluffynomics session cookie after callback, but disables local password login, registration, password changes, profile avatar changes, user CRUD, and registration-code CRUD.
-- Failed or expired OAuth callbacks redirect back to the landing page with an
-  `oauth_error` query value so the web app can show a notification instead of
-  leaving users on an API error response.
+- Expired OAuth state callbacks redirect back to the landing page with an
+  `oauth_error` query value. The web app removes that query and performs one
+  automatic OAuth retry so a central Remember Me session can restore and finish
+  the sign-in hop. Other OAuth failures, and a repeated expired-state callback,
+  show a notification instead of leaving users on an API error response or
+  redirect loop.
 - `AUTH_BASE_URL` is the public browser/issuer base, while
   `OAUTH_SERVER_BASE_URL` can point backend token and userinfo calls at an
   internal auth API URL.

@@ -99,6 +99,7 @@ const router = useRouter()
 const route = useRoute()
 const mode = ref<'login' | 'register'>('login')
 const usesCentralAuth = authMode === 'oauth'
+const oauthAutoRetryKey = 'fluffynomics.oauth_state_auto_retry'
 
 const loginForm = ref({
   username: '',
@@ -135,7 +136,19 @@ const submitRegister = async () => {
   registerForm.value.registrationCode = ''
 }
 
-onMounted(() => {
+const claimOAuthStateAutoRetry = () => {
+  try {
+    if (window.sessionStorage.getItem(oauthAutoRetryKey) === '1') {
+      return false
+    }
+    window.sessionStorage.setItem(oauthAutoRetryKey, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
+onMounted(async () => {
   const oauthError = typeof route.query.oauth_error === 'string' ? route.query.oauth_error : ''
   if (!oauthError) {
     if (usesCentralAuth) {
@@ -143,14 +156,18 @@ onMounted(() => {
     }
     return
   }
+  const query = { ...route.query }
+  delete query.oauth_error
+  await router.replace({ path: route.path, query })
+  if (usesCentralAuth && oauthError === 'oauth_state' && claimOAuthStateAutoRetry()) {
+    beginOAuthLogin()
+    return
+  }
   errorMessage.value =
     oauthError === 'oauth_state'
       ? 'Central sign-in expired. Please start again.'
       : 'Central sign-in could not be completed. Please try again.'
   snackbar.value = true
-  const query = { ...route.query }
-  delete query.oauth_error
-  void router.replace({ path: route.path, query })
 })
 </script>
 

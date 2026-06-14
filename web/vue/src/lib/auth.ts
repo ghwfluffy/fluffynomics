@@ -28,6 +28,15 @@ interface LoginResponse {
 
 export const currentUser = ref<User | null>(null)
 export const sessionToken = ref<string | null>(null)
+const oauthAutoRetryKey = 'fluffynomics.oauth_state_auto_retry'
+
+function clearOAuthStateAutoRetry(): void {
+  try {
+    window.sessionStorage.removeItem(oauthAutoRetryKey)
+  } catch {
+    // Ignore unavailable session storage.
+  }
+}
 
 export function beginOAuthLogin(nextPath: unknown = '/app'): void {
   const safeNextPath = typeof nextPath === 'string' ? nextPath : '/app'
@@ -38,6 +47,7 @@ export async function refreshSession(): Promise<User | null> {
   try {
     const user = await request.get<User>('/auth/me', { suppressError: true })
     currentUser.value = user
+    clearOAuthStateAutoRetry()
     syncMaskedModeForUser(user.id)
     return user
   } catch {
@@ -60,6 +70,7 @@ export async function login(username: string, password: string, sessionSeconds?:
   })
   currentUser.value = response.user
   sessionToken.value = response.session_token
+  clearOAuthStateAutoRetry()
   syncMaskedModeForUser(response.user.id)
   return response.user
 }
