@@ -397,6 +397,7 @@ Color mapping:
 
 - Built web app is served by NGINX (`web/Dockerfile`).
 - NGINX reverse-proxy config is rendered at container startup by `web/docker-entrypoint.d/20-render-base-path-config.sh`; this template is the source of truth for base-path routing, API proxying, and edge limits.
+- The admin full-site restore route has a narrowly scoped 25 MB request-body limit; other API routes retain NGINX's default body limit.
 
 ## Agent Handoff Notes
 

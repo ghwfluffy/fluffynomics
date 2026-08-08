@@ -114,6 +114,21 @@ cat >>/etc/nginx/conf.d/default.conf <<EOF
         proxy_set_header X-Forwarded-Prefix ${api_prefix};
     }
 
+    location = ${api_prefix}/backups/site/restore {
+        client_max_body_size 25m;
+        limit_req zone=api_per_ip burst=300 nodelay;
+        limit_conn conn_per_ip 80;
+
+        rewrite ^${escaped_api_prefix}/(.*)\$ /\$1 break;
+        proxy_pass http://api:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Prefix ${api_prefix};
+    }
+
     location ^~ ${api_prefix}/ {
         limit_req zone=api_per_ip burst=300 nodelay;
         limit_conn conn_per_ip 80;
