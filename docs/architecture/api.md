@@ -450,6 +450,9 @@ Defined in `python/mp/api/backups.py`.
   - supports gzip SQL dumps (`.sql.gz`) and plain SQL dumps (`.sql`)
   - app-local NGINX permits request bodies up to 25 MB for this endpoint while retaining the default body limit elsewhere
   - restores full site contents into the configured Postgres DB
+- `POST /data/import`
+  - imports a personal export package and replaces the current user's existing data
+  - app-local NGINX permits request bodies up to 25 MB for this endpoint
 
 ## Admin API
 
