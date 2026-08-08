@@ -320,7 +320,8 @@ Contract create/edit also mirrors account create/edit patterns:
 - icon selection/upload from `/icons` and generated icon variants,
 - immutable type selected before modal opens.
 - linked target selector supports wallet aliases (`PayPal Wallet`, `Google Pay Wallet`) in addition to account IDs.
-- `Payment Day` field is hidden and omitted from payload for week-based recurring periods (`weekly_weekday`, `biweekly_weekday`, `every_n_weeks_weekday`).
+- `Payment Period` is the sole contract schedule editor; its structured recurring-period JSON contains every required day, weekday, interval, and anchor value.
+- Contracts with no recoverable period remain visible but unscheduled until edited with a valid payment period.
 - masked mode should still show contract amounts/countdowns, but through the same deterministic fake-currency formatter used by the accounts dashboard
 
 ## Expenses UX

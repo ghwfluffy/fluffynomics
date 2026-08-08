@@ -56,7 +56,6 @@ class Contract(Base):
     last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     next_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     payment_period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     expiration_date: Mapped[date] = mapped_column(
         Date, nullable=False, server_default=text("'2099-01-01'")
     )
@@ -112,7 +111,6 @@ class ContractBaseSchema(BaseModel):
     last_payment_date: Optional[date] = None
     next_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
-    payment_day: Optional[int] = None
     expiration_date: Optional[date] = None
     notes: Optional[str] = None
     category: Optional[str] = None
@@ -140,7 +138,6 @@ class ContractUpdateSchema(BaseModel):
     last_payment_date: Optional[date] = None
     next_payment_date: Optional[date] = None
     payment_period: Optional[str] = None
-    payment_day: Optional[int] = None
     expiration_date: Optional[date] = None
     notes: Optional[str] = None
     category: Optional[str] = None

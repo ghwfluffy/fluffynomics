@@ -23,15 +23,6 @@ from mp.schema.contract import Contract, ContractPosting
 from mp.schema.user import User
 
 
-LEGACY_RECURRENCE = {
-    "daily": '{"kind":"daily_weekdays","weekdays":[0,1,2,3,4,5,6]}',
-    "weekly": '{"kind":"weekly_weekday","weekday":0}',
-    "biweekly": '{"kind":"biweekly_weekday","weekday":0,"start_date":"2025-01-06"}',
-    "monthly": '{"kind":"monthly_day","day":1}',
-    "yearly": '{"kind":"yearly_month_day","month":1,"day":1}',
-}
-
-
 @dataclass
 class SimulatedPosting:
     contract_id: UUID
@@ -59,10 +50,6 @@ def _as_date(raw: date | str | None) -> date | None:
 
 def _parse_period(contract: Contract) -> RecurringPeriod | None:
     raw = (contract.payment_period or "").strip()
-    if not raw and contract.payment_day:
-        raw = f'{{"kind":"monthly_day","day":{int(contract.payment_day)}}}'
-    if raw.lower() in LEGACY_RECURRENCE:
-        raw = LEGACY_RECURRENCE[raw.lower()]
     if not raw:
         return None
     try:

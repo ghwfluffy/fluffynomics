@@ -1367,7 +1367,6 @@ interface ContractCalendarPayload {
   source_account_id?: string
   last_payment_date?: string
   payment_period?: string
-  payment_day?: number
   expiration_date?: string
 }
 
@@ -2196,7 +2195,7 @@ const expenseMixSlices = computed<DonutSlice[]>(() => {
     if (contract.type === 'income' || contract.type === 'transfer') {
       continue
     }
-    const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period, contract.payment_day)
+    const annualOccurrences = annualOccurrencesFromRecurring(contract.payment_period)
     const annualOutflowCents = Math.abs(intOrZero(contract.amount_cents)) * annualOccurrences
     if (!annualOutflowCents) {
       continue
@@ -4096,7 +4095,7 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
   if (contract.type === 'transfer') {
     return 0
   }
-  const spec = recurringSpecFromRaw(contract.payment_period, contract.payment_day || 1, referenceTime)
+  const spec = recurringSpecFromRaw(contract.payment_period, undefined, referenceTime)
   if (!spec?.kind) {
     return 0
   }
@@ -4107,16 +4106,16 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
     const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
     return signedAmount * fraction
   }
-  let next = recurringOnOrAfter(referenceTime, spec.kind, spec.payload, contract.payment_day || 1)
+  let next = recurringOnOrAfter(referenceTime, spec.kind, spec.payload, 1)
   if (!next) {
     return 0
   }
-  let previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+  let previous = previousOccurrenceBefore(next, spec.kind, spec.payload, 1)
   const adjustedNext = nextOccurrenceSkippingEarly(
     next,
     spec.kind,
     spec.payload,
-    contract.payment_day || 1,
+    1,
     contract.last_payment_date,
   )
   if (adjustedNext && adjustedNext.getTime() !== next.getTime()) {
@@ -4133,13 +4132,13 @@ const contractProratedContributionCents = (contract: ContractCalendarPayload, re
   const startRaw = String(spec.payload?.start_date || '')
   if (startRaw) {
     const startDate = startOfDay(new Date(`${startRaw}T00:00:00`))
-    const firstOccurrence = recurringOnOrAfter(startDate, spec.kind, spec.payload, contract.payment_day || 1)
+    const firstOccurrence = recurringOnOrAfter(startDate, spec.kind, spec.payload, 1)
     if (firstOccurrence && referenceTime < firstOccurrence) {
       return 0
     }
   }
   if (!previous || previous >= next) {
-    previous = previousOccurrenceBefore(next, spec.kind, spec.payload, contract.payment_day || 1)
+    previous = previousOccurrenceBefore(next, spec.kind, spec.payload, 1)
   }
   const fraction = proratedCycleFraction(referenceTime, previous, next)
   const signedAmount = contract.type === 'income' ? Math.abs(contract.amount_cents || 0) : -Math.abs(contract.amount_cents || 0)
@@ -4220,7 +4219,7 @@ const buildManualContractBreakdown = (
     if (contract.automatic !== false || contract.type === 'transfer') {
       continue
     }
-    const spec = recurringSpecFromRaw(contract.payment_period, contract.payment_day || 1, startDay)
+    const spec = recurringSpecFromRaw(contract.payment_period, undefined, startDay)
     if (!spec?.kind) {
       continue
     }
@@ -4242,7 +4241,7 @@ const buildManualContractBreakdown = (
       }
       continue
     }
-    let next = recurringOnOrAfter(addDays(startDay, 1), spec.kind, spec.payload, contract.payment_day || 1)
+    let next = recurringOnOrAfter(addDays(startDay, 1), spec.kind, spec.payload, 1)
     if (!next) {
       continue
     }
@@ -4250,7 +4249,7 @@ const buildManualContractBreakdown = (
       next,
       spec.kind,
       spec.payload,
-      contract.payment_day || 1,
+      1,
       contract.last_payment_date,
     )
     let guard = 0
@@ -4265,7 +4264,7 @@ const buildManualContractBreakdown = (
           netDeltaCents: signedAmount,
         })
       }
-      next = recurringNext(next, spec.kind, spec.payload, contract.payment_day || 1)
+      next = recurringNext(next, spec.kind, spec.payload, 1)
       guard += 1
     }
   }
@@ -4353,7 +4352,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
 
   for (const contract of calendarContracts.value) {
     const payload = parseRecurringPayload(contract.payment_period)
-    const kind = String(payload?.kind || (contract.payment_day ? 'monthly_day' : ''))
+    const kind = String(payload?.kind || '')
     if (!kind) {
       continue
     }
@@ -4362,7 +4361,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
       calendarGridEnd.value,
       kind,
       payload,
-      contract.payment_day || 1,
+      1,
       contract.last_payment_date,
     )
     for (const date of dates) {
@@ -4551,7 +4550,6 @@ const currentNetWorthDailyDriverItems = computed<DailyDriverItem[]>(() => {
       const dailyRateCents = recurringDailyRateCents(
         signedAmountCents,
         contract.payment_period,
-        contract.payment_day,
       )
       if (!dailyRateCents) {
         return null

@@ -165,7 +165,7 @@ def _contract_prorated_contribution_cents(
         return 0.0
     kind, period = _normalized_period(
         contract.payment_period,
-        fallback_day=contract.payment_day or 1,
+        fallback_day=None,
         reference_day=reference_time.date(),
     )
     if kind is None:

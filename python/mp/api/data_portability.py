@@ -18,6 +18,7 @@ import yaml
 from mp.api.auth import get_current_user
 from mp.db import get_db
 from mp.db.account_history import compute_user_net_worth_cents
+from mp.models.recurring_period import parse_recurring_period
 from mp.schema.account import (
     Account,
     AccountTransfer,
@@ -41,7 +42,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 12
+PAYLOAD_SCHEMA_VERSION = 13
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -49,6 +50,14 @@ KDF_ITERATIONS = 1_500_000
 KDF_SALT_BYTES = 64
 
 DEFAULT_CONTRACT_EXPIRATION = date(2099, 1, 1)
+
+LEGACY_CONTRACT_PERIODS = {
+    "daily": '{"kind":"daily_weekdays","weekdays":[0,1,2,3,4,5,6]}',
+    "weekly": '{"kind":"weekly_weekday","weekday":0}',
+    "biweekly": ('{"kind":"biweekly_weekday","weekday":0,"start_date":"2025-01-06"}'),
+    "monthly": '{"kind":"monthly_day","day":1}',
+    "yearly": '{"kind":"yearly_month_day","month":1,"day":1}',
+}
 
 ICON_TYPE_VALUES = {"Letters", "Gravatar", "Icon"}
 
@@ -467,30 +476,27 @@ def _legacy_contract_period(
     last_payment_date: date | None,
     next_payment_date: date | None,
     unsupported_periods: set[str],
-) -> tuple[str | None, int | None]:
+) -> str | None:
     period = _normalize_legacy_period(raw_period)
     reference_date = next_payment_date or last_payment_date
-    payment_day = reference_date.day if reference_date is not None else 1
+    day_of_month = reference_date.day if reference_date is not None else 1
     reference = reference_date or date.today()
     every_n_months_match = re.fullmatch(r"(\d+)\s+months?", period)
     every_n_weeks_match = re.fullmatch(r"(?:every\s+)?(\d+)\s+weeks?", period)
     every_n_years_match = re.fullmatch(r"(\d+)\s+years?", period)
     if period in {"", "month", "1 month", "monthly"}:
-        return json.dumps({"kind": "monthly_day", "day": payment_day}), payment_day
+        return json.dumps({"kind": "monthly_day", "day": day_of_month})
     if period in {"half month", "half-month", "semi monthly", "semimonthly"}:
-        return json.dumps({"kind": "twice_monthly", "day_1": 15, "day_2": 31}), 15
+        return json.dumps({"kind": "twice_monthly", "day_1": 15, "day_2": 31})
     if every_n_months_match is not None:
         interval_months = int(every_n_months_match.group(1))
-        return (
-            json.dumps(
-                {
-                    "kind": "every_n_months_day",
-                    "interval_months": interval_months,
-                    "day": payment_day,
-                    "start_date": reference.isoformat(),
-                }
-            ),
-            payment_day,
+        return json.dumps(
+            {
+                "kind": "every_n_months_day",
+                "interval_months": interval_months,
+                "day": day_of_month,
+                "start_date": reference.isoformat(),
+            }
         )
     if period in {"2 weeks", "2 week", "biweekly"}:
         weekday = reference_date.weekday() if reference_date is not None else 0
@@ -500,65 +506,70 @@ def _legacy_contract_period(
             "weekday": weekday,
             "start_date": (start or date.today()).isoformat(),
         }
-        return json.dumps(payload), None
+        return json.dumps(payload)
     if every_n_weeks_match is not None:
         interval_weeks = int(every_n_weeks_match.group(1))
         weekday = reference_date.weekday() if reference_date is not None else 0
         start = last_payment_date or next_payment_date
         if interval_weeks == 1:
-            return (
-                json.dumps({"kind": "weekly_weekday", "weekday": weekday}),
-                None,
-            )
+            return json.dumps({"kind": "weekly_weekday", "weekday": weekday})
         if interval_weeks == 2:
-            return (
-                json.dumps(
-                    {
-                        "kind": "biweekly_weekday",
-                        "weekday": weekday,
-                        "start_date": (start or date.today()).isoformat(),
-                    }
-                ),
-                None,
-            )
-        return (
-            json.dumps(
+            return json.dumps(
                 {
-                    "kind": "every_n_weeks_weekday",
-                    "interval_weeks": interval_weeks,
+                    "kind": "biweekly_weekday",
                     "weekday": weekday,
                     "start_date": (start or date.today()).isoformat(),
                 }
-            ),
-            None,
+            )
+        return json.dumps(
+            {
+                "kind": "every_n_weeks_weekday",
+                "interval_weeks": interval_weeks,
+                "weekday": weekday,
+                "start_date": (start or date.today()).isoformat(),
+            }
         )
     if period in {"week", "weekly"}:
         weekday = reference_date.weekday() if reference_date is not None else 0
-        return json.dumps({"kind": "weekly_weekday", "weekday": weekday}), None
+        return json.dumps({"kind": "weekly_weekday", "weekday": weekday})
     if period in {"year", "yearly", "1 year"}:
         ref = reference
-        return (
-            json.dumps(
-                {"kind": "yearly_month_day", "month": ref.month, "day": ref.day}
-            ),
-            payment_day,
+        return json.dumps(
+            {"kind": "yearly_month_day", "month": ref.month, "day": ref.day}
         )
     if every_n_years_match is not None:
         interval_years = int(every_n_years_match.group(1))
-        return (
-            json.dumps(
-                {
-                    "kind": "every_n_years_month_day",
-                    "interval_years": interval_years,
-                    "month": reference.month,
-                    "day": reference.day,
-                    "start_date": reference.isoformat(),
-                }
-            ),
-            payment_day,
+        return json.dumps(
+            {
+                "kind": "every_n_years_month_day",
+                "interval_years": interval_years,
+                "month": reference.month,
+                "day": reference.day,
+                "start_date": reference.isoformat(),
+            }
         )
     unsupported_periods.add(period or "<empty>")
-    return None, payment_day
+    return None
+
+
+def _normalize_contract_period_without_payment_day(
+    raw_period: Any, raw_payment_day: Any
+) -> str | None:
+    normalized = str(raw_period).strip() if raw_period is not None else ""
+    if not normalized:
+        try:
+            payment_day = int(raw_payment_day)
+        except (TypeError, ValueError):
+            return None
+        if 1 <= payment_day <= 31:
+            return json.dumps({"kind": "monthly_day", "day": payment_day})
+        return None
+    candidate = LEGACY_CONTRACT_PERIODS.get(normalized.lower(), normalized)
+    try:
+        parse_recurring_period(candidate)
+    except ValueError:
+        return None
+    return candidate
 
 
 def _legacy_expense_frequency(
@@ -1370,7 +1381,7 @@ def _convert_legacy_payload_to_latest(
         mark_expired = _is_far_future_date(next_payment_date) or _is_far_future_date(
             explicit_expiration_date
         )
-        payment_period, payment_day = _legacy_contract_period(
+        payment_period = _legacy_contract_period(
             item.get("period"),
             last_payment_date,
             next_payment_date,
@@ -1436,7 +1447,6 @@ def _convert_legacy_payload_to_latest(
                 if last_payment_date
                 else None,
                 "payment_period": payment_period,
-                "payment_day": payment_day,
                 "expiration_date": (
                     (date.today() - timedelta(days=1)).isoformat()
                     if mark_expired
@@ -1478,7 +1488,6 @@ def _convert_legacy_payload_to_latest(
                 "source_account_id": None,
                 "last_payment_date": None,
                 "payment_period": json.dumps({"kind": "monthly_last_day"}),
-                "payment_day": None,
                 "expiration_date": None,
                 "notes": "Imported from legacy retirement monthlyContribution",
                 "category": "Retirement",
@@ -1841,7 +1850,6 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "last_payment_date": _serialize_date(contract.last_payment_date),
                 "next_payment_date": _serialize_date(contract.next_payment_date),
                 "payment_period": contract.payment_period,
-                "payment_day": contract.payment_day,
                 "expiration_date": _serialize_date(contract.expiration_date),
                 "notes": contract.notes,
                 "category": contract.category,
@@ -2128,6 +2136,22 @@ def _upgrade_payload_v11_to_v12(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v12_to_v13(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 13
+    contracts = _required_list(upgraded.get("contracts", []), "contracts")
+    upgraded_contracts: list[dict[str, Any]] = []
+    for raw in contracts:
+        item = dict(_required_dict(raw, "contracts[]"))
+        item["payment_period"] = _normalize_contract_period_without_payment_day(
+            item.get("payment_period"), item.get("payment_day")
+        )
+        item.pop("payment_day", None)
+        upgraded_contracts.append(item)
+    upgraded["contracts"] = upgraded_contracts
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2141,6 +2165,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     9: _upgrade_payload_v9_to_v10,
     10: _upgrade_payload_v10_to_v11,
     11: _upgrade_payload_v11_to_v12,
+    12: _upgrade_payload_v12_to_v13,
 }
 
 
@@ -2692,6 +2717,19 @@ def _replace_user_data(
             item.get("expiration_date", item.get("expirationDate")),
             "contracts[].expiration_date",
         )
+        payment_period = (
+            str(item.get("payment_period")).strip()
+            if item.get("payment_period") is not None
+            else None
+        )
+        if payment_period:
+            try:
+                parse_recurring_period(payment_period)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail="contracts[].payment_period is invalid",
+                ) from exc
         contract = Contract(
             id=uuid4(),
             user_id=user_id,
@@ -2720,12 +2758,7 @@ def _replace_user_data(
             next_payment_date=_parse_optional_date(
                 item.get("next_payment_date"), "contracts[].next_payment_date"
             ),
-            payment_period=str(item.get("payment_period")).strip()
-            if item.get("payment_period") is not None
-            else None,
-            payment_day=_parse_int(item.get("payment_day"), "contracts[].payment_day")
-            if item.get("payment_day") is not None
-            else None,
+            payment_period=payment_period or None,
             expiration_date=parsed_contract_expiration_date
             or DEFAULT_CONTRACT_EXPIRATION,
             notes=str(item.get("notes")).strip()

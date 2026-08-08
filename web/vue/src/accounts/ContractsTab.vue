@@ -234,7 +234,6 @@
             <UnifiedDropdown v-model="contractForm.source_account_id" label="Source Account" searchable :options="sourceAccountDropdownOptions" />
           </div>
           <RecurringPeriodField v-model="contractForm.payment_period" label="Payment Period" />
-          <BankField v-if="showPaymentDayField" v-model="contractForm.payment_day" label="Payment Day" type="number" required />
           <UnifiedDropdown v-model="contractForm.category" label="Category" searchable allow-custom :options="categoryOptions" />
           <BankField v-model="contractForm.url" label="URL" type="url" />
           <BankField v-if="contractForm.type === 'payment'" v-model="contractForm.billing_day" label="Billing Day" type="number" />
@@ -363,7 +362,6 @@ interface ContractPayload {
   last_payment_date?: string
   next_payment_date?: string
   payment_period?: string
-  payment_day?: number
   expiration_date?: string
   notes?: string
   category?: string
@@ -423,8 +421,7 @@ const makeContractForm = (): ContractForm => ({
   linked_wallet: undefined,
   source_account_id: undefined,
   last_payment_date: '',
-  payment_period: '',
-  payment_day: undefined,
+  payment_period: '{"kind":"monthly_day","day":1}',
   notes: '',
   category: 'Financial',
   url: '',
@@ -803,31 +800,9 @@ const parseContractPeriod = (contract: ContractPayload) => {
       payload = null
     }
   }
-  const kind = (payload?.kind as string | undefined) || (contract.payment_day ? 'monthly_day' : undefined)
+  const kind = payload?.kind as string | undefined
   return { kind, payload }
 }
-
-const periodRequiresPaymentDay = (rawPeriod?: string) => {
-  const trimmed = (rawPeriod || '').trim().toLowerCase()
-  if (!trimmed) {
-    return true
-  }
-  if (trimmed === 'weekly' || trimmed === 'biweekly') {
-    return false
-  }
-  if (!trimmed.startsWith('{')) {
-    return true
-  }
-  try {
-    const payload = JSON.parse(trimmed) as Record<string, unknown>
-    const kind = String(payload.kind || '')
-    return !['weekly_weekday', 'biweekly_weekday', 'every_n_weeks_weekday'].includes(kind)
-  } catch {
-    return true
-  }
-}
-
-const showPaymentDayField = computed(() => periodRequiresPaymentDay(contractForm.value.payment_period))
 
 const linkedTargetSelector = computed({
   get: () => {
@@ -1052,7 +1027,6 @@ const advanceOccurrence = (
 
 const firstRegularDueAfterLastPayment = (contract: ContractPayload) => {
   const { kind, payload } = parseContractPeriod(contract)
-  const dayFromContract = contract.payment_day || 1
   if (!kind) {
     return null
   }
@@ -1063,16 +1037,16 @@ const firstRegularDueAfterLastPayment = (contract: ContractPayload) => {
     : createdRaw
       ? startOfDay(new Date(`${createdRaw}T00:00:00`))
       : startOfDay(new Date())
-  let next = occurrenceOnOrAfter(addDays(baseline, 1), kind, payload, dayFromContract)
+  let next = occurrenceOnOrAfter(addDays(baseline, 1), kind, payload, 1)
   if (!next) {
     return null
   }
   if (baselineRaw) {
     const paidDate = startOfDay(new Date(`${baselineRaw}T00:00:00`))
     if (!Number.isNaN(paidDate.getTime())) {
-      const expectedLast = previousOccurrenceBefore(next, kind, payload, dayFromContract)
+      const expectedLast = previousOccurrenceBefore(next, kind, payload, 1)
       if (expectedLast && paidDate > expectedLast && paidDate < next) {
-        const nextAfter = advanceOccurrence(next, kind, payload, dayFromContract)
+        const nextAfter = advanceOccurrence(next, kind, payload, 1)
         if (nextAfter) {
           next = nextAfter
         }
@@ -1098,20 +1072,19 @@ const nextPaymentDate = (contract: ContractPayload) => {
     }
   }
   const { kind, payload } = parseContractPeriod(contract)
-  const dayFromContract = contract.payment_day || 1
   if (!kind) {
     return null
   }
-  let next = occurrenceOnOrAfter(today, kind, payload, dayFromContract)
+  let next = occurrenceOnOrAfter(today, kind, payload, 1)
   if (!next) {
     return null
   }
   if (paidRaw) {
     const paidDate = startOfDay(new Date(`${paidRaw}T00:00:00`))
     if (!Number.isNaN(paidDate.getTime())) {
-      const expectedLast = previousOccurrenceBefore(next, kind, payload, dayFromContract)
+      const expectedLast = previousOccurrenceBefore(next, kind, payload, 1)
       if (expectedLast && paidDate > expectedLast && paidDate < next) {
-        const nextAfter = advanceOccurrence(next, kind, payload, dayFromContract)
+        const nextAfter = advanceOccurrence(next, kind, payload, 1)
         if (nextAfter) {
           next = nextAfter
         }
@@ -1151,8 +1124,8 @@ const nextPaymentCountdownLabel = (contract: ContractPayload) => {
         !Number.isNaN(overrideDate.getTime()) &&
         startOfDay(next).getTime() === overrideDate.getTime() &&
         regularDue
-          ? advanceOccurrence(regularDue, kind, payload, contract.payment_day || 1)
-          : advanceOccurrence(next, kind, payload, contract.payment_day || 1)
+          ? advanceOccurrence(regularDue, kind, payload, 1)
+          : advanceOccurrence(next, kind, payload, 1)
       if (following) {
         const today = startOfDay(new Date())
         const target = startOfDay(following)
@@ -1263,14 +1236,6 @@ const validateContractForm = () => {
     snackbar.value = true
     return false
   }
-  if (
-    showPaymentDayField.value &&
-    (!contractForm.value.payment_day || contractForm.value.payment_day < 1 || contractForm.value.payment_day > 31)
-  ) {
-    errorMessage.value = 'Payment day is required (1-31)'
-    snackbar.value = true
-    return false
-  }
   if (contractForm.value.type === 'transfer' && !contractForm.value.source_account_id) {
     errorMessage.value = 'Source account is required for transfer contracts'
     snackbar.value = true
@@ -1294,7 +1259,6 @@ const submitContract = async () => {
     organization: contractForm.value.organization?.trim(),
     last_payment_date: contractForm.value.last_payment_date || null,
     payment_period: contractForm.value.payment_period || null,
-    payment_day: showPaymentDayField.value ? contractForm.value.payment_day : null,
     notes: contractForm.value.notes || null,
     url: contractForm.value.url || null,
     billing_day: contractForm.value.billing_day || null,

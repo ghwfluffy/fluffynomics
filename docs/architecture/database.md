@@ -127,9 +127,12 @@ Contracts now carry tile-parity fields to match account dashboard interactions:
 - `expiration_date` (`DATE`, default `2099-01-01`) for lifecycle grouping (active vs expired).
 - `linked_wallet` (`TEXT`, nullable, check `paypal|google_pay`) for wallet-alias indirection.
 - `next_payment_date` (`DATE`, nullable) for a one-off next-occurrence override on payment contracts.
+- `payment_period` (`TEXT`, nullable only for unrecoverable legacy rows) is the sole persisted contract schedule and contains structured recurring-period JSON.
+- migration `0044_contracts_remove_payment_day.sql` backfills missing periods from a valid legacy day, normalizes legacy keyword periods, and drops `contracts.payment_day`; `accounts.payment_day` remains unchanged.
 
 Contracts remain user-scoped (`contracts.user_id`) and are grouped by category in web UI. Ranking is applied within category sections.
 Current UI grouping is by `type + category` for active contracts, plus a trailing `Expired` section based on `expiration_date < today`.
+Contracts whose legacy data contains neither a usable period nor a valid legacy day remain unscheduled until the user supplies a valid structured period.
 
 ### Architecture Decision: Snapshot Consistency Model
 

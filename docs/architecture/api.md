@@ -296,7 +296,8 @@ Validation + ownership rules:
 - `type` must be one of `income|payment|transfer`.
 - `source_account_id` is required only for `transfer`.
 - `transfer` cannot use `linked_wallet`; it must use concrete account IDs.
-- `payment_day` is required (`1..31`).
+- `payment_period` is required and must be valid structured recurring-period JSON; legacy keyword values are not accepted on writes.
+- Contract responses and writes do not expose a separate `payment_day`; all recurrence timing belongs in `payment_period`.
 - `account_number` is optional for contracts.
 - `linked_account_id` and `source_account_id` must belong to current user.
 - `icon_type` follows account behavior (`Letters|Gravatar|Icon`).
