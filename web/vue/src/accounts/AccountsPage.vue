@@ -1315,6 +1315,9 @@ interface AccountPayload {
   fee_period?: string
   apy_bps?: number
   compound_period?: string
+  apr_bps?: number
+  billing_day?: number
+  payment_amount_cents?: number
   usd_balance_cents?: number
   queued_credit_card_payment?: QueuedCreditCardPaymentPayload | null
   stock_positions?: Array<{ stock_id?: string; ticker?: string; quantity: string; last_price_cents?: number }>
@@ -1448,7 +1451,7 @@ type RateRow = {
   valueCents: number
 }
 
-type CalendarEventKind = 'fee' | 'contract' | 'expense'
+type CalendarEventKind = 'fee' | 'payable' | 'contract' | 'expense'
 
 type CalendarEventAction = 'edit' | 'update'
 
@@ -4325,6 +4328,35 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
     if (account.closed) {
       continue
     }
+    if (
+      ['line_of_credit', 'loan'].includes(account.type) &&
+      intOrZero(account.balance_cents) !== 0 &&
+      intOrZero(account.payment_day) > 0
+    ) {
+      const paymentDay = intOrZero(account.payment_day)
+      const dates = recurringOccurrencesInMonth(
+        calendarGridStart.value,
+        calendarGridEnd.value,
+        'monthly_day',
+        { day: paymentDay },
+        paymentDay,
+        account.last_payment_date,
+      )
+      for (const date of dates) {
+        const dateIso = formatCalendarDateIso(date)
+        items.push({
+          key: `payable-${account.id}-${dateIso}`,
+          kind: 'payable',
+          kindLabel: 'Payable',
+          sourceId: account.id,
+          title: `${account.name} payment`,
+          label: `${account.name} payment`,
+          dateIso,
+          dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          signedAmountCents: -Math.abs(intOrZero(account.payment_amount_cents)),
+        })
+      }
+    }
     if ((account.fee_amount_cents || 0) <= 0 || !account.fee_period?.trim()) {
       continue
     }
@@ -4875,6 +4907,13 @@ const submitCreateAccount = async () => {
   }
   const payload: CreateAccountPayload = {
     ...createForm.value,
+    // Keep zero-valued balances/payment amounts explicit when editing a loan
+    // or payable that previously had no recorded amount.
+    balance_cents: needsBalance.value ? intOrZero(createForm.value.balance_cents) : createForm.value.balance_cents,
+    payment_amount_cents:
+      createForm.value.type === 'loan'
+        ? intOrZero(createForm.value.payment_amount_cents)
+        : createForm.value.payment_amount_cents,
     stock_positions: createForm.value.type === 'stocks_account' ? createForm.value.stock_positions : [],
     crypto_positions: ['crypto_wallet', 'crypto_exchange'].includes(createForm.value.type) ? createForm.value.crypto_positions : [],
     cash_bills: createForm.value.type === 'cash' ? createForm.value.cash_bills : [],
@@ -5309,6 +5348,19 @@ const runCalendarEventAction = async (action: CalendarEventAction) => {
   const event = selectedCalendarEvent.value
   closeCalendarEventDialog()
   if (event.kind === 'fee') {
+    const account = accounts.value.find((item) => item.id === event.sourceId)
+    if (!account) {
+      return
+    }
+    activeTab.value = 'accounts'
+    if (action === 'edit') {
+      startEditAccount(account)
+    } else {
+      openUpdateDialog(account)
+    }
+    return
+  }
+  if (event.kind === 'payable') {
     const account = accounts.value.find((item) => item.id === event.sourceId)
     if (!account) {
       return
