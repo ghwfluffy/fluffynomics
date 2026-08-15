@@ -6660,7 +6660,13 @@ watch(
 
 .calendar-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
+}
+
+.calendar-panel > * {
+  min-width: 0;
 }
 
 .calendar-toolbar {
@@ -7088,7 +7094,10 @@ watch(
 
   .calendar-mobile {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.45rem;
+    width: 100%;
+    min-width: 0;
   }
 
   .calendar-mobile-weekdays,
@@ -7096,6 +7105,8 @@ watch(
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 0.3rem;
+    width: 100%;
+    min-width: 0;
   }
 
   .calendar-mobile-weekday {
@@ -7108,6 +7119,8 @@ watch(
   .calendar-mobile-day {
     border: 1px solid #cbd5e1;
     border-radius: 8px;
+    width: 100%;
+    min-width: 0;
     min-height: 2.85rem;
     padding: 0.15rem;
     display: grid;
@@ -7196,6 +7209,33 @@ watch(
 
   .dashboard-tabs {
     display: none;
+  }
+
+  .calendar-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .calendar-toolbar h3 {
+    font-size: clamp(1.125rem, 6vw, 1.75rem);
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .calendar-toolbar .cds--btn {
+    inline-size: auto;
+    min-inline-size: 0;
+    padding-inline: 0.25rem;
+    justify-content: center;
+  }
+
+  .calendar-toolbar .cds--btn:first-child {
+    justify-self: start;
+  }
+
+  .calendar-toolbar .cds--btn:last-child {
+    justify-self: end;
   }
 
   .forecast-popover {

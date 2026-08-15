@@ -44,6 +44,7 @@ Calendar tab behavior:
   remain visible while the payable has a non-zero balance.
 - clicking an event opens actions and supports `Edit` / `Update` using the same object flows as the source tab.
 - on narrow screens, swaps to a compact month grid with day-level color coding by net change magnitude; tapping a day opens the exact event names and amounts for that date.
+- the narrow-screen toolbar and seven-column grid must shrink within the calendar tile instead of establishing an intrinsic width that overflows the dashboard margins.
 
 ## Design System Direction
 
