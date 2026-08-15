@@ -220,6 +220,9 @@ Optional central-auth behavior:
 - `VITE_AUTH_MODE=oauth` auto-starts central sign-in from the landing page and sends shared identity, password, avatar, and user-management actions to central Account Settings.
 - In OAuth mode the shared federated banner comes from `vendor/federated-banner`
   and owns cross-app switching, central Account Settings, and sign-out placement.
+  A parent deployment may provide the complete `VITE_FEDERATED_APPS` JSON
+  inventory; when present it replaces individual app base URL fallbacks so
+  every enabled app appears consistently.
   Fluffynomics-specific settings remain local: digital wallet mappings, widget
   URL generation, export/import, administration, and masked mode must stay
   available through the app menu and must not be removed when central identity

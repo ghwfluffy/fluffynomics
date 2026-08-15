@@ -658,6 +658,7 @@ import {
   FederatedBanner,
   accountSettingsUrl,
   createGhwizFederatedSites,
+  parseFederatedSites,
   type FederatedBannerMenuItem,
   type FederatedBannerUser,
 } from '@ghwiz/federated-banner'
@@ -758,12 +759,13 @@ const manageUserDeleteDialogOpen = ref(false)
 const manageDeleteTargetUserId = ref('')
 const manageDeleteTargetUsername = ref('')
 const usesCentralAuth = authMode === 'oauth'
+const configuredBannerSites = parseFederatedSites(import.meta.env.VITE_FEDERATED_APPS)
 
 const bannerSites = computed(() => {
   if (!usesCentralAuth) {
     return []
   }
-  return createGhwizFederatedSites({
+  return configuredBannerSites.length > 0 ? configuredBannerSites : createGhwizFederatedSites({
     authBaseUrl: centralAuthBaseUrl,
     goalsBaseUrl: import.meta.env.VITE_GOALS_BASE_URL,
     moneyPlannerBaseUrl: import.meta.env.VITE_MONEY_PLANNER_BASE_URL,
