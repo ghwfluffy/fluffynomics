@@ -1,0 +1,11 @@
+.git
+**/.git
+**/node_modules
+web/vue/dist
+python/venv
+python/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+backups
+*.py[cod]
