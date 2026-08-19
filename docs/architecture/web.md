@@ -346,6 +346,12 @@ Expenses support CRUD in `ExpensesTab.vue` with:
 - generated `Letters` and `Gravatar` expense icons should use the expense name as their seed; fall back to category only when name is blank.
 - `Update` menu action edits only operational fields: `enabled`, `last expensed date`, `next expensed date`.
 
+Expense recurrence weekday payloads use Python/ISO ordering: `0 = Monday`
+through `6 = Sunday`. Frequency labels must map those numeric values directly
+and deterministically; do not pass recurrence weekdays through JavaScript
+`Date`, UTC, or local-time conversion APIs. This keeps tile, table, filtering,
+and sorting labels aligned with the stored schedule in every owner timezone.
+
 The tab supports both tile and table rendering and follows the same menu/modal patterns as accounts/contracts.
 The create/edit expense modal must always expose linked-account selection so expense simulation can apply deltas to the intended account.
 Disabled expenses stay editable/updateable in the `Legacy` tile section, which is collapsed by default.

@@ -53,7 +53,7 @@
                 <div class="tile-sub">Last: {{ formatDate(item.last_expensed_date) }}</div>
                 <div class="tile-sub">Next: {{ formatDate(item.next_expensed_date) }}</div>
                 <div class="tile-balance balance-liability">Est. {{ cents(item.estimated_amount_cents) }}</div>
-                <div class="tile-type">{{ frequencyLabel(item.general_frequency) }}<span v-if="!item.enabled"> • Disabled</span></div>
+                <div class="tile-type">{{ formatExpenseFrequency(item.general_frequency) }}<span v-if="!item.enabled"> • Disabled</span></div>
               </div>
               <div class="tile-actions">
                 <button class="tile-menu-trigger" type="button" aria-label="Expense menu" @click.stop="toggleMenu(item.id)">
@@ -105,7 +105,7 @@
               <td>{{ item.name }}</td>
               <td>{{ expenseCategoryLabel(item) }}</td>
               <td>{{ cents(item.estimated_amount_cents) }}</td>
-              <td>{{ frequencyLabel(item.general_frequency) }}</td>
+              <td>{{ formatExpenseFrequency(item.general_frequency) }}</td>
               <td>{{ formatDate(item.last_expensed_date) }}</td>
               <td>{{ formatDate(item.next_expensed_date) }}</td>
               <td class="table-actions-cell">
@@ -249,6 +249,7 @@ import DollarField from '@/components/DollarField.vue'
 import RecurringPeriodField from '@/components/RecurringPeriodField.vue'
 import UnifiedDropdown from '@/components/UnifiedDropdown.vue'
 import CollapsibleSectionHeader from '@/components/CollapsibleSectionHeader.vue'
+import { formatExpenseFrequency } from '@/accounts/expenseFrequency'
 
 interface Expense {
   id: string
@@ -401,7 +402,7 @@ const filteredExpenses = computed(() => {
   const filtered = expenses.value.filter((item) => {
     const matchesNeedle =
       !needle ||
-      [item.name, item.category, expenseCategoryLabel(item), frequencyLabel(item.general_frequency), formatDate(item.last_expensed_date), formatDate(item.next_expensed_date)]
+      [item.name, item.category, expenseCategoryLabel(item), formatExpenseFrequency(item.general_frequency), formatDate(item.last_expensed_date), formatDate(item.next_expensed_date)]
         .join(' ')
         .toLowerCase()
         .includes(needle)
@@ -426,7 +427,7 @@ const filteredExpenses = computed(() => {
           : sortKey.value === 'estimated'
             ? a.estimated_amount_cents
             : sortKey.value === 'frequency'
-              ? frequencyLabel(a.general_frequency)
+              ? formatExpenseFrequency(a.general_frequency)
               : sortKey.value === 'last'
                 ? new Date(`${(a.last_expensed_date || '1900-01-01').slice(0, 10)}T00:00:00`).getTime()
                 : new Date(`${(a.next_expensed_date || '1900-01-01').slice(0, 10)}T00:00:00`).getTime()
@@ -438,7 +439,7 @@ const filteredExpenses = computed(() => {
           : sortKey.value === 'estimated'
             ? b.estimated_amount_cents
             : sortKey.value === 'frequency'
-              ? frequencyLabel(b.general_frequency)
+              ? formatExpenseFrequency(b.general_frequency)
               : sortKey.value === 'last'
                 ? new Date(`${(b.last_expensed_date || '1900-01-01').slice(0, 10)}T00:00:00`).getTime()
                 : new Date(`${(b.next_expensed_date || '1900-01-01').slice(0, 10)}T00:00:00`).getTime()
@@ -488,67 +489,6 @@ const formatDate = (raw?: string) => {
     return raw
   }
   return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-const weekdayLabel = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const monthLabel = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-const frequencyLabel = (raw?: string) => {
-  const value = (raw || '').trim()
-  if (!value) {
-    return 'As needed'
-  }
-  if (!value.startsWith('{')) {
-    return value
-  }
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
-    const kind = String(parsed.kind || '')
-    if (kind === 'monthly_day') {
-      return `Monthly on day ${parsed.day}`
-    }
-    if (kind === 'monthly_last_day') {
-      return 'Monthly on last day'
-    }
-    if (kind === 'semimonthly_days') {
-      return `Twice monthly (${parsed.day_1}, ${parsed.day_2})`
-    }
-    if (kind === 'yearly_month_day') {
-      const month = Number(parsed.month)
-      const day = Number(parsed.day)
-      return `Yearly (${monthLabel[month] || month} ${day})`
-    }
-    if (kind === 'every_n_months_day') {
-      const interval = Math.max(1, Number(parsed.interval_months || 1))
-      const day = Number(parsed.day || 1)
-      return `Every ${interval} month${interval === 1 ? '' : 's'} (day ${day})`
-    }
-    if (kind === 'every_n_years_month_day') {
-      const interval = Math.max(1, Number(parsed.interval_years || 1))
-      const month = Number(parsed.month || 1)
-      const day = Number(parsed.day || 1)
-      return `Every ${interval} year${interval === 1 ? '' : 's'} (${monthLabel[month] || month} ${day})`
-    }
-    if (kind === 'weekly_weekday') {
-      const weekday = Number(parsed.weekday)
-      return `Weekly (${weekdayLabel[weekday] || 'Day'})`
-    }
-    if (kind === 'biweekly_weekday') {
-      const weekday = Number(parsed.weekday)
-      return `Every 2 weeks (${weekdayLabel[weekday] || 'Day'})`
-    }
-    if (kind === 'every_n_weeks_weekday') {
-      const interval = Math.max(1, Number(parsed.interval_weeks || 1))
-      const weekday = Number(parsed.weekday)
-      return `Every ${interval} weeks (${weekdayLabel[weekday] || 'Day'})`
-    }
-    if (kind === 'daily_weekdays') {
-      return 'Daily'
-    }
-  } catch {
-    return 'Custom'
-  }
-  return 'Custom'
 }
 
 const iconUrl = (iconId?: string) => (iconId ? apiUrl(`icons/${iconId}`) : '')
