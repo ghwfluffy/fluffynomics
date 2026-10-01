@@ -5,6 +5,11 @@
 - PostgreSQL (dockerized via `docker-compose.yml`)
 - App schema managed by migration files in `python/mp/db/migrations/`
 - ORM models in `python/mp/schema/*.py`
+- Bare `postgresql://` connection URLs explicitly select the installed
+  `psycopg2-binary` driver in `python/mp/db/core.py`. SQLAlchemy 2.1 changed its
+  default to `psycopg`; do not depend on that implicit choice. Explicit driver
+  URLs and SQLite test URLs remain unchanged, as does the original
+  `DATABASE_URL` used by backup tools.
 - Local filesystem backup target directory: `./backups` (mounted into backup worker container)
 
 ## Operational Backups
