@@ -485,6 +485,15 @@
             <BankField v-if="needsPaymentDay" v-model="createForm.payment_day" label="Payment Day" type="number" />
           </div>
 
+          <template v-if="createForm.type === 'credit_card'">
+            <div class="field-row">
+              <DollarField :model-value="createForm.minimum_payment_cents ?? undefined" @update:model-value="createForm.minimum_payment_cents = $event" label="Minimum Payment" />
+              <BankField :model-value="createForm.default_payment_account_id ?? undefined" @update:model-value="createForm.default_payment_account_id = String($event || '')" label="Default Payment Account" :options="defaultCardPaymentAccountOptions" />
+            </div>
+            <BankField :model-value="createForm.last_payment_date ?? undefined" @update:model-value="createForm.last_payment_date = String($event || '')" label="Last Payment Date" type="date" />
+            <p class="cds--label">A positive minimum enables monthly payments on Payment Day. Payments and interest update your planner balances.</p>
+          </template>
+
           <template v-if="needsExpiration && createForm.type !== 'credit_card'">
             <BankField v-model="createForm.expiration_date" label="Expiration Date" type="date" />
             <BankField v-if="needsCvc" v-model="createForm.cvc" label="CVC" />
@@ -1305,6 +1314,8 @@ interface AccountPayload {
   url?: string
   payment_day?: number
   last_payment_date?: string
+  minimum_payment_cents?: number
+  default_payment_account_id?: string
   expiration_date?: string
   closed?: boolean
   last_update?: string
@@ -1465,6 +1476,7 @@ interface CalendarEventItem {
   dateIso: string
   dateLabel: string
   signedAmountCents: number
+  netWorthDeltaCents?: number
 }
 
 interface CalendarCell {
@@ -1511,7 +1523,9 @@ interface CreateAccountPayload {
   apr_bps?: number
   billing_day?: number
   payment_day?: number
-  last_payment_date?: string
+  last_payment_date?: string | null
+  minimum_payment_cents?: number | null
+  default_payment_account_id?: string | null
   expiration_date?: string
   closed?: boolean
   max_credit_cents?: number
@@ -1719,6 +1733,26 @@ const now = new Date()
 const calendarMonthAnchor = ref<Date>(new Date(now.getFullYear(), now.getMonth(), 1))
 const calendarContracts = ref<ContractCalendarPayload[]>([])
 const calendarExpenses = ref<ExpenseCalendarPayload[]>([])
+interface CreditCardEventPayload {
+  account_id: string
+  account_name: string
+  source_account_name?: string
+  effective_date: string
+  kind: 'payment' | 'interest'
+  amount_cents: number
+  net_worth_delta_cents: number
+}
+const calendarCardEvents = ref<CreditCardEventPayload[]>([])
+let calendarCardRequest = 0
+const loadCalendarCardEvents = async () => {
+  const requestId = ++calendarCardRequest
+  const events = await request.get<CreditCardEventPayload[]>('/credit-card-events', { params: {
+    from_date: formatCalendarDateIso(calendarGridStart.value),
+    through_date: formatCalendarDateIso(calendarGridEnd.value),
+  } })
+  if (requestId === calendarCardRequest) calendarCardEvents.value = events
+}
+
 const calendarEventDialogOpen = ref(false)
 const selectedCalendarEvent = ref<CalendarEventItem | null>(null)
 const calendarDayDialogOpen = ref(false)
@@ -1777,6 +1811,12 @@ const needsApr = computed(() => ['line_of_credit', 'credit_card', 'loan'].includ
 const needsCompoundPeriod = computed(() =>
   ['line_of_credit', 'credit_card', 'loan'].includes(createForm.value.type),
 )
+const defaultCardPaymentAccountOptions = computed(() => [
+  { label: 'No default account', value: '' },
+  ...accounts.value.filter((account) => !account.closed && ['checking', 'savings'].includes(account.type) && account.id !== editingAccountId.value)
+    .map((account) => ({ label: account.name, value: account.id })),
+])
+
 const needsBillingDay = computed(() => ['line_of_credit', 'credit_card'].includes(createForm.value.type))
 const needsPaymentDay = computed(() => ['line_of_credit', 'credit_card', 'loan'].includes(createForm.value.type))
 const needsExpiration = computed(() => ['credit_card', 'rewards_card'].includes(createForm.value.type))
@@ -4323,7 +4363,18 @@ const calendarGridStart = computed(() => addDays(monthStart.value, -monthStart.v
 const calendarGridEnd = computed(() => addDays(calendarGridStart.value, 41))
 
 const calendarEvents = computed<CalendarEventItem[]>(() => {
-  const items: CalendarEventItem[] = []
+  const items: CalendarEventItem[] = calendarCardEvents.value.map((event) => {
+    const date = parseDateOnly(event.effective_date)!
+    const label = event.kind === 'payment' ? `${event.account_name} minimum payment` : `${event.account_name} interest`
+    return {
+      key: `card-${event.account_id}-${event.kind}-${event.effective_date}`,
+      kind: 'payable', kindLabel: event.kind === 'payment' ? 'Automatic Payment' : 'Interest',
+      sourceId: event.account_id, title: event.source_account_name ? `${label} from ${event.source_account_name}` : label,
+      label, dateIso: event.effective_date,
+      dateLabel: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      signedAmountCents: -event.amount_cents, netWorthDeltaCents: event.net_worth_delta_cents,
+    }
+  })
   for (const account of accounts.value) {
     if (account.closed) {
       continue
@@ -4463,7 +4514,7 @@ const calendarEventsByIso = computed(() => {
 const calendarNetChangeByIso = computed(() => {
   const map = new Map<string, number>()
   for (const event of calendarEvents.value) {
-    map.set(event.dateIso, (map.get(event.dateIso) || 0) + event.signedAmountCents)
+    map.set(event.dateIso, (map.get(event.dateIso) || 0) + (event.netWorthDeltaCents ?? event.signedAmountCents))
   }
   return map
 })
@@ -4500,7 +4551,7 @@ const calendarUpcomingEvents = computed(() => {
 const calendarUpcomingEventsWithRunning = computed(() => {
   let running = 0
   return calendarUpcomingEvents.value.map((event) => {
-    running += event.signedAmountCents
+    running += event.netWorthDeltaCents ?? event.signedAmountCents
     return {
       ...event,
       runningTotalCents: running,
@@ -4767,7 +4818,7 @@ const lastUpdateTone = (account: AccountPayload) => {
 const loadAccounts = async () => {
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
   accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
-  await Promise.all([loadWidgets(), loadTransfers(), loadLogs()])
+  await Promise.all([loadWidgets(), loadTransfers(), loadLogs(), loadCalendarCardEvents()])
 }
 
 const loadTransfers = async () => {
@@ -4907,6 +4958,12 @@ const submitCreateAccount = async () => {
   }
   const payload: CreateAccountPayload = {
     ...createForm.value,
+    // Explicit null clears an existing optional setting.
+    ...(createForm.value.type === 'credit_card' ? {
+      minimum_payment_cents: createForm.value.minimum_payment_cents ?? null,
+      default_payment_account_id: createForm.value.default_payment_account_id || null,
+      last_payment_date: createForm.value.last_payment_date || null,
+    } : {}),
     // Keep zero-valued balances/payment amounts explicit when editing a loan
     // or payable that previously had no recorded amount.
     balance_cents: needsBalance.value ? intOrZero(createForm.value.balance_cents) : createForm.value.balance_cents,
@@ -5119,7 +5176,7 @@ const openUpdateDialog = (account: AccountPayload) => {
   updateForm.value.currentBalanceCents = Math.max(0, queuedPayment?.current_balance_cents || updateModalBalanceCents(account))
   updateForm.value.pendingBalanceCents = Math.max(0, queuedPayment?.pending_balance_cents || 0)
   updateForm.value.paymentCents = Math.max(0, queuedPayment?.payment_cents || updateModalBalanceCents(account))
-  updateForm.value.sourceAccountId = queuedPayment?.source_account_id || creditCardFundingAccountOptions.value[0]?.value || ''
+  updateForm.value.sourceAccountId = queuedPayment?.source_account_id || account.default_payment_account_id || creditCardFundingAccountOptions.value[0]?.value || ''
   if (account.type === 'stocks_account') {
     const positions =
       account.stock_positions?.map((position) => ({
@@ -5700,6 +5757,10 @@ watch(
     }, 1000)
   },
 )
+
+watch(calendarMonthAnchor, async () => {
+  await loadCalendarCardEvents()
+})
 
 watch(
   () => forecastDate.value,

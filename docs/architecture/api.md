@@ -511,3 +511,49 @@ For **accounts**:
 - Startup loader `mp.organization_defaults.ensure_default_organizations_loaded()` ensures defaults are in DB.
 - Account creation/update can infer `icon_id` from matching organization defaults when explicit icon is not provided.
 - For uploaded/default catalog icons, `icon_type` should be `Icon`.
+
+## Credit-card automatic bookkeeping
+
+Cards accept `minimum_payment_cents` (nonnegative), `default_payment_account_id`
+(an owned, open checking or savings account), `payment_day`, and `last_payment_date`.
+A positive minimum requires the funding account and a payment day. Clearing the
+minimum or setting it to zero disables automatic payments.
+
+`mp/accounts/credit_cards.py` is shared by live posting and daily projections.
+On the monthly payment day, an open card with positive debt pays the smaller of
+its minimum and remaining debt. A payment after the previous monthly due date
+covers the current cycle; a payment exactly on that prior due date does not
+skip the next month. An active queued card payment suppresses another automatic
+payment; settlement records its effective date as the last payment. Both the
+funding balance and card debt decrease, leaving net worth unchanged. As with
+other planner transfers, source balances may go negative; this does not issue
+bank instructions or check available funds at a bank.
+
+On the billing day, positive debt accrues monthly interest of `balance * APR / 12`,
+rounded half-up to whole cents, which compounds on later billing dates. The
+existing `compound_period` field does not override this card-specific monthly
+posting rule. Interest is processed before a payment when both dates coincide.
+Days 29–31 clamp to the last day in shorter months. Closed cards do not post.
+
+The 30-minute scheduler and lazy account/transfer reads apply due bookkeeping
+under ordered account row locks. A persisted per-card processing date prevents
+replays, including concurrent reads. New/deployed cards start at today rather
+than charging prior months against current balances. Setting changes are
+prospective and never move a processing date backward. Missed dates after that
+start are caught up on the next scheduler/read. Each payment retains an applied
+transfer; each event records audit/history and refreshes the daily snapshot.
+
+Session-only `GET /credit-card-events?from_date=...&through_date=...` returns
+historical posted and future projected payments/interest for the calendar.
+Projections incorporate scheduled contract, expense, and investment deltas
+before each day's card events and stop payments when projected debt reaches
+zero. The maximum forecast horizon is ten years. Account/as-of and net-worth
+forecasts use the same card engine. Existing agent scopes remain unchanged:
+account reads expose settings, while automatic-payment configuration requires
+the normal app session.
+
+Card regression tests run with `venv/bin/python -m unittest discover -s tests`.
+Set `CREDIT_CARD_TEST_DATABASE_URL` to a disposable PostgreSQL database to also
+run persistence, concurrency, migration, and export/import tests; these tests
+create their own users and a temporary migration schema and must not target
+production. Python lint and the web build remain required.

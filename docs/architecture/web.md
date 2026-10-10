@@ -428,3 +428,20 @@ Color mapping:
   - stricter per-IP limits for `/api/auth/*` (brute-force/fuzz pressure),
   - no edge rate/connection limits for `/api/icons/*` image/generated-icon fetches so dashboard icon fan-out does not randomly 429 during page render,
   - broader per-IP request + connection limits for `/api/*`; these must tolerate normal dashboard fan-out, including bounded account-history reads for overview charts.
+
+## Credit-card minimum payments and calendar
+
+The card create/edit modal exposes Minimum Payment, Default Payment Account,
+and Last Payment Date beside the existing Payment Day/Billing Day/APR controls.
+The funding selector offers open checking/savings accounts. Zero or a cleared
+minimum disables automatic payments; clearing an existing setting sends null.
+These are planner balance changes rather than external banking actions.
+
+Calendar card events come from `/credit-card-events`, refreshed after account
+changes and month navigation. It retains completed payments via audit history
+and shows future minimum payments only while projected card debt remains.
+Automatic-payment labels include the funding account in the detail title.
+Payment chips show the money moved, while their daily/running net-worth delta
+is zero; interest chips reduce net worth. Clicking an event uses the card's
+existing edit/update controls. Month requests use a sequence guard so a slow
+previous request cannot overwrite the currently displayed month.

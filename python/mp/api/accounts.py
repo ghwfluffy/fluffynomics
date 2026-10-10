@@ -7,6 +7,13 @@ from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from mp.accounts.credit_cards import (
+    FUNDING_TYPES,
+    CreditCardEvent,
+    apply_credit_card_automation,
+    project_card_day,
+)
+from mp.schema.audit_log import AuditLogEvent
 from mp.db import get_db
 from mp.db.account_history import (
     compute_account_value_cents as _compute_account_value_cents,
@@ -132,6 +139,58 @@ def _validate_type_requirements(
     # Type-specific fields are intentionally optional. We only enforce
     # account identity fields + a valid account type.
     return
+
+
+def _validate_card_automation(
+    db: Session,
+    user_id: UUID,
+    payload: AccountCreateSchema,
+    account_id: UUID | None = None,
+) -> None:
+    if payload.type != "credit_card":
+        if (
+            payload.minimum_payment_cents is not None
+            or payload.default_payment_account_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Automatic minimum payments require a credit card",
+            )
+        return
+    for value in (payload.payment_day, payload.billing_day):
+        if value is not None and not 1 <= value <= 31:
+            raise HTTPException(
+                status_code=400,
+                detail="Billing and payment days must be between 1 and 31",
+            )
+    if payload.apr_bps is not None and payload.apr_bps < 0:
+        raise HTTPException(status_code=400, detail="APR cannot be negative")
+    if payload.default_payment_account_id is not None:
+        source = (
+            db.query(Account)
+            .filter(
+                Account.id == payload.default_payment_account_id,
+                Account.user_id == user_id,
+            )
+            .first()
+        )
+        if (
+            source is None
+            or source.id == account_id
+            or source.closed
+            or source.type not in FUNDING_TYPES
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Default payment account must be an owned, open checking or savings account",
+            )
+    if (payload.minimum_payment_cents or 0) > 0 and (
+        payload.default_payment_account_id is None or payload.payment_day is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="A minimum payment requires a payment day and default payment account",
+        )
 
 
 def _normalized_nested_positions_for_type(
@@ -597,6 +656,7 @@ def _project_serialized_accounts_to_date(
             account = accounts_by_id.get(account_id)
             if account is not None:
                 _apply_balance_delta(account, int(delta_cents))
+        project_card_day(projected, day)
         day += timedelta(days=1)
     return projected
 
@@ -894,6 +954,44 @@ def _settle_due_account_transfers(
     *,
     trigger_type: AuditLogTriggerType = "system",
 ) -> bool:
+    # Normal reads avoid account locks once today's automation has completed.
+    card_due = (
+        db.query(Account.id)
+        .filter(
+            Account.user_id == user_id,
+            Account.type == "credit_card",
+            Account.credit_card_processed_through < date.today(),
+        )
+        .first()
+    )
+    transfer_due = (
+        db.query(AccountTransfer.id)
+        .filter(
+            AccountTransfer.user_id == user_id,
+            AccountTransfer.applied_at.is_(None),
+            AccountTransfer.effective_at <= datetime.utcnow(),
+        )
+        .first()
+    )
+    if card_due is None and transfer_due is None:
+        return False
+    # Serialize lazy settlement and the card scheduler on the same account locks.
+    db.query(Account).filter(Account.user_id == user_id).order_by(
+        Account.id
+    ).with_for_update().populate_existing().all()
+    settled = _settle_pending_account_transfers(db, user_id, trigger_type=trigger_type)
+    automated = apply_credit_card_automation(
+        db, user_id, date.today(), trigger_type=trigger_type
+    )
+    return settled or automated
+
+
+def _settle_pending_account_transfers(
+    db: Session,
+    user_id: UUID,
+    *,
+    trigger_type: AuditLogTriggerType = "system",
+) -> bool:
     due_transfers = (
         db.query(AccountTransfer)
         .filter(
@@ -942,6 +1040,11 @@ def _settle_due_account_transfers(
             continue
         source_account.last_update = now
         transfer.applied_at = now
+        if destination_account.type == "credit_card":
+            destination_account.last_payment_date = max(
+                destination_account.last_payment_date or date.min,
+                transfer.effective_at.date(),
+            )
         _record_account_value_history(db, source_account)
         if not bool(transfer.instant_deposit):
             destination_account.last_update = now
@@ -1107,6 +1210,7 @@ def _forecast_net_worth_points(
             account = accounts_by_id.get(account_id)
             if account is not None:
                 _apply_balance_delta(account, int(delta_cents))
+        project_card_day(projected_accounts, day)
         points.append(
             NetWorthForecastPointSchema(
                 snapshot_date=day,
@@ -1168,6 +1272,9 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         billing_day=account.billing_day,
         payment_day=account.payment_day,
         last_payment_date=account.last_payment_date,
+        minimum_payment_cents=account.minimum_payment_cents,
+        default_payment_account_id=account.default_payment_account_id,
+        credit_card_processed_through=account.credit_card_processed_through,
         expiration_date=account.expiration_date,
         closed=bool(account.closed),
         max_credit_cents=account.max_credit_cents,
@@ -1331,6 +1438,62 @@ def _propagate_stock_prices_for_user(
         )
 
 
+@router.get("/credit-card-events", response_model=list[CreditCardEvent])
+def get_credit_card_events(
+    from_date: date,
+    through_date: date,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[CreditCardEvent]:
+    if from_date > through_date or through_date > date.today() + timedelta(days=3660):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid calendar range (maximum forecast is ten years)",
+        )
+    if _settle_due_account_transfers(db, current_user.id):
+        db.commit()
+    # Audit events preserve today's and historical payments after balances are posted.
+    history = (
+        db.query(AuditLogEvent)
+        .filter(
+            AuditLogEvent.user_id == current_user.id,
+            AuditLogEvent.event_type.in_(
+                ["credit_card_automatic_payment", "credit_card_automatic_interest"]
+            ),
+            AuditLogEvent.details_json["effective_date"].astext
+            >= from_date.isoformat(),
+            AuditLogEvent.details_json["effective_date"].astext
+            <= min(through_date, date.today()).isoformat(),
+        )
+        .all()
+    )
+    events = [CreditCardEvent.model_validate(item.details_json) for item in history]
+    if through_date <= date.today():
+        return sorted(
+            events,
+            key=lambda item: (item.effective_date, item.kind, str(item.account_id)),
+        )
+    projected = [
+        _serialize_account(db, item)
+        for item in db.query(Account).filter(Account.user_id == current_user.id).all()
+    ]
+    projected = _apply_active_account_transfers(db, current_user.id, projected)
+    deltas = _future_account_deltas_by_day(db, current_user.id, through_date)
+    by_id = {item.id: item for item in projected}
+    day = date.today() + timedelta(days=1)
+    while day <= through_date:
+        for account_id, delta in deltas.get(day, {}).items():
+            if account_id in by_id:
+                _apply_balance_delta(by_id[account_id], delta)
+        card_events = project_card_day(projected, day)
+        if day >= from_date:
+            events.extend(card_events)
+        day += timedelta(days=1)
+    return sorted(
+        events, key=lambda item: (item.effective_date, item.kind, str(item.account_id))
+    )
+
+
 @router.get("/accounts", response_model=list[AccountSchema])
 def get_accounts(
     as_of_date: date | None = Query(default=None),
@@ -1395,10 +1558,16 @@ def get_account(
         raise HTTPException(status_code=404, detail="Account not found")
     serialized = _serialize_account(db, account)
     if as_of_date is not None and as_of_date > date.today():
+        all_accounts = [
+            _serialize_account(db, item)
+            for item in db.query(Account)
+            .filter(Account.user_id == current_user.id)
+            .all()
+        ]
         projected = _project_serialized_accounts_to_date(
-            db, current_user.id, [serialized], as_of_date
+            db, current_user.id, all_accounts, as_of_date
         )
-        return projected[0]
+        return next(item for item in projected if item.id == account_id)
     if as_of_date is not None:
         contract_simulation = run_contract_simulation(
             db, current_user.id, as_of_date, apply=False
@@ -1510,6 +1679,7 @@ def create_account(
     _validate_recurring_period(payload.fee_period)
     _validate_last_payment_date(payload.last_payment_date)
     _validate_type_requirements(payload)
+    _validate_card_automation(db, current_user.id, payload)
 
     max_rank = (
         db.query(func.max(Account.rank))
@@ -1542,6 +1712,9 @@ def create_account(
         billing_day=payload.billing_day,
         payment_day=payload.payment_day,
         last_payment_date=payload.last_payment_date,
+        minimum_payment_cents=payload.minimum_payment_cents,
+        default_payment_account_id=payload.default_payment_account_id,
+        credit_card_processed_through=date.today() - timedelta(days=1),
         expiration_date=payload.expiration_date,
         closed=bool(payload.closed),
         max_credit_cents=payload.max_credit_cents,
@@ -1687,6 +1860,12 @@ def update_account(
         billing_day=data.get("billing_day", account.billing_day),
         payment_day=data.get("payment_day", account.payment_day),
         last_payment_date=data.get("last_payment_date", account.last_payment_date),
+        minimum_payment_cents=data.get(
+            "minimum_payment_cents", account.minimum_payment_cents
+        ),
+        default_payment_account_id=data.get(
+            "default_payment_account_id", account.default_payment_account_id
+        ),
         expiration_date=data.get("expiration_date", account.expiration_date),
         closed=data.get("closed", account.closed),
         max_credit_cents=data.get("max_credit_cents", account.max_credit_cents),
@@ -1768,6 +1947,25 @@ def update_account(
                     status_code=400, detail="Stock position contains unknown stock"
                 )
 
+    _validate_card_automation(db, current_user.id, merged_payload, account.id)
+    # Apply new settings prospectively rather than replaying old missed cycles.
+    if any(
+        field in data and data[field] != getattr(account, field)
+        for field in (
+            "type",
+            "minimum_payment_cents",
+            "default_payment_account_id",
+            "payment_day",
+            "billing_day",
+            "apr_bps",
+            "closed",
+        )
+    ):
+        account.credit_card_processed_through = max(
+            account.credit_card_processed_through or date.min,
+            date.today() - timedelta(days=1),
+        )
+
     for field in [
         "account_number",
         "name",
@@ -1785,6 +1983,8 @@ def update_account(
         "billing_day",
         "payment_day",
         "last_payment_date",
+        "minimum_payment_cents",
+        "default_payment_account_id",
         "expiration_date",
         "closed",
         "max_credit_cents",

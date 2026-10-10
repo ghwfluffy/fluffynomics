@@ -42,6 +42,9 @@ def _run_once() -> None:
                 lock=True,
                 trigger_type="cron",
             )
+            from mp.api.accounts import _settle_due_account_transfers
+
+            _settle_due_account_transfers(db, user_id, trigger_type="cron")
         db.commit()
     finally:
         db.close()

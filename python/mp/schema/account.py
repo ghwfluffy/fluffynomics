@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy import (
     Boolean,
     LargeBinary,
@@ -52,6 +52,15 @@ class Account(Base):
     billing_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     payment_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     last_payment_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    minimum_payment_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    default_payment_account_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    credit_card_processed_through: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, server_default=text("CURRENT_DATE - 1")
+    )
     expiration_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     closed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
@@ -355,6 +364,8 @@ class AccountBaseSchema(BaseModel):
     billing_day: Optional[int] = None
     payment_day: Optional[int] = None
     last_payment_date: Optional[date] = None
+    minimum_payment_cents: Optional[int] = Field(default=None, ge=0)
+    default_payment_account_id: Optional[UUID] = None
     expiration_date: Optional[date] = None
     closed: bool = False
     max_credit_cents: Optional[int] = None
@@ -392,6 +403,8 @@ class AccountUpdateSchema(BaseModel):
     billing_day: Optional[int] = None
     payment_day: Optional[int] = None
     last_payment_date: Optional[date] = None
+    minimum_payment_cents: Optional[int] = Field(default=None, ge=0)
+    default_payment_account_id: Optional[UUID] = None
     expiration_date: Optional[date] = None
     closed: Optional[bool] = None
     max_credit_cents: Optional[int] = None
@@ -511,6 +524,7 @@ class NetWorthForecastPointSchema(BaseModel):
 
 
 class AccountSchema(AccountBaseSchema):
+    credit_card_processed_through: Optional[date] = None
     id: UUID
     user_id: UUID
     rank: float

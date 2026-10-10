@@ -42,7 +42,7 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 PACKAGE_FORMAT = "money-planner-export"
 PACKAGE_VERSION = 1
-PAYLOAD_SCHEMA_VERSION = 13
+PAYLOAD_SCHEMA_VERSION = 14
 
 # Intentional security-over-speed defaults for export package encryption.
 KDF_ALGORITHM = "pbkdf2_sha256"
@@ -1802,6 +1802,13 @@ def _build_export_payload(db: Session, user_id: UUID) -> dict[str, Any]:
                 "billing_day": account.billing_day,
                 "payment_day": account.payment_day,
                 "last_payment_date": _serialize_date(account.last_payment_date),
+                "minimum_payment_cents": account.minimum_payment_cents,
+                "default_payment_account_id": str(account.default_payment_account_id)
+                if account.default_payment_account_id
+                else None,
+                "credit_card_processed_through": _serialize_date(
+                    account.credit_card_processed_through
+                ),
                 "expiration_date": _serialize_date(account.expiration_date),
                 "closed": bool(account.closed),
                 "max_credit_cents": account.max_credit_cents,
@@ -2152,6 +2159,23 @@ def _upgrade_payload_v12_to_v13(payload: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_payload_v13_to_v14(payload: dict[str, Any]) -> dict[str, Any]:
+    upgraded = dict(payload)
+    upgraded["schema_version"] = 14
+    upgraded["accounts"] = [
+        {
+            **_required_dict(raw, "accounts[]"),
+            "minimum_payment_cents": None,
+            "default_payment_account_id": None,
+            "credit_card_processed_through": (
+                date.today() - timedelta(days=1)
+            ).isoformat(),
+        }
+        for raw in _required_list(payload.get("accounts", []), "accounts")
+    ]
+    return upgraded
+
+
 PAYLOAD_MIGRATIONS: dict[int, Any] = {
     0: _upgrade_payload_v0_to_v1,
     1: _upgrade_payload_v1_to_v2,
@@ -2166,6 +2190,7 @@ PAYLOAD_MIGRATIONS: dict[int, Any] = {
     10: _upgrade_payload_v10_to_v11,
     11: _upgrade_payload_v11_to_v12,
     12: _upgrade_payload_v12_to_v13,
+    13: _upgrade_payload_v13_to_v14,
 }
 
 
@@ -2582,6 +2607,16 @@ def _replace_user_data(
             retirement_account_type=_normalize_retirement_account_type(
                 item.get("retirement_account_type")
             ),
+            minimum_payment_cents=_parse_int(
+                item.get("minimum_payment_cents"), "accounts[].minimum_payment_cents"
+            )
+            if item.get("minimum_payment_cents") is not None
+            else None,
+            credit_card_processed_through=_parse_optional_date(
+                item.get("credit_card_processed_through"),
+                "accounts[].credit_card_processed_through",
+            )
+            or date.today() - timedelta(days=1),
             payment_amount_cents=_parse_int(
                 item.get("payment_amount_cents"), "accounts[].payment_amount_cents"
             )
@@ -2627,6 +2662,31 @@ def _replace_user_data(
         item = _required_dict(raw, "accounts[]")
         old_account_id = _parse_uuid(item.get("id"), "accounts[].id")
         new_account_id = account_id_map[old_account_id]
+        imported_account = db.get(Account, new_account_id)
+        assert imported_account is not None
+        old_source = _parse_optional_uuid(
+            item.get("default_payment_account_id"),
+            "accounts[].default_payment_account_id",
+        )
+        if old_source is not None:
+            source_id = account_id_map.get(old_source)
+            source = db.get(Account, source_id) if source_id else None
+            if (
+                source is None
+                or source.id == new_account_id
+                or source.type not in {"checking", "savings"}
+            ):
+                raise HTTPException(
+                    status_code=400, detail="Invalid default payment account in import"
+                )
+            imported_account.default_payment_account_id = source.id
+        if (
+            imported_account.minimum_payment_cents is not None
+            and imported_account.minimum_payment_cents < 0
+        ):
+            raise HTTPException(
+                status_code=400, detail="Minimum payment cannot be negative"
+            )
         for raw_pos in _required_list(
             item.get("stock_positions", []), "accounts[].stock_positions"
         ):
@@ -3082,6 +3142,18 @@ def _replace_user_data(
             raise HTTPException(
                 status_code=400, detail="audit_log_events[].details must be an object"
             )
+        if str(item.get("event_type") or "").startswith("credit_card_automatic_"):
+            details = dict(details)
+            for field in ("account_id", "source_account_id"):
+                audit_account_id = _parse_optional_uuid(
+                    details.get(field), f"audit_log_events[].details.{field}"
+                )
+                mapped_id = (
+                    account_id_map.get(audit_account_id) if audit_account_id else None
+                )
+                details[field] = (
+                    str(mapped_id or audit_account_id) if audit_account_id else None
+                )
         db.add(
             AuditLogEvent(
                 id=uuid4(),

@@ -287,3 +287,23 @@ When changing schema:
 - update affected API handlers,
 - update data portability serializer/import migrator in `python/mp/api/data_portability.py` so export packages remain complete and older package versions can be upgraded,
 - update docs in `docs/architecture/*.md`.
+
+## Credit-card automation persistence
+
+Migration `0045_credit_card_automation.sql` adds nullable nonnegative
+`accounts.minimum_payment_cents`, nullable self-reference
+`default_payment_account_id` (`ON DELETE SET NULL`), and
+`credit_card_processed_through`. The processing date begins at deployment minus
+one day and advances atomically with payment/interest writes, protecting against
+duplicate posting and historical replay. APR/billing day controls monthly
+interest independently of the optional minimum payment configuration.
+
+Automatic payments persist as already-applied `account_transfers` with kind
+`credit_card_payment`. `credit_card_automatic_payment` and
+`credit_card_automatic_interest` audit events retain effective dates, amounts,
+card identity, funding identity, and net-worth delta for calendar history.
+Export schema 14 includes the settings and processing date; import remaps the
+self-reference after all accounts exist and remaps card audit identities.
+Older exports upgrade with minimum payments disabled and a fresh processing
+start, avoiding retroactive postings. The sample card demonstrates a minimum,
+default checking account, and prior payment date.
