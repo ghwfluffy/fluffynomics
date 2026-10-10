@@ -194,6 +194,49 @@ class CreditCardPersistenceTests(unittest.TestCase):
             self.card.balance_cents, 7200
         )  # only today's posting was persisted
 
+    def test_metadata_edits_keep_pending_preview_out_of_stored_balances(self) -> None:
+        self.card.apr_bps = 0
+        self.card.minimum_payment_cents = None
+        self.card.credit_card_processed_through = date.today()
+        transfer = AccountTransfer(
+            user_id=self.user.id,
+            source_account_id=self.source.id,
+            destination_account_id=self.card.id,
+            amount_cents=3000,
+            current_balance_cents=10000,
+            pending_balance_cents=0,
+            transfer_kind="credit_card_payment",
+            instant_deposit=False,
+            queued_at=datetime.utcnow(),
+            effective_at=datetime.utcnow() + timedelta(days=1),
+        )
+        self.db.add(transfer)
+        self.db.commit()
+        for minimum in (2500, 3500, 4500):
+            displayed = get_account(self.card.id, None, self.db, self.user)
+            self.assertEqual(displayed.balance_cents, 7000)
+            self.assertEqual(displayed.stored_balance_cents, 10000)
+            # The editor submits settings without an untouched balance.
+            update_account(
+                self.card.id,
+                AccountUpdateSchema(minimum_payment_cents=minimum),
+                self.db,
+                self.user,
+            )
+            self.db.refresh(self.card)
+            self.db.refresh(self.source)
+            self.assertEqual(self.card.balance_cents, 10000)
+            self.assertEqual(self.source.balance_cents, 100000)
+        transfer.effective_at = datetime.utcnow() - timedelta(seconds=1)
+        self.db.commit()
+        _settle_due_account_transfers(self.db, self.user.id)
+        self.db.commit()
+        settled = get_account(self.card.id, None, self.db, self.user)
+        self.assertEqual(settled.balance_cents, 7000)
+        self.assertEqual(settled.stored_balance_cents, 7000)
+        self.db.refresh(self.source)
+        self.assertEqual(self.source.balance_cents, 97000)
+
     def test_setting_changes_do_not_repost_today(self) -> None:
         apply_credit_card_automation(self.db, self.user.id, date.today())
         self.db.commit()

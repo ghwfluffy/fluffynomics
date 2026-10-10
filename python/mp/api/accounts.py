@@ -1275,6 +1275,8 @@ def _serialize_account(db: Session, account: Account) -> AccountSchema:
         minimum_payment_cents=account.minimum_payment_cents,
         default_payment_account_id=account.default_payment_account_id,
         credit_card_processed_through=account.credit_card_processed_through,
+        stored_balance_cents=account.balance_cents,
+        stored_usd_balance_cents=account.usd_balance_cents,
         expiration_date=account.expiration_date,
         closed=bool(account.closed),
         max_credit_cents=account.max_credit_cents,

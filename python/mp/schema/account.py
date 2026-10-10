@@ -524,6 +524,8 @@ class NetWorthForecastPointSchema(BaseModel):
 
 
 class AccountSchema(AccountBaseSchema):
+    stored_balance_cents: Optional[int] = None
+    stored_usd_balance_cents: Optional[int] = None
     credit_card_processed_through: Optional[date] = None
     id: UUID
     user_id: UUID

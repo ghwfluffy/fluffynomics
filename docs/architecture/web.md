@@ -445,3 +445,9 @@ Payment chips show the money moved, while their daily/running net-worth delta
 is zero; interest chips reduce net worth. Clicking an event uses the card's
 existing edit/update controls. Month requests use a sequence guard so a slow
 previous request cannot overwrite the currently displayed month.
+
+The full account editor and value-update modal use explicit stored balance
+fields rather than tile/forecast amounts. `accountEditing.ts` prepares stored
+editor amounts and removes unchanged balances from metadata edit payloads.
+Repeated credit-card settings edits while a payment is queued must leave stored
+card/funding balances unchanged and apply the display deduction only once.

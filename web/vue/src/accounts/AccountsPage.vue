@@ -1258,6 +1258,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { apiUrl } from '@/lib/paths'
 import { currentUser } from '@/lib/auth'
+import { accountEditPayload, storedAccountBalances, type AccountBalances } from '@/accounts/accountEditing'
 import {
   formatMaskedCurrencyCents,
   formatMaskedIntegerCurrencyCents,
@@ -1303,6 +1304,8 @@ type AccountType =
   | 'rewards_card'
 
 interface AccountPayload {
+  stored_balance_cents?: number | null
+  stored_usd_balance_cents?: number | null
   id: string
   rank: number
   icon_id?: string
@@ -1664,6 +1667,7 @@ const iconChoices = ref<IconListItem[]>([])
 const createDialog = ref(false)
 const createForm = ref<CreateAccountPayload>(makeCreateForm())
 const editingAccountId = ref<string | null>(null)
+const editingOriginalBalances = ref<AccountBalances>({})
 const deleteDialog = ref(false)
 const pendingDeleteAccountId = ref<string | null>(null)
 const updateDialog = ref(false)
@@ -3099,10 +3103,14 @@ const pendingTransferDisplayDeltaCents = (account: AccountPayload) =>
   }, 0)
 
 const updateModalBalanceCents = (account: AccountPayload) =>
-  intOrZero(account.balance_cents) - pendingTransferDisplayDeltaCents(account)
+  account.stored_balance_cents !== undefined
+    ? intOrZero(account.stored_balance_cents)
+    : intOrZero(account.balance_cents) - pendingTransferDisplayDeltaCents(account)
 
 const updateModalUsdBalanceCents = (account: AccountPayload) =>
-  intOrZero(account.usd_balance_cents) - pendingTransferDisplayDeltaCents(account)
+  account.stored_usd_balance_cents !== undefined
+    ? intOrZero(account.stored_usd_balance_cents)
+    : intOrZero(account.usd_balance_cents) - pendingTransferDisplayDeltaCents(account)
 
 const visibleBalanceCents = (account: AccountPayload) => {
   if (account.type === 'stocks_account') {
@@ -4976,7 +4984,7 @@ const submitCreateAccount = async () => {
     cash_bills: createForm.value.type === 'cash' ? createForm.value.cash_bills : [],
   }
   if (editingAccountId.value) {
-    await request.put(`/accounts/${editingAccountId.value}`, payload)
+    await request.put(`/accounts/${editingAccountId.value}`, accountEditPayload(payload, editingOriginalBalances.value))
   } else {
     await request.post('/accounts', payload)
   }
@@ -5132,9 +5140,11 @@ const startEditAccount = (account: AccountPayload) => {
   createForm.value = {
     ...makeCreateForm(),
     ...account,
+    ...storedAccountBalances(account),
     stock_positions: account.stock_positions || [],
     crypto_positions: account.crypto_positions || [],
   }
+  editingOriginalBalances.value = storedAccountBalances(account)
   createForm.value.icon_type = account.icon_type || 'Icon'
   editingAccountId.value = account.id
   createDialog.value = true

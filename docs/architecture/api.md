@@ -557,3 +557,13 @@ Set `CREDIT_CARD_TEST_DATABASE_URL` to a disposable PostgreSQL database to also
 run persistence, concurrency, migration, and export/import tests; these tests
 create their own users and a temporary migration schema and must not target
 production. Python lint and the web build remain required.
+
+### Stored balances versus queued-payment previews
+
+Account responses expose read-only `stored_balance_cents` and
+`stored_usd_balance_cents` alongside display/projected amounts. Pending transfers
+change display balances immediately but must change stored balances only when
+settled (except the explicit instant-deposit destination behavior). Editors must
+load stored amounts and omit untouched balance fields from metadata PUTs.
+Saving a minimum payment, account name, or other setting must not persist the
+queued-payment preview or undo a settlement that occurred while editing.

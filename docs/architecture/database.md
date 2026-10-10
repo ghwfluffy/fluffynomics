@@ -307,3 +307,8 @@ self-reference after all accounts exist and remaps card audit identities.
 Older exports upgrade with minimum payments disabled and a fresh processing
 start, avoiding retroactive postings. The sample card demonstrates a minimum,
 default checking account, and prior payment date.
+
+Pending-payment display values are derived and must never be written back by
+metadata edits. Read-only stored balance response fields reflect persisted
+columns; they add no schema columns. Account editors omit unchanged balances
+so queued-payment settlement remains the sole debit for that queued movement.
