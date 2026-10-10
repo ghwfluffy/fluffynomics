@@ -451,3 +451,13 @@ fields rather than tile/forecast amounts. `accountEditing.ts` prepares stored
 editor amounts and removes unchanged balances from metadata edit payloads.
 Repeated credit-card settings edits while a payment is queued must leave stored
 card/funding balances unchanged and apply the display deduction only once.
+
+Dashboard refreshes invalidate older account and widget requests immediately
+when the forecast date changes. Only the newest refresh may publish values or
+clear its loading indicator. The projection widget hides outdated bars while
+loading and shows a refresh error if loading fails. `forecastRefresh.ts` fetches
+one daily forecast through the longest required horizon and slices that same
+path for the anchor trend and next-30-day widgets. Avoid separate overlapping
+forecast calls for each widget. The projection explains that configured
+payments, recurring spending, and compound credit-card interest are included;
+surplus income is not automatically assigned to extra card payments.

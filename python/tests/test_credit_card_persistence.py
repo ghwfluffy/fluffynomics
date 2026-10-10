@@ -12,10 +12,11 @@ from typing import ClassVar
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
-from sqlalchemy import create_engine, text, Engine  # noqa: E402
+from sqlalchemy import create_engine, event, text, Engine  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 from mp.accounts.credit_cards import apply_credit_card_automation  # noqa: E402
 from mp.api.accounts import (  # noqa: E402
+    _forecast_net_worth_points,
     get_credit_card_events,
     get_accounts,
     get_account,
@@ -30,6 +31,9 @@ from mp.schema.account import (  # noqa: E402
     AccountUpdateSchema,
     NetWorthDailySnapshot,
 )  # noqa: E402
+from mp.contracts.engine import run_contract_simulation  # noqa: E402
+from mp.models.recurring_period import parse_recurring_period  # noqa: E402
+from mp.schema.contract import Contract, ContractPosting  # noqa: E402
 from mp.schema.audit_log import AuditLogEvent  # noqa: E402
 from mp.schema.base import Base  # noqa: E402
 from mp.schema.user import User  # noqa: E402
@@ -281,6 +285,94 @@ class CreditCardPersistenceTests(unittest.TestCase):
                 row.credit_card_processed_through, date.today() - timedelta(days=1)
             )
             conn.execute(text("DROP SCHEMA card_migration_test CASCADE"))
+
+    def test_long_forecast_uses_bounded_queries_and_preserves_posted_occurrences(
+        self,
+    ) -> None:
+        today = date.today()
+        contract = Contract(
+            id=uuid4(),
+            user_id=self.user.id,
+            name="Monthly income",
+            type="income",
+            automatic=True,
+            amount_cents=30000000,
+            linked_account_id=self.source.id,
+            payment_period='{"kind":"monthly_day","day":%d}' % today.day,
+            last_payment_date=today,
+        )
+        self.db.add(contract)
+        period = parse_recurring_period(contract.payment_period or "")
+        first_due = period.next_on_or_after(today + timedelta(days=1))
+        self.db.add(
+            ContractPosting(
+                id=uuid4(),
+                user_id=self.user.id,
+                contract_id=contract.id,
+                effective_date=first_due,
+                delta_cents=30000000,
+            )
+        )
+        self.db.commit()
+        user_id = self.user.id
+        query_count = 0
+
+        def count_query(*args: object) -> None:
+            nonlocal query_count
+            query_count += 1
+
+        event.listen(self.engine, "before_cursor_execute", count_query)
+        try:
+            _forecast_net_worth_points(
+                self.db, user_id, today.replace(year=today.year + 1)
+            )
+            short_count = query_count
+            query_count = 0
+            points = _forecast_net_worth_points(
+                self.db, user_id, today.replace(year=today.year + 10)
+            )
+            long_count = query_count
+        finally:
+            event.remove(self.engine, "before_cursor_execute", count_query)
+        self.assertLessEqual(long_count, short_count)
+        self.assertLess(long_count, 30)
+        self.assertGreater(points[-1].value_cents, 2**31)
+        self.assertEqual(points[0].value_cents, 90000)
+        first_value = next(
+            p.value_cents for p in points if p.snapshot_date == first_due
+        )
+        self.assertLess(first_value, 100000)  # Already-posted income is not replayed.
+        self.assertEqual(self.source.balance_cents, 100000)
+        self.assertEqual(self.card.balance_cents, 10000)
+        self.assertEqual(
+            self.db.query(ContractPosting).filter_by(user_id=user_id).count(), 1
+        )
+
+    def test_bulk_posting_lookup_keeps_apply_idempotent(self) -> None:
+        today = date.today()
+        contract = Contract(
+            id=uuid4(),
+            user_id=self.user.id,
+            name="Income",
+            type="income",
+            automatic=True,
+            amount_cents=10000,
+            linked_account_id=self.source.id,
+            payment_period='{"kind":"monthly_day","day":%d}' % today.day,
+            last_payment_date=today,
+        )
+        self.db.add(contract)
+        self.db.commit()
+        due = parse_recurring_period(contract.payment_period or "").next_on_or_after(
+            today + timedelta(days=1)
+        )
+        first = run_contract_simulation(self.db, self.user.id, due, apply=True)
+        self.db.commit()
+        second = run_contract_simulation(self.db, self.user.id, due, apply=True)
+        self.db.commit()
+        self.assertEqual(len(first.postings), 1)
+        self.assertEqual(len(second.postings), 0)
+        self.assertEqual(self.source.balance_cents, 110000)
 
 
 if __name__ == "__main__":

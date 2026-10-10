@@ -198,7 +198,10 @@
         </article>
         <article class="widget-slot widget-card">
           <h3>Net-Worth Projection</h3>
-          <VChart class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
+          <p v-if="widgetLoading" class="widget-subtext">Updating projection…</p>
+          <p v-else-if="widgetError" class="widget-subtext" role="alert">{{ widgetError }}</p>
+          <VChart v-else class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
+          <p class="widget-subtext">Includes configured payments, recurring spending, and compound credit-card interest.</p>
         </article>
       </div>
       <div class="widget-derived-grid">
@@ -1256,6 +1259,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errorMessage, request, snackbar } from '@/lib/api'
+import { createRefreshGate, loadForecastRanges } from './forecastRefresh'
 import { apiUrl } from '@/lib/paths'
 import { currentUser } from '@/lib/auth'
 import { accountEditPayload, storedAccountBalances, type AccountBalances } from '@/accounts/accountEditing'
@@ -1623,6 +1627,8 @@ const routeDashboardViewMode = (value: unknown): DashboardViewMode | null => {
 const expandedAccountIconIds = ref<Set<string>>(new Set())
 const closedAccountsSectionOpen = ref(false)
 const widgetLoading = ref(false)
+const widgetError = ref('')
+const accountRefreshGate = createRefreshGate()
 const next30BreakdownBusy = ref(false)
 const showNext30Breakdown = ref(false)
 const showCurrentNetWorthPopup = ref(false)
@@ -1655,7 +1661,7 @@ const projectedAccelerationWindowWeeks = ref(0)
 const proratedNowMs = ref(Date.now())
 const suppressProratedNetWorthFlash = ref(false)
 const proratedNetWorthFlashClass = ref<'widget-trend-summary-value--flash-up' | 'widget-trend-summary-value--flash-down' | ''>('')
-let widgetRequestToken = 0
+const widgetRefreshGate = createRefreshGate()
 const accountsTableFilter = ref('')
 const accountsSortKey = ref<'section' | 'name' | 'organization' | 'last4' | 'type' | 'balance' | 'last_update'>('section')
 const accountsSortDir = ref<'asc' | 'desc'>('asc')
@@ -3486,7 +3492,8 @@ const pickThresholdEvents = (items: NetChangeBreakdownItem[], direction: 'positi
     .slice(0, count)
 
 const loadWidgets = async () => {
-  const runToken = ++widgetRequestToken
+  const runToken = widgetRefreshGate.begin()
+  widgetError.value = ''
   widgetLoading.value = true
   next30BreakdownBusy.value = true
   try {
@@ -3539,8 +3546,7 @@ const loadWidgets = async () => {
       expenses,
       investments,
       next60Preview,
-      next30ForecastSeries,
-      projectionForecastSeries,
+      forecastRanges,
       accountHistoryRows,
     ] = await Promise.all([
       request.get<NetWorthHistoryPoint[]>('/accounts/net-worth/history'),
@@ -3550,23 +3556,16 @@ const loadWidgets = async () => {
       request.post<ContractRunPreviewPayload>('/contracts/run', undefined, {
         params: { dry_run: true, through_date: localIsoDate(next60Target) },
       }),
-      request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
-        params: { through_date: localIsoDate(next30Target) },
-      }),
-      projectionTarget.getTime() > Date.now()
-        ? request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
-            params: { through_date: localIsoDate(projectionTarget) },
-          })
-        : Promise.resolve([] as NetWorthForecastPoint[]),
+      loadForecastRanges(
+        (throughDate) => request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
+          params: { through_date: throughDate },
+        }),
+        anchorIso, localIsoDate(next30Target), localIsoDate(projectionTarget), localIsoDate(new Date()),
+      ),
       accountHistoryRequest,
     ])
-    const forecastSeries =
-      anchor.getTime() > Date.now()
-        ? await request.get<NetWorthForecastPoint[]>('/accounts/net-worth/forecast', {
-            params: { through_date: localIsoDate(anchor) },
-          })
-        : []
-    if (runToken !== widgetRequestToken) {
+    const { projection: projectionForecastSeries, next30: next30ForecastSeries, trend: forecastSeries } = forecastRanges
+    if (!widgetRefreshGate.isCurrent(runToken)) {
       return
     }
     const historyPoints = [...netWorthHistory]
@@ -3740,8 +3739,12 @@ const loadWidgets = async () => {
       return
     }
     trendSnapshots.value = historical
+  } catch {
+    if (widgetRefreshGate.isCurrent(runToken)) {
+      widgetError.value = 'Could not refresh the projection. Try selecting the forecast date again.'
+    }
   } finally {
-    if (runToken === widgetRequestToken) {
+    if (widgetRefreshGate.isCurrent(runToken)) {
       widgetLoading.value = false
       next30BreakdownBusy.value = false
     }
@@ -4824,9 +4827,24 @@ const lastUpdateTone = (account: AccountPayload) => {
 }
 
 const loadAccounts = async () => {
+  const runToken = accountRefreshGate.begin()
+  // Invalidate an older widget run immediately, before this account request finishes.
+  widgetRefreshGate.begin()
+  widgetLoading.value = true
+  widgetError.value = ''
   const params = forecastDate.value ? { as_of_date: forecastDate.value } : undefined
-  accounts.value = await request.get<AccountPayload[]>('/accounts', { params })
-  await Promise.all([loadWidgets(), loadTransfers(), loadLogs(), loadCalendarCardEvents()])
+  try {
+    const loadedAccounts = await request.get<AccountPayload[]>('/accounts', { params })
+    if (!accountRefreshGate.isCurrent(runToken)) return
+    accounts.value = loadedAccounts
+    await Promise.all([loadWidgets(), loadTransfers(), loadLogs(), loadCalendarCardEvents()])
+  } catch {
+    if (accountRefreshGate.isCurrent(runToken)) {
+      widgetError.value = 'Could not refresh the projection. Try selecting the forecast date again.'
+    }
+  } finally {
+    if (accountRefreshGate.isCurrent(runToken)) widgetLoading.value = false
+  }
 }
 
 const loadTransfers = async () => {

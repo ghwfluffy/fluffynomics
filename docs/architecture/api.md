@@ -567,3 +567,10 @@ settled (except the explicit instant-deposit destination behavior). Editors must
 load stored amounts and omit untouched balance fields from metadata PUTs.
 Saving a minimum payment, account name, or other setting must not persist the
 queued-payment preview or undo a settlement that occurred while editing.
+
+Long net-worth forecasts load existing contract postings in one bulk query per
+simulation, rather than querying once for every future occurrence. Keep the
+posted `(contract_id, effective_date)` exclusion intact in both dry-run and
+apply modes; daily forecast horizons must not increase the SQL query count.
+Forecasts include compound card interest and only the configured payments.
+Positive income in a funding account does not imply extra debt repayments.

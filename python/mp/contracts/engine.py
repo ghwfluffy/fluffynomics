@@ -168,6 +168,23 @@ def run_contract_simulation(
     projected_next_payment: dict[UUID, date | None] = {}
     now = datetime.utcnow()
 
+    # Load posted occurrences once; per-occurrence queries make multi-year
+    # read-only projections scale with thousands of database round trips.
+    existing_postings = (
+        set(
+            db.query(ContractPosting.contract_id, ContractPosting.effective_date)
+            .filter(
+                ContractPosting.contract_id.in_(
+                    [contract.id for contract in contracts]
+                ),
+                ContractPosting.effective_date <= as_of_date,
+            )
+            .all()
+        )
+        if contracts
+        else set()
+    )
+
     for contract in contracts:
         override_due = _valid_next_payment_override(contract)
         if override_due is not None:
@@ -271,12 +288,7 @@ def run_contract_simulation(
                     )
                     continue
 
-            existing = (
-                db.query(ContractPosting)
-                .filter_by(contract_id=contract.id, effective_date=due_date)
-                .first()
-            )
-            if existing is not None:
+            if (contract.id, due_date) in existing_postings:
                 projected_last_payment[contract.id] = max(
                     projected_last_payment.get(contract.id, due_date), due_date
                 )
