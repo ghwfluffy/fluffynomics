@@ -201,7 +201,7 @@
           <p v-if="widgetLoading" class="widget-subtext">Updating projection…</p>
           <p v-else-if="widgetError" class="widget-subtext" role="alert">{{ widgetError }}</p>
           <VChart v-else class="widget-projection-echart" :option="netWorthProjectionChartOption" autoresize />
-          <p class="widget-subtext">Includes configured payments, recurring spending, and compound credit-card interest.</p>
+          <p class="widget-subtext">Includes recurring spending and interest. Checking above $10,000 pays debt in $5,000 batches, highest APR first.</p>
         </article>
       </div>
       <div class="widget-derived-grid">

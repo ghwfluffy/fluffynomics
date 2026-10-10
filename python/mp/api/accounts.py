@@ -13,6 +13,7 @@ from mp.accounts.credit_cards import (
     apply_credit_card_automation,
     project_card_day,
 )
+from mp.accounts.projection_payments import apply_projected_surplus_payments
 from mp.schema.audit_log import AuditLogEvent
 from mp.db import get_db
 from mp.db.account_history import (
@@ -657,6 +658,7 @@ def _project_serialized_accounts_to_date(
             if account is not None:
                 _apply_balance_delta(account, int(delta_cents))
         project_card_day(projected, day)
+        apply_projected_surplus_payments(projected, day)
         day += timedelta(days=1)
     return projected
 
@@ -1211,6 +1213,7 @@ def _forecast_net_worth_points(
             if account is not None:
                 _apply_balance_delta(account, int(delta_cents))
         project_card_day(projected_accounts, day)
+        apply_projected_surplus_payments(projected_accounts, day)
         points.append(
             NetWorthForecastPointSchema(
                 snapshot_date=day,

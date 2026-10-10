@@ -459,5 +459,8 @@ loading and shows a refresh error if loading fails. `forecastRefresh.ts` fetches
 one daily forecast through the longest required horizon and slices that same
 path for the anchor trend and next-30-day widgets. Avoid separate overlapping
 forecast calls for each widget. The projection explains that configured
-payments, recurring spending, and compound credit-card interest are included;
-surplus income is not automatically assigned to extra card payments.
+payments, recurring spending, compound credit-card interest, and projected
+checking-surplus debt payments are included. Each future checking balance above
+$10,000 funds repeated batches up to $5,000, highest APR debt first. Forecast
+account tiles and the net-worth chart share this assumption. The subtitle names
+the threshold, batch size, and APR priority; actual balances are unchanged.

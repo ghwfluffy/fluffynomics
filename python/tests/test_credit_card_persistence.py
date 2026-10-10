@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session  # noqa: E402
 from mp.accounts.credit_cards import apply_credit_card_automation  # noqa: E402
 from mp.api.accounts import (  # noqa: E402
     _forecast_net_worth_points,
+    _project_serialized_accounts_to_date,
+    _serialize_account,
     get_credit_card_events,
     get_accounts,
     get_account,
@@ -373,6 +375,53 @@ class CreditCardPersistenceTests(unittest.TestCase):
         self.assertEqual(len(first.postings), 1)
         self.assertEqual(len(second.postings), 0)
         self.assertEqual(self.source.balance_cents, 110000)
+
+    def test_surplus_projection_matches_account_forecast_without_persisting(
+        self,
+    ) -> None:
+        today = date.today()
+        self.source.balance_cents = 900000
+        self.card.balance_cents = 700000
+        self.card.billing_day = None
+        self.card.payment_day = None
+        target = today + timedelta(days=1)
+        self.db.add(
+            Contract(
+                id=uuid4(),
+                user_id=self.user.id,
+                name="Future income",
+                type="income",
+                automatic=True,
+                amount_cents=200000,
+                linked_account_id=self.source.id,
+                payment_period='{"kind":"monthly_day","day":%d}' % target.day,
+                last_payment_date=today,
+                next_payment_date=target,
+            )
+        )
+        self.db.commit()
+        points = _forecast_net_worth_points(self.db, self.user.id, target)
+        projected = _project_serialized_accounts_to_date(
+            self.db,
+            self.user.id,
+            [_serialize_account(self.db, a) for a in [self.source, self.card]],
+            target,
+        )
+        self.assertEqual(projected[0].balance_cents, 600000)
+        self.assertEqual(projected[1].balance_cents, 200000)
+        self.assertEqual(points[-1].value_cents, 400000)
+        self.assertEqual(points[0].value_cents, 200000)
+        self.db.refresh(self.source)
+        self.db.refresh(self.card)
+        self.assertEqual(self.source.balance_cents, 900000)
+        self.assertEqual(self.card.balance_cents, 700000)
+        self.assertIsNone(self.card.last_payment_date)
+        self.assertEqual(
+            self.db.query(AccountTransfer).filter_by(user_id=self.user.id).count(), 0
+        )
+        self.assertEqual(
+            self.db.query(AuditLogEvent).filter_by(user_id=self.user.id).count(), 0
+        )
 
 
 if __name__ == "__main__":

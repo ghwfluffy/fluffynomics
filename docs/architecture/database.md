@@ -312,3 +312,7 @@ Pending-payment display values are derived and must never be written back by
 metadata edits. Read-only stored balance response fields reflect persisted
 columns; they add no schema columns. Account editors omit unchanged balances
 so queued-payment settlement remains the sole debit for that queued movement.
+
+Projection-only checking-surplus debt payments modify copied `AccountSchema`
+values, including simulated last payment dates. They must not write account
+rows, transfers, histories, audits, or snapshots and require no migration.

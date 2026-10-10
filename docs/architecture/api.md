@@ -573,4 +573,26 @@ simulation, rather than querying once for every future occurrence. Keep the
 posted `(contract_id, effective_date)` exclusion intact in both dry-run and
 apply modes; daily forecast horizons must not increase the SQL query count.
 Forecasts include compound card interest and only the configured payments.
-Positive income in a funding account does not imply extra debt repayments.
+Future checking surpluses follow the projection-only debt-payment rule below.
+
+
+### Projection-only checking surplus payments
+
+Every future simulated day, after account yields, recurring postings, and
+scheduled card interest/minimum payments, each open checking account with more
+than $10,000 pays open debt in repeated $5,000 batches. Debts include credit
+cards, lines of credit, and loans with positive stored amounts owed, ranked by
+APR descending (missing APR is zero; UUID breaks ties). Each batch is capped at
+remaining debt, then the rule rechecks checking and the next eligible debt. It
+stops at or below $10,000 or when all debts are paid. This is a trigger rather
+than a $10,000 reserve: $10,001 can become $5,001 after a payment. Checking
+accounts are processed in stable UUID order; closed accounts and savings never
+fund these payments. Paying down debt preserves immediate net worth, but
+reduces later card interest. A projected extra card payment covers that monthly
+cycle under the same last-payment-date rule as other card payments.
+
+`mp/accounts/projection_payments.py` operates only on response schemas and runs
+in both future account reads and net-worth forecasts. Today's starting value
+is unchanged. This assumption never runs in live scheduler/settlement code and
+creates no stored transfers, history, or audit events. There is no new setting
+or migration; the rule is an automatic assumption for future projections.
