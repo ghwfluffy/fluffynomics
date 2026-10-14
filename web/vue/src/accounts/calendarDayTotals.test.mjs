@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { it } from 'node:test'
-import { calendarDayTotals, calendarDayToneClass } from './calendarDayTotals.ts'
+import { calendarDayTotals, calendarDayToneClass, uniqueCalendarEvents } from './calendarDayTotals.ts'
 
 const day = '2026-10-13'
 const event = (signedAmountCents, dateIso = day) => ({ dateIso, signedAmountCents })
@@ -39,4 +39,13 @@ it('handles color boundaries, offsetting events, and empty days', () => {
   assert.equal(calendarDayToneClass(100000, true), 'calendar-day-tone--positive-high')
   assert.equal(calendarDayToneClass(calendarDayTotals([event(100000), event(-100000)]).get(day), true), 'calendar-day-tone--low')
   assert.equal(calendarDayToneClass(0, false), 'calendar-day-tone--none')
+})
+
+it('keeps interest and payment for the same card/day while removing exact duplicates', () => {
+  const interest = { ...event(-1000), key: `card-1-interest-${day}`, kind: 'payable', sourceId: 'card-1' }
+  const payment = { ...event(-100000), key: `card-1-payment-${day}`, kind: 'payable', sourceId: 'card-1', netWorthDeltaCents: 0 }
+  const rows = uniqueCalendarEvents([interest, payment, interest])
+  assert.equal(rows.length, 2)
+  assert.equal(calendarDayTotals(rows).get(day), -101000)
+  assert.equal(calendarDayToneClass(calendarDayTotals(rows).get(day), true), 'calendar-day-tone--negative-high')
 })

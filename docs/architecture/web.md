@@ -475,3 +475,7 @@ the upcoming table's net-worth running total remains a separate calculation.
 Today's marker uses an outline so it does not override the day's aggregate
 color. Less than $200 in absolute daily total is blue, $200–$999.99 uses a
 moderate positive/negative color, and $1,000 or more uses the strong color.
+
+Calendar deduplication uses each event's full key. Card interest and payments
+on the same date must stay distinct, even though both have the same `payable`
+UI kind and card ID. Never deduplicate them solely by kind/account/date.

@@ -1260,7 +1260,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { createRefreshGate, loadForecastRanges } from './forecastRefresh'
-import { calendarDayTotals, calendarDayToneClass } from './calendarDayTotals'
+import { calendarDayTotals, calendarDayToneClass, uniqueCalendarEvents } from './calendarDayTotals'
 import { apiUrl } from '@/lib/paths'
 import { currentUser } from '@/lib/auth'
 import { accountEditPayload, storedAccountBalances, type AccountBalances } from '@/accounts/accountEditing'
@@ -4504,11 +4504,7 @@ const calendarEvents = computed<CalendarEventItem[]>(() => {
       signedAmountCents: -Math.abs(expense.estimated_amount_cents || 0),
     })
   }
-  const deduped = new Map<string, CalendarEventItem>()
-  for (const item of items) {
-    deduped.set(`${item.kind}:${item.sourceId}:${item.dateIso}`, item)
-  }
-  return Array.from(deduped.values()).sort((a, b) =>
+  return uniqueCalendarEvents(items).sort((a, b) =>
     a.dateIso === b.dateIso ? a.label.localeCompare(b.label) : a.dateIso.localeCompare(b.dateIso),
   )
 })

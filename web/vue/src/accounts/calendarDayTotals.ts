@@ -19,3 +19,8 @@ export function calendarDayToneClass(totalCents: number, hasEvents: boolean) {
   const sign = totalCents > 0 ? 'positive' : 'negative'
   return `calendar-day-tone--${sign}-${magnitude < 100_000 ? 'mid' : 'high'}`
 }
+
+/** Distinct payments and interest may share an account/date but not an event key. */
+export function uniqueCalendarEvents<T extends { key: string }>(events: readonly T[]) {
+  return Array.from(new Map(events.map((event) => [event.key, event])).values())
+}
