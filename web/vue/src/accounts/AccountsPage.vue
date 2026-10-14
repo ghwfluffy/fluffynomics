@@ -311,7 +311,7 @@
           v-for="cell in calendarCells"
           :key="cell.key"
           class="calendar-day-cell"
-          :class="{ 'calendar-day-cell--outside': !cell.inMonth, 'calendar-day-cell--today': cell.isToday }"
+          :class="[calendarDayToneClass(cell.dailyNetChangeCents, cell.events.length > 0), { 'calendar-day-cell--outside': !cell.inMonth, 'calendar-day-cell--today': cell.isToday }]"
         >
           <div class="calendar-day-number">{{ cell.dayNumber }}</div>
           <div class="calendar-day-events">
@@ -343,7 +343,7 @@
             type="button"
             class="calendar-mobile-day"
             :class="[
-              calendarMobileDayToneClass(cell.dailyNetChangeCents, cell.events.length > 0),
+              calendarDayToneClass(cell.dailyNetChangeCents, cell.events.length > 0),
               {
                 'calendar-mobile-day--outside': !cell.inMonth,
                 'calendar-mobile-day--today': cell.isToday,
@@ -1224,7 +1224,7 @@
       <section class="confirm-card confirm-card--wide cds--tile calendar-day-dialog">
         <h3>{{ selectedCalendarDay.dateLabel }}</h3>
         <p>
-          Net change:
+          Day total:
           <strong :class="deltaClass(selectedCalendarDay.dailyNetChangeCents)">
             {{ signedCents(selectedCalendarDay.dailyNetChangeCents) }}
           </strong>
@@ -1260,6 +1260,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { errorMessage, request, snackbar } from '@/lib/api'
 import { createRefreshGate, loadForecastRanges } from './forecastRefresh'
+import { calendarDayTotals, calendarDayToneClass } from './calendarDayTotals'
 import { apiUrl } from '@/lib/paths'
 import { currentUser } from '@/lib/auth'
 import { accountEditPayload, storedAccountBalances, type AccountBalances } from '@/accounts/accountEditing'
@@ -4522,13 +4523,7 @@ const calendarEventsByIso = computed(() => {
   return map
 })
 
-const calendarNetChangeByIso = computed(() => {
-  const map = new Map<string, number>()
-  for (const event of calendarEvents.value) {
-    map.set(event.dateIso, (map.get(event.dateIso) || 0) + (event.netWorthDeltaCents ?? event.signedAmountCents))
-  }
-  return map
-})
+const calendarNetChangeByIso = computed(() => calendarDayTotals(calendarEvents.value))
 
 const calendarCells = computed<CalendarCell[]>(() => {
   const month = monthStart.value
@@ -4588,29 +4583,12 @@ const calendarEventToneClass = (event: CalendarEventItem) => {
   return 'calendar-event-chip--negative-3'
 }
 
-const calendarMobileDayToneClass = (amountCents: number, hasEvents: boolean) => {
-  if (!hasEvents) {
-    return 'calendar-mobile-day--none'
-  }
-  const abs = Math.abs(amountCents)
-  if (abs < 20_000) {
-    return 'calendar-mobile-day--low'
-  }
-  if (amountCents > 0) {
-    return abs < 100_000 ? 'calendar-mobile-day--positive-mid' : 'calendar-mobile-day--positive-high'
-  }
-  if (amountCents < 0) {
-    return abs < 100_000 ? 'calendar-mobile-day--negative-mid' : 'calendar-mobile-day--negative-high'
-  }
-  return 'calendar-mobile-day--low'
-}
-
 const calendarMobileDayAriaLabel = (cell: CalendarCell) => {
   if (!cell.events.length) {
     return `${cell.dateLabel}, no changes`
   }
   const eventCount = `${cell.events.length} event${cell.events.length === 1 ? '' : 's'}`
-  return `${cell.dateLabel}, ${eventCount}, net change ${signedCents(cell.dailyNetChangeCents)}`
+  return `${cell.dateLabel}, ${eventCount}, day total ${signedCents(cell.dailyNetChangeCents)}`
 }
 
 const projectedRateRows = computed(() => rateRowsFromDailyCents(projectedNetWorthDailyRateCents.value))
@@ -6825,7 +6803,41 @@ watch(
 .calendar-day-cell.calendar-day-cell--today:nth-child(odd),
 .calendar-day-cell.calendar-day-cell--today.calendar-day-cell--outside,
 .calendar-day-cell.calendar-day-cell--today.calendar-day-cell--outside:nth-child(odd) {
+  box-shadow: 0 0 0 2px #0f62fe inset;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--none {
+  background: #f8fafc;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--low {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e3a8a;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--positive-mid {
   background: #bbf7d0;
+  border-color: #4ade80;
+  color: #14532d;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--positive-high {
+  background: #4ade80;
+  border-color: #16a34a;
+  color: #052e16;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--negative-mid {
+  background: #fecaca;
+  border-color: #f87171;
+  color: #7f1d1d;
+}
+
+:is(.calendar-day-cell, .calendar-mobile-day).calendar-day-tone--negative-high {
+  background: #ef4444;
+  border-color: #b91c1c;
+  color: #ffffff;
 }
 
 .calendar-day-number {
@@ -7233,40 +7245,6 @@ watch(
 
   .calendar-mobile-day--today {
     box-shadow: 0 0 0 2px #0f62fe inset;
-  }
-
-  .calendar-mobile-day--none {
-    background: #f8fafc;
-  }
-
-  .calendar-mobile-day--low {
-    background: #dbeafe;
-    border-color: #93c5fd;
-    color: #1e3a8a;
-  }
-
-  .calendar-mobile-day--positive-mid {
-    background: #bbf7d0;
-    border-color: #4ade80;
-    color: #14532d;
-  }
-
-  .calendar-mobile-day--positive-high {
-    background: #4ade80;
-    border-color: #16a34a;
-    color: #052e16;
-  }
-
-  .calendar-mobile-day--negative-mid {
-    background: #fecaca;
-    border-color: #f87171;
-    color: #7f1d1d;
-  }
-
-  .calendar-mobile-day--negative-high {
-    background: #ef4444;
-    border-color: #b91c1c;
-    color: #ffffff;
   }
 
   .calendar-upcoming-table-wrap {

@@ -464,3 +464,14 @@ checking-surplus debt payments are included. Each future checking balance above
 $10,000 funds repeated batches up to $5,000, highest APR debt first. Forecast
 account tiles and the net-worth chart share this assumption. The subtitle names
 the threshold, batch size, and APR priority; actual balances are unchanged.
+
+Calendar day colors and the day-dialog total use the signed sum of every
+income/outflow item for that date, including automatic credit-card payments.
+The total includes events beyond the desktop's visible chip limit and is
+independent of event order. `calendarDayTotals.ts` supplies the shared daily
+aggregation and tone thresholds for both desktop and mobile. A payment's zero
+net-worth delta must not suppress its displayed cash outflow in this total;
+the upcoming table's net-worth running total remains a separate calculation.
+Today's marker uses an outline so it does not override the day's aggregate
+color. Less than $200 in absolute daily total is blue, $200–$999.99 uses a
+moderate positive/negative color, and $1,000 or more uses the strong color.
