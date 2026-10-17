@@ -62,6 +62,19 @@ it('includes daily occurrences on both grid boundaries', () => {
   ])
 })
 
+for (const kind of ['biweekly_weekday', 'every_n_weeks_weekday']) {
+  it(`continues ${kind} after the spring daylight-saving transition`, () => {
+    const expense = {
+      ...weekly,
+      next_expensed_date: '2027-03-01',
+      general_frequency: JSON.stringify({ kind, interval_weeks: 2, weekday: 0, start_date: '2027-03-01' }),
+    }
+    assert.deepEqual(occurrences(expense, '2027-03-01', '2027-04-12'), [
+      '2027-03-01', '2027-03-15', '2027-03-29', '2027-04-12',
+    ])
+  })
+}
+
 it('handles month-end clamping and twice-monthly schedules', () => {
   const expense = { ...weekly, next_expensed_date: '2027-01-31', general_frequency: JSON.stringify({ kind: 'monthly_day', day: 31 }) }
   assert.deepEqual(occurrences(expense, '2027-02-01', '2027-03-31'), ['2027-02-28', '2027-03-31'])

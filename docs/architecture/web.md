@@ -52,6 +52,8 @@ Calendar tab behavior:
   Expenses without a recurrence remain single events, and disabled expenses
   stay hidden. `expenseCalendar.ts` uses the shared `calendarRecurrence.ts`
   date helpers and the backend's legacy frequency mappings.
+  Weekly interval arithmetic counts local calendar dates, not elapsed 24-hour
+  periods, so daylight-saving transitions cannot truncate the recurrence.
 
 ## Design System Direction
 

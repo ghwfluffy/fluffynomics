@@ -48,6 +48,10 @@ export const monthlyRecurringDate = (year: number, monthZeroBased: number, day: 
 export const addMonthsRecurring = (value: Date, months: number, day: number) =>
   monthlyRecurringDate(value.getFullYear(), value.getMonth() + months, day)
 
+// Recurrence intervals count calendar days, including 23/25-hour DST days.
+const calendarDayNumber = (value: Date) =>
+  Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()) / (1000 * 60 * 60 * 24)
+
 export const recurringOnOrAfter = (
   anchor: Date,
   kind: string,
@@ -135,7 +139,7 @@ export const recurringOnOrAfter = (
     if (anchor <= base) {
       return startOfDay(base)
     }
-    const daysSince = Math.floor((anchor.getTime() - base.getTime()) / (1000 * 60 * 60 * 24))
+    const daysSince = calendarDayNumber(anchor) - calendarDayNumber(base)
     const periods = Math.ceil(daysSince / 14)
     const result = new Date(base)
     result.setDate(result.getDate() + periods * 14)
@@ -154,7 +158,7 @@ export const recurringOnOrAfter = (
       return startOfDay(base)
     }
     const intervalDays = intervalWeeks * 7
-    const daysSince = Math.floor((anchor.getTime() - base.getTime()) / (1000 * 60 * 60 * 24))
+    const daysSince = calendarDayNumber(anchor) - calendarDayNumber(base)
     const periods = Math.ceil(daysSince / intervalDays)
     const result = new Date(base)
     result.setDate(result.getDate() + periods * intervalDays)
