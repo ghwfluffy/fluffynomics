@@ -45,6 +45,13 @@ Calendar tab behavior:
 - clicking an event opens actions and supports `Edit` / `Update` using the same object flows as the source tab.
 - on narrow screens, swaps to a compact month grid with day-level color coding by net change magnitude; tapping a day opens the exact event names and amounts for that date.
 - the narrow-screen toolbar and seven-column grid must shrink within the calendar tile instead of establishing an intrinsic width that overflows the dashboard margins.
+- Enabled expenses expand across the entire visible six-week grid, including
+  later months. Start from the API's `next_expensed_date` (which already handles
+  early expenses), then follow `general_frequency`; never reinsert covered dates.
+  Explicit next-date overrides occur once before the regular cadence resumes.
+  Expenses without a recurrence remain single events, and disabled expenses
+  stay hidden. `expenseCalendar.ts` uses the shared `calendarRecurrence.ts`
+  date helpers and the backend's legacy frequency mappings.
 
 ## Design System Direction
 
