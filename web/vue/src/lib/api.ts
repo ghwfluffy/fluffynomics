@@ -1,7 +1,8 @@
 import axios from 'axios'
+import { createSessionRecovery } from './sessionRecovery'
 import type { AxiosRequestConfig, AxiosResponse } from 'axios'
 import { ref } from 'vue'
-import { apiBasePath } from '@/lib/paths'
+import { apiBasePath, authMode } from '@/lib/paths'
 
 export const errorMessage = ref('')
 export const snackbar = ref(false)
@@ -16,6 +17,21 @@ const instance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+})
+
+const recoverSession = createSessionRecovery(() => `${apiBasePath}/auth/oauth/login?next=%2Fapp`, authMode === 'oauth')
+instance.interceptors.response.use(undefined, async (error) => {
+  const config = error.config
+  if (error.response?.status !== 401 || !config || config.sessionRecoveryAttempted ||
+      (config.url?.startsWith('/auth/') && config.url !== '/auth/me')) throw error
+  config.sessionRecoveryAttempted = true
+  let first = true
+  const result = await recoverSession(async () => {
+    if (first) { first = false; return error.response }
+    return instance.request(config)
+  })
+  if (result === error.response) throw error
+  return result
 })
 
 async function handleRequest<T>(

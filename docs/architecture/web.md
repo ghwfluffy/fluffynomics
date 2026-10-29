@@ -488,3 +488,17 @@ moderate positive/negative color, and $1,000 or more uses the strong color.
 Calendar deduplication uses each event's full key. Card interest and payments
 on the same date must stay distinct, even though both have the same `payable`
 UI kind and card ID. Never deduplicate them solely by kind/account/date.
+
+## Background session recovery
+
+The browser API client handles an expired app session by fetching its configured
+OAuth login URL in the background, with same-origin cookies, then retrying the
+rejected request once. Redirects and PKCE callbacks run through the existing
+server endpoints without replacing the visible document or losing UI state.
+Concurrent failures share one recovery attempt; recovery has a ten-second limit.
+Only authentication failures qualify; permission denials, network failures,
+password sign-in and logout do not trigger recovery. OAuth-disabled consumers
+retain their local behavior. If the retry fails, existing error/sign-in handling
+applies. Central Remember Me cookies remain private to the auth app; no tokens
+are exposed to browser JavaScript. Browser recovery grants no assistant access
+and never applies to external gate-control requests or scoped assistant tokens.
